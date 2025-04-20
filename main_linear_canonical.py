@@ -86,9 +86,9 @@ print("Data Load")
 if(InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
    [train_input, train_target, train_init, cv_input, cv_target, cv_init, test_input, test_target, test_init] = torch.load(dataFolderName + dataFileName)
    [F_train_mat,F_val_mat,F_test_mat] = torch.load(dataFolderName + dataFileName_F)
-   print("trainset size:",train_target.size())
-   print("cvset size:",cv_target.size())
-   print("testset size:",test_target.size())
+   # print("trainset size:",train_target.size())
+   # print("cvset size:",cv_target.size())
+   # print("testset size:",test_target.size())
 elif(LengthIsRandom):
    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName)
    [F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F)
@@ -103,8 +103,6 @@ else:
    print("trainset size:",train_target.size())
    print("cvset size:",cv_target.size())
    print("testset size:",test_target.size())
-
-
 
 
 
@@ -137,11 +135,10 @@ print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
 ### Evaluate Kalman Filter ###
 ##############################
 print("Evaluate Kalman Filter True")
-#i enter the F ori
 if InitIsRandom_test:
-   [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F_test_mat, randomInit = True, test_init=test_init)#ori
+   [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F = F_test_mat, randomInit = True, test_init=test_init)
 else: 
-   [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F_test_mat)
+   [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
 
 
 #############################
@@ -149,9 +146,9 @@ else:
 #############################
 print("Evaluate RTS Smoother True")
 if InitIsRandom_test:
-   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F_test_mat, randomInit = True,test_init=test_init)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
 else:
-   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F_test_mat)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 PlotfolderName = 'Smoothers' + '/'
 ComparedmodelName = 'Dataset'  

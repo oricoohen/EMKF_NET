@@ -14,7 +14,7 @@
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 
-def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5): #ori
+def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5):
     """
     Generate a list of random F that looks like(1,0.1,-0.5,1) matrices for a 2D state (position and velocity).
     Args:
@@ -26,10 +26,12 @@ def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5): #ori
     """
     F_matrices = []
     for _ in range(num_F):
-        F = torch.eye(state_dim)
-        #F[0, 1] = 1+ torch.randn(1).item() * delta_t  # random  velocity structure
-        F[0, 1] = 1   # random  velocity structure
-        F[1, 0] = torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F = torch.eye(state_dim)
+        # #F[0, 1] = 1+ torch.randn(1).item() * delta_t  # random  velocity structure
+        # F[0, 1] = 1   # random  velocity structure
+        # F[1, 0] = torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        F = torch.tensor([[1., 1.],
+                          [0.25, 1.]])
         F_matrices.append(F)
     return F_matrices
 
@@ -256,7 +258,7 @@ class SystemModel:
         initConditions = self.m1x_0
 
         F_matrices = generate_random_F_matrices(size//10 +1)
-
+        print('11111111111111', F_matrices)
 
 
 

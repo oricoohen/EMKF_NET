@@ -4,7 +4,6 @@ import time
 from Smoothers.Linear_KF import KalmanFilter
 
 def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, randomInit = False, test_init=None):
-
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
 
@@ -21,13 +20,11 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
 
 
     for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
-        if F is not None:#ori
+        if F is not None:
             F_index = j//10
             SysModel.F = F[F_index]
-
-
-
-
+            KF.F = F[F_index]
+            KF.F_T = F[F_index].T
 
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)        
@@ -36,7 +33,7 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
             
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
 
-        
+
         if(allStates):
             MSE_KF_linear_arr[j] = loss_fn(KF.x, sequence_target).item()
         else:

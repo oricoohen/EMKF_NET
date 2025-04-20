@@ -14,6 +14,7 @@ class KalmanNetNN(torch.nn.Module):
     
     def NNBuild(self, SysModel, args):
 
+        self.F = SysModel.F
         self.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
 
         # Number of neurons in the 1st hidden layer
@@ -121,6 +122,15 @@ class KalmanNetNN(torch.nn.Module):
     ##################################
     ### Initialize System Dynamics ###
     ##################################
+    def f_new(self,x):
+        return torch.matmul(self.F, x)
+
+    def update_F(self,F ):
+        self.F = F
+        self.f =self.f_new
+
+
+
     def InitSystemDynamics(self, f, h, m, n):
         
         # Set State Evolution Function

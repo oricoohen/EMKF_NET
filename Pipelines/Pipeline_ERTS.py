@@ -26,10 +26,10 @@ class Pipeline_ERTS:
         torch.save(self, self.PipelineName)
 
     def setssModel(self, ssModel):
-        self.SysModel = ssModel
+        self.SysModel = ssModel #the dinamic system model contains the F, Q, H, R, T, T_test
 
     def setModel(self, model):
-        self.model = model
+        self.model = model # the RTSNet model contains the parameters of the RTSNet
 
     def setTrainingParams(self, args, alpha=0.5, b=0.5):
         self.N_steps = args.n_steps  # Number of Training Steps
@@ -99,7 +99,7 @@ class Pipeline_ERTS:
                 if generate_f != None:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
-                    self.model.F = SysModel.F  # Ensure KalmanNet uses the latest F
+                    self.model.update_F(SysModel.F)
                 y_training = train_input[n_e]
                 SysModel.T = y_training.size()[-1]
 
@@ -198,7 +198,7 @@ class Pipeline_ERTS:
                     if generate_f != None:  ####if we valid with different f
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
-                        self.model.F = SysModel.F  # Ensure KalmanNet uses the latest F
+                        self.model.update_F(SysModel.F)
 
 
                     if(randomInit):
@@ -322,7 +322,8 @@ class Pipeline_ERTS:
                 if generate_f != None:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
-                    self.model.F = SysModel.F  # Ensure KalmanNet uses the latest F
+                    self.model.update_F(SysModel.F)
+
                     # Debug check
                     # print(f"[DEBUG] Sample {j}:")
                     # print("F matrix:\n", SysModel.F)
@@ -404,7 +405,7 @@ class Pipeline_ERTS:
                     if generate_f != None:  ####if we valid with different f
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
-                        self.model.F = SysModel.F  # Ensure KalmanNet uses the latest F
+                        self.model.update_F(SysModel.F)
 
                     if (randomInit):
                         if (cv_init == None):
@@ -545,8 +546,7 @@ class Pipeline_ERTS:
             if generate_f != None:  ####if we valid with different f
                 index = j // 10
                 SysModel.F = SysModel.F_test[index]
-                self.model.F = SysModel.F  # Ensure KalmanNet uses the latest F
-
+                self.model.update_F(SysModel.F)
             # Forward pass and compute P-smooth
             self.model.sigma_list = []
             self.model.smoother_gain_list = []
@@ -604,7 +604,7 @@ class Pipeline_ERTS:
             P_smooth_list.append(P_smoothed_seq)
 
             #######compute V############
-            V =  self.compute_cross_covariances(self.model.F, self.SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
+            V =  self.compute_cross_covariances(self.SysModel.F_test[j//10], self.SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
             V_list.append(V)
 
 
