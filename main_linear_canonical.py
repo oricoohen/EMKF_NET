@@ -179,7 +179,7 @@ if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
    ## Test Neural Network
    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True,randomInit=True,test_init=test_init)
 
-else:
+else:#e
     [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True)
     RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
     ## Test Neural Network
