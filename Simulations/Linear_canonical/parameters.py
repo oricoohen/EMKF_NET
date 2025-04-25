@@ -27,11 +27,11 @@ m2_0 = 0*torch.eye(m)
 ### state evolution matrix F and observation matrix H ###
 #########################################################
 # # F in canonical form
-F = torch.eye(m)
-F[0] = torch.ones(1,m)
+# F = torch.eye(m)
+# F[0] = torch.ones(1,m)
 #
-# F = torch.tensor([[1., 1.],
-#                   [0.25, 1.]])
+F = torch.tensor([[1., 1.],
+                  [0.25, 1.]])
 
 
 #F_initial_guess = torch.eye(m)
