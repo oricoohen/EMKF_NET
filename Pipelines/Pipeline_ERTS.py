@@ -59,7 +59,7 @@ class Pipeline_ERTS:
         # P-smooth loss weight
         self.p_smooth_weight = 0.1  # Default weight for p-smooth loss
 
-    def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results, generate_f=None,
+    def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results,path_rtsnet='best-model.pt', generate_f=None,
                  randomInit=False, cv_init=None, train_init=None):
 
         '''train P-smooth network with RTSNet fixed. dont change the RTSNet'''
@@ -67,6 +67,7 @@ class Pipeline_ERTS:
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
 
+        self.model = torch.load(path_results + path_rtsnet)  # Load the best RTSNet model
         self.model.eval() # Freeze RTSNet if needed, so it doesn't change
 
         self.PsmoothNN.train()  # Set P-smooth network to train mode
