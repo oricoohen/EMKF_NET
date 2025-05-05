@@ -11,7 +11,7 @@ from Simulations.Linear_CA.parameters import F_gen, F_CV, H_identity, H_onlyPos,
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
-from RTSNet.RTSNet_nn import RTSNetNN
+from RTSNet.RTSNet_nn1 import RTSNetNN
 from RNN.RNN_FWandBW import Vanilla_RNN
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline

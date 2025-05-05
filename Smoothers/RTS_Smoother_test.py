@@ -29,10 +29,13 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
         if F is not None:
             F_index = j//10
             SysModel.F = F[F_index]
+            SysModel.F_T = SysModel.F.T
             KF.F = F[F_index]
             KF.F_T = F[F_index].T
             RTS.F = F[F_index]
             RTS.F_T = F[F_index].T
+
+
 
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)  

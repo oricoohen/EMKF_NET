@@ -28,7 +28,7 @@ class rts_smoother:
         filter_sigma_prior = torch.matmul(self.F, filter_sigma)
         filter_sigma_prior = torch.matmul(filter_sigma_prior, self.F_T) + self.Q
         self.SG = torch.matmul(self.SG, torch.inverse(filter_sigma_prior))
-    
+
     # Innovation for Smoother
     def S_Innovation(self, filter_x, filter_sigma):
         filter_x_prior = torch.matmul(self.F, filter_x)

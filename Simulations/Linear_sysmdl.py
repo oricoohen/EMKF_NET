@@ -30,8 +30,8 @@ def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5):
         # F[0, 1] = 1+ torch.randn(1).item() * delta_t  # random  velocity structure
         # # F[0, 1] = 1   # random  velocity structure
         # F[1, 0] = torch.randn(1).item() * delta_t*0.1  # Add random coupling
-        F = torch.tensor([[0.6, 0.2],
-                          [0.2, 0.6]])
+        F = torch.tensor([[1, 1],
+                          [0.1, 1]])
         F_matrices.append(F)
     return F_matrices
 

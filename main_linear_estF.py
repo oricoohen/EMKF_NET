@@ -10,7 +10,7 @@ from Simulations.Linear_canonical.parameters import F, H, F_rotated, Q_structure
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
-from RTSNet.RTSNet_nn import RTSNetNN
+from RTSNet.RTSNet_nn1 import RTSNetNN
 from RNN.RNN_FWandBW import Vanilla_RNN
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline

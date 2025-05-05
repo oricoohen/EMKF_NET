@@ -275,7 +275,7 @@ class Pipeline_ERTS:
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
-        return
+        return  [self.MSE_train_dB_epoch[ti],self.MSE_cv_dB_epoch[ti]]
 
 
 
@@ -322,13 +322,12 @@ class Pipeline_ERTS:
                 if generate_f != None:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
-                    self.model.update_F(SysModel.F)
 
+                    self.model.update_F(SysModel.F)
                     # Debug check
                     # print(f"[DEBUG] Sample {j}:")
                     # print("F matrix:\n", SysModel.F)
                     # print("f(x) output for [1.0, 1.0]:", SysModel.f(torch.tensor([1.0, 1.0])))
-
                 y_training = train_input[n_e]
                 SysModel.T = y_training.size()[-1]
 
@@ -636,7 +635,8 @@ class Pipeline_ERTS:
         # Print Run Time
         print("Inference Time:", t)
 
-        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, x_out_list, t, P_smooth_list, V_list, self.model.K_T_list]
+        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, x_out_list, t, P_smooth_list, V_list, self.model.K_T_list,
+                self.MSE_test_psmooth_dB_avg, self.MSE_test_psmooth_std]
 
     def PlotTrain_KF(self, MSE_KF_linear_arr, MSE_KF_dB_avg):
 
