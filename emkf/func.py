@@ -55,9 +55,9 @@ def compute_A1(x_0, x_t, V):
     """
     T, n = x_t.shape[1], x_t.shape[0]
     A1 = torch.zeros((n, n), dtype=x_t.dtype, device=x_t.device)
-    print("x_t[:, 0] shape:", x_t[:, 0].shape)
-    print("x_0 shape:", x_0.shape)
-    print("unsqueezed shapes:", x_t[:, 0].unsqueeze(1).shape, x_0.unsqueeze(0).shape)
+    # print("x_t[:, 0] shape:", x_t[:, 0].shape)
+    # print("x_0 shape:", x_0.shape)
+    # print("unsqueezed shapes:", x_t[:, 0].unsqueeze(1).shape, x_0.unsqueeze(0).shape)
     A1 += x_t[:, 0].unsqueeze(1) @ x_0.T + V[0]
     for t in range(1, T):
         A1 += x_t[:, t].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + V[t]

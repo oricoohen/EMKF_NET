@@ -31,13 +31,13 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X, P_smooth, V, K_T, max_it=100, tol_
 
     F_all = [F_0.clone()]
     likelihood = []
-    print('f_0 shape', F_0.shape)
+    # print('f_0 shape', F_0.shape)
     for i in range(max_it):
         A_1 = compute_A1(x_0, X, V)  # (n, n)
         A_2 = compute_A2(x_0, P_0, X, P_smooth)  # (n, n)
         # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
         F_i = A_1 @ torch.linalg.pinv(A_2)
-        print('f_i shape',F_i.shape)
+        # print('f_i shape',F_i.shape)
         F_all.append(F_i)
 
         # Check convergence
@@ -81,7 +81,7 @@ def EMKF_F(F_0_matrices, H, Q, R, Y_list, x_0, P_0, X_list, P_smooth_list, V_lis
         V = V_list[j]
         K_T = K_list[j]
 
-        print(f"Running EMKF on sequence {j + 1}/{len(X_list)} using F[{index}]")
+        # print(f"Running EMKF on sequence {j + 1}/{len(X_list)} using F[{index}]")
 
         F_est, likelihood, iterations = EMKF_F_solo(F_0, H, Q, R, Y, x_0, P_0, X, P_smooth, V, K_T, max_it,
                                                     tol_likelihood, tol_params)

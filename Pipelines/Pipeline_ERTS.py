@@ -67,7 +67,7 @@ class Pipeline_ERTS:
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
 
-        self.model = torch.load(path_results + path_rtsnet)  # Load the best RTSNet model
+        self.model = torch.load(path_results + path_rtsnet, weights_only=False)  # Load the best RTSNet model
         self.model.eval() # Freeze RTSNet if needed, so it doesn't change
 
         self.PsmoothNN.train()  # Set P-smooth network to train mode
@@ -492,9 +492,7 @@ class Pipeline_ERTS:
         return V
 
 
-
-
-    def NNTest(self, SysModel, test_input, test_target, path_results, generate_f=None, MaskOnState=False, rnn=False,
+    def NNTest(self, SysModel, test_input, test_target, path_results, generate_f=None, MaskOnState=False,
                randomInit=False, test_init=None, load_model=False, load_model_path=None,load_p_smoothe_model_path=None):
 
         print("Testing RTSNet...")

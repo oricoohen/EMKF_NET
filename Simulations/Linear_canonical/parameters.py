@@ -55,8 +55,8 @@ H = torch.tensor([[1., 1.],
 ### Rotated F and H ###
 #######################
 #F_rotated = torch.zeros_like(F)
-F_rotated = None
-H_rotated = torch.zeros_like(H)
+# F_rotated = None
+# H_rotated = torch.zeros_like(H)
 
 if(m==2):
     alpha_degree = 10 # rotation angle in degree
@@ -67,7 +67,7 @@ if(m==2):
                                 [sin_alpha, cos_alpha]])
 
 #   F_rotated = torch.mm(F,rotate_matrix)
-    H_rotated = torch.mm(H,rotate_matrix) 
+#     H_rotated = torch.mm(H,rotate_matrix)
 
 ###############################################
 ### process noise Q and observation noise R ###
