@@ -369,6 +369,7 @@ class Pipeline_ERTS:
 
             # Train RTSNet first
             Batch_Optimizing_LOSS_mean.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.3)#ori
             self.optimizer.step()
 
 

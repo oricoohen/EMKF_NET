@@ -43,8 +43,8 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 50  # Number of training examples (size of the training dataset).50
-args.N_CV = 30  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
+args.N_E = 200  # Number of training examples (size of the training dataset).50
+args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30    # Length of the time series for training and cross-validation sequences.
@@ -52,7 +52,7 @@ args.T_test = 30 # Length of the time series for test sequences.
 
 ### training parameters
 args.n_steps = 500  # Number of training steps or iterations for optimization.
-args.n_batch = 10    # Batch size: the number of sequences processed at each training step.10
+args.n_batch = 16    # Batch size: the number of sequences processed at each training step.10
 args.lr = 1e-4       # Learning rate: controls how quickly the model updates during training.
 args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
 
