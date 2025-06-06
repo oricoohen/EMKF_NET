@@ -21,7 +21,10 @@ class rts_smoother:
         self.T = SystemModel.T
         self.T_test = SystemModel.T_test
 
+        self.m1x_0 = SystemModel.m1x_0
+        self.m2x_0 = SystemModel.m2x_0
 
+        self.SGains = []
     # Compute the Smoother Gain
     def SGain(self, filter_sigma):
         self.SG = torch.matmul(filter_sigma, self.F_T)
@@ -51,7 +54,7 @@ class rts_smoother:
         self.S_Innovation(filter_x, filter_sigma)
         self.S_Correct(filter_x, filter_sigma)
 
-        return self.s_m1x_nexttime,self.s_m2x_nexttime
+        return self.s_m1x_nexttime,self.s_m2x_nexttime,self.SG
 
 
     ### Generate Sequence ###
@@ -63,15 +66,25 @@ class rts_smoother:
 
         self.s_m1x_nexttime = filter_x[:, T-1]
         self.s_m2x_nexttime = filter_sigma[:, :, T-1]
+
+
+        # Clear any previous runs of smoother gains
+        self.SGains.clear()
+
         self.s_x[:, T-1] = torch.squeeze(self.s_m1x_nexttime)
         self.s_sigma[:, :, T-1] = torch.squeeze(self.s_m2x_nexttime)
 
+        #T-2, T-3, T-4, …, 2, 1, 0
         for t in range(T-2,-1,-1):
             filter_xt = filter_x[:, t]
             filter_sigmat = filter_sigma[:, :, t]
-            s_xt,s_sigmat = self.S_Update(filter_xt, filter_sigmat)
+            s_xt,s_sigmat,S_t = self.S_Update(filter_xt, filter_sigmat)
             self.s_x[:, t] = torch.squeeze(s_xt)
             self.s_sigma[:, :, t] = torch.squeeze(s_sigmat)
+            self.SGains.append(S_t.clone())
+        #####COMPUTE S(0)#####
+        s_xt, s_sigmat, S_t = self.S_Update(self.m1x_0, self.m2x_0)
+        self.SGains.append(S_t.clone())
 
 
 

@@ -323,7 +323,6 @@ class Pipeline_ERTS:
                 if generate_f != None:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
-
                     self.model.update_F(SysModel.F)
                     # Debug check
                     # print(f"[DEBUG] Sample {j}:")
@@ -366,9 +365,17 @@ class Pipeline_ERTS:
             # Average losses for this batch
             Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
 
+            #ori
+            if torch.isnan(Batch_Optimizing_LOSS_mean):
+                print(f"NaN detected in training loss at iteration {ti}")
+                continue
+            elif  torch.isinf(Batch_Optimizing_LOSS_mean):
+                print(f"inf detected in training loss at iteration {ti}")
+                continue
 
             # Train RTSNet first
             Batch_Optimizing_LOSS_mean.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)#ori
             self.optimizer.step()
 
 

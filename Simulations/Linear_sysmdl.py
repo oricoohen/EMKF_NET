@@ -13,8 +13,29 @@
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
+import random
 
-def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5):
+def uniform_two_ranges(a: float, b: float):
+    """
+    Draws a single sample that is uniform either in  [a , b]
+    or in [−b , −a]   (each half chosen with 50 % probability).
+
+    Requires  0 ≤ a ≤ b.
+    """
+    assert 0.0 <= a <= b, "`a` must be non-negative and ≤ `b`"
+
+    u = torch.rand(1).item()            # uniform in [0,1)
+    x = a + (b - a) * u                 # now uniform in [a , b]
+
+    if random.random() < 0.5:           # coin flip → positive half
+        return  x                       #  in  [ a ,  b]
+    else:                               # negative half
+        return -x                       #  in [−b , −a]
+
+
+
+
+def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
     """
     Generate a list of random F that looks like(1,0.1,-0.5,1) matrices for a 2D state (position and velocity).
     Args:
@@ -29,12 +50,41 @@ def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5):
         F = torch.tensor([[1, 1],
                           [0.1, 1]])
         # F = torch.eye(state_dim)
-        F[0, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # random
-        F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
-        F[0, 0] = 1 + torch.randn(1).item() * delta_t*0.5  # random
-        F[1, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # random
+        # F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 0] = 1 + torch.randn(1).item() * delta_t*0.5  # random
+        # F[1, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        F[0, 1] = 1 + uniform_two_ranges(0.0, 2) * delta_t*0.5  # random
+        F[1, 0] = 0.1 + uniform_two_ranges(0.0, 2) * delta_t*0.5  # Add random coupling
+        F[0, 0] = 1 + uniform_two_ranges(0.0, 2) * delta_t*0.5  # random
+        F[1, 1] = 1 + uniform_two_ranges(0.0, 2) * delta_t*0.5  # Add random coupling
         F_matrices.append(F)
     return F_matrices
+
+def change_F(F, mult=0.0001, many=True):
+
+    def apply_change(F_single, mult):
+
+        F_single[0, 1] = F_single[0, 1] + torch.randn(1).item()*mult
+        F_single[1, 0] = F_single[1, 0] + torch.randn(1).item()*mult
+        F_single[0, 0] = F_single[0, 0] + torch.randn(1).item()*mult
+        F_single[1, 1] = F_single[1, 1] + torch.randn(1).item()*mult
+
+        return F_single
+
+    if not many:
+        return apply_change(F, mult)
+    else:
+        LIST_F = []
+        for F_i in F:
+            F_i2=apply_change(F_i,mult)
+            LIST_F.append(F_i2)
+            #delta = (F_i- F_i2).norm()
+            #print("Deviation:", delta.item())
+
+        return LIST_F
+
+
 
 
 
@@ -237,7 +287,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, randomInit=False, randomLength=False,F_gen=None):
+    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -258,8 +308,8 @@ class SystemModel:
         ### Generate Examples
         initConditions = self.m1x_0
 
-        F_matrices = generate_random_F_matrices(size//10 +1)
-        print('11111111111111', F_matrices)
+        F_matrices = generate_random_F_matrices(size//10 +1,delta)
+        #print('11111111111111', F_matrices) dehil
 
 
 

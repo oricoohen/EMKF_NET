@@ -3,8 +3,13 @@ import torch.nn as nn
 import time
 from Smoothers.Linear_KF import KalmanFilter
 from Smoothers.RTS_Smoother import rts_smoother
+from Pipelines.Pipeline_ERTS import Pipeline_ERTS
 
-def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None):
+
+
+
+
+def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None,K_T_list=None):
 
     # LOSS
     loss_rts = nn.MSELoss(reduction='mean')
@@ -16,6 +21,10 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     KF = KalmanFilter(SysModel)
     RTS = rts_smoother(SysModel)
     RTS_out = [] # allocate for saving output
+    P_smooth_list  = []
+    V_test_list    = []
+    pipe1 = Pipeline_ERTS()
+
 
     if not allStates:
         loc = torch.tensor([True,False,False]) # for position only
@@ -36,7 +45,6 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             RTS.F_T = F[F_index].T
 
 
-
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)  
         else:
@@ -44,12 +52,22 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
+
         
         if(allStates):
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x, sequence_target).item()
         else:           
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x[loc,:], sequence_target[loc,:]).item()
-        RTS_out.append(RTS.s_x)      
+        RTS_out.append(RTS.s_x)
+
+        P_smooth_list.append(RTS.s_sigma.clone())
+        SGains = RTS.SGains
+        if K_T_list: #####JUST IF THEY GAVE US K WE CAN COMPUTE THE V
+            V_now = pipe1.compute_cross_covariances(SysModel.F, SysModel.H, K_T_list[j], P_smooth_list, SGains)
+            V_test_list.append(V_now)
+
+
+
 
     end = time.time()
     t = end - start
