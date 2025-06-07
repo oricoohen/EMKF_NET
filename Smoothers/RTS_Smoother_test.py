@@ -87,7 +87,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     print("RTS Smoother - STD:", RTS_std_dB, "[dB]")
     # Print Run Time
     print("Inference Time:", t)
-    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg ,RTS_out]
+    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg ,RTS_out,P_smooth_list,V_test_list]
 
 
 

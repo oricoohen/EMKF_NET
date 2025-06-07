@@ -137,15 +137,14 @@ print("testset size:",test_target.size())
 
 ###############################################################################################
 
-
+sys_model.F = F_test_mat
 F_initial_1 = torch.tensor([[1., 1.], [0.1, 1.]])
 F_initial_2  = torch.tensor([[1., 1.], [0.1, 1.]])
 
 ############kalman_TRUE############################
 [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, K_list] = KFTest(args, sys_model, test_input, test_target)
 ############rts_TRUE###############################
-[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,K_list)
-
+[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,P_smooth_list,V_list] = S_Test(sys_model, test_input, test_target,K_list)
 
 
 
@@ -153,7 +152,21 @@ F_initial_2  = torch.tensor([[1., 1.], [0.1, 1.]])
 ########EMKF##########
 #####TRUE######
 
-EMKF_F(F_test_mat, H, Q, R, test_input, m1_0, m2_0, test_target, P_smooth_list, V_list, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005)
+F_matrices, likelihoods, iterations_list = EMKF_F(F_test_mat, H, Q, R, test_input, m1_0, m2_0, test_target, P_smooth_list, V_list, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005)
+print('True F matrices 1', F_test_mat[0])
+print('end of EMKF',F_matrices[0] )
+print('True F matrices 2', F_test_mat[1])
+print('end of EMKF',F_matrices[1])
+
+######mse with emkf F #######
+sys_model.F = F_matrices
+[MSE_KF_linear_arr1, MSE_KF_linear_avg1, MSE_KF_dB_avg1, K_list1] = KFTest(args, sys_model, test_input, test_target)
+[MSE_RTS_linear_arr2, MSE_RTS_linear_avg2, MSE_RTS_dB_avg2, RTS_out2,P_smooth_list2,V_list2] = S_Test(sys_model, test_input, test_target,K_list1)
+
+
+
+print('mse of smoother',MSE_RTS_dB_avg)
+print('mse of emkf',MSE_RTS_dB_avg2)
 
 
 #######FALSE_1#######
