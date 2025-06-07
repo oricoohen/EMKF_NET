@@ -4,7 +4,7 @@ import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
-from emkf.main_emkf import EMKF_F
+from emkf.main_emkf_func import EMKF_F
 
 from Simulations.utils import DataLoader, DataGen
 

@@ -35,11 +35,9 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
 
 
-        if(allStates):
-            MSE_KF_linear_arr[j] = loss_fn(KF.x, sequence_target).item()
-        else:
-            MSE_KF_linear_arr[j] = loss_fn(KF.x[loc,:], sequence_target[loc,:]).item()
-        #MSE_KF_linear_arr[j] = loss_fn(test_input[j, :, :], test_target[j, :, :]).item()
+
+        MSE_KF_linear_arr[j] = loss_fn(KF.x, sequence_target).item()
+
 
 
         #    KF.K should have shape (m, n)
