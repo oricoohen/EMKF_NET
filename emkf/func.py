@@ -43,7 +43,7 @@ def Ell(H, R, y, x, P):
 
 
 
-def compute_A1(x_0, x_t, V):
+def compute_A1(x_0, x_t, V,n,T):
     """
     Computes A1 = sum_{t=1}^{T-1} (x_t x_{t-1}^T + V[:,:,t])
     Args:
@@ -52,7 +52,6 @@ def compute_A1(x_0, x_t, V):
     Returns:
         A1: [n, n] matrix
     """
-    n, T = x_t.shape
 
     A1 = torch.zeros((n, n), dtype=x_t.dtype, device=x_t.device)
     # print("x_t[:, 0] shape:", x_t[:, 0].shape)
@@ -63,7 +62,7 @@ def compute_A1(x_0, x_t, V):
         A1 += x_t[:, t].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + V[:,:,t]
     return nonsing_simetric(A1)
 
-def compute_A2(x_0, P_0, x_t, P_t):
+def compute_A2(x_0, P_0, x_t, P_t,n,T):
     """
     Computes A2 = sum_t(x_{t-1} x_{t-1}^T + P_{t-1})
     Args:
@@ -74,7 +73,6 @@ def compute_A2(x_0, P_0, x_t, P_t):
     Returns:
         A2: [n, n] matrix
     """
-    T, n = x_t.shape[1], x_t.shape[0]
     # Compute the first term (x_0 * x_0^T + P_0)
     A2 = x_0 @ x_0.T + P_0
     for t in range(1, T):

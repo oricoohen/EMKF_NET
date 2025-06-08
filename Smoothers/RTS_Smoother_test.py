@@ -67,7 +67,7 @@ def compute_cross_covariances( F, H, Ks, Ps, SGains):
 
 
 
-def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None,K_T_list=None):
+def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None):
 
     # LOSS
     loss_rts = nn.MSELoss(reduction='mean')
@@ -75,16 +75,16 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     # MSE [Linear]
     T = test_input[0].size(-1)
     m = SysModel.m
+    n = SysModel.n
     N_T = len(test_input)
     MSE_RTS_linear_arr = torch.empty(N_T)
     start = time.time()
     KF = KalmanFilter(SysModel)
     RTS = rts_smoother(SysModel)
-    RTS_out = torch.zeros(N_T, m, T)
-    P_smooth = torch.zeros(N_T, m, m, T)
-    V_test = None
-    if K_T_list is not None:
-        V_test = torch.zeros(N_T, m, m, T)
+    RTS_out = torch.zeros(N_T, n, T)
+    P_smooth = torch.zeros(N_T, n, n, T)
+    V_test = torch.zeros(N_T, n, n, T)
+    last_gains = torch.empty(N_T, SysModel.n, SysModel.m)
 
 
 
@@ -97,6 +97,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     # mask = torch.tensor([True,True,True,False,False,False])# for kitti
 
     for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
+
         if F is not None:
             F_index = j//10
             SysModel.F = F[F_index]
@@ -105,31 +106,28 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             KF.F_T = F[F_index].T
             RTS.F = F[F_index]
             RTS.F_T = F[F_index].T
-
-
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)  
         else:
             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)   
-            
+
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
+        RTS_out[j] = RTS.s_x.clone()
 
+        #    KF.K should have shape (m, n)
+        last_gains[j] = KF.KG.clone()
         
         if(allStates):
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x, sequence_target).item()
         else:           
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x[loc,:], sequence_target[loc,:]).item()
-        RTS_out[j] =RTS.s_x
+
 
         P_smooth[j] = RTS.s_sigma.clone()
         SGains = RTS.SGains
-        if K_T_list is not None: #####JUST IF THEY GAVE US K WE CAN COMPUTE THE V
-            V_now = compute_cross_covariances(SysModel.F, SysModel.H, K_T_list[j], P_smooth[j], SGains)
-            V_test[j] = V_now
-
-
-
+        V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_smooth[j], SGains)
+        V_test[j] = V_now
 
     end = time.time()
     t = end - start

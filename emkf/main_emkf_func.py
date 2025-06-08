@@ -10,7 +10,7 @@ from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1
 from Simulations.utils import DataLoader, DataGen
 
 
-def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X, P_smooth, V, K_T, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=100, tol_likelihood=0.01, tol_params=0.005):
     """
     Perform EM for a single sequence to estimate the state transition matrix F.
 
@@ -32,29 +32,13 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X, P_smooth, V, K_T, max_it=100, tol_
         likelihood (torch.Tensor): Log-likelihood per iteration, shape (num_iter+1,)
         iterations (int): Number of EM iterations
     """
+    A_1 = compute_A1(x_0, X_s, V_s,n,T)  # (n, n)
+    A_2 = compute_A2(x_0, P_0, X_s, P_smooth_s,n,T)  # (n, n)
+    # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
+    F_fin = A_1 @ torch.linalg.pinv(A_2)
+    # print('f_i shape',F_i.shape)
 
-    T = y.shape[1]
-    n = x_0.shape[0]
-
-    F_all = [F_0.clone()]
-    likelihood = []
-    # print('f_0 shape', F_0.shape)
-    for i in range(max_it):
-        A_1 = compute_A1(x_0, X, V)  # (n, n)
-        A_2 = compute_A2(x_0, P_0, X, P_smooth)  # (n, n)
-        # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
-        F_i = A_1 @ torch.linalg.pinv(A_2)
-        # print('f_i shape',F_i.shape)
-        F_all.append(F_i)
-
-        # Check convergence
-        if i > 0:
-            delta_F = torch.abs(F_all[i + 1] - F_all[i]).max()
-            if delta_F < tol_params:
-                print(f"Converged on F at iteration {i}")
-                break
-        F_fin = F_all[-1]
-    return F_fin, torch.tensor(likelihood), len(F_all) - 1
+    return F_fin,0
 
 
 
@@ -98,35 +82,35 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X, P_smooth, V, K_T, max_it=100, tol_
 #
 #     return F_matrices, likelihoods, iterations_list
 
-def EMKF_F(F_0_matrices, H, Q, R, Y_list, x_0, P_0, X_list, P_smooth_list, V_list, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005):
-    """
-    Run EMKF_F_solo across a list of sequences.
-
-    Args:
-        F_0_matrices (List[Tensor]): List of F_0 matrices, each (n, n)
-        H, Q, R (Tensor): System model parameters
-        Y_list (List[Tensor]): Observation sequences, each (m, T)
-        X_list (List[Tensor]): Smoothed states, each (n, T)
-        P_smooth_list (List[Tensor]): Smoothed covariances, each (n, n, T)
-        V_list (List[Tensor]): Lag-1 autocovariances, each (n, n, T)
-        K_list (List[Tensor]): Kalman gains
-
-    Returns:
-        Tuple of (List of estimated F, List of likelihoods, List of iteration counts)
-    """
-
-    # print(f"Running EMKF on sequence {j + 1}/{len(X_list)} using F[{index}]")
-
-    F_est, likelihood, iterations = EMKF_F_solo(F_0_matrices[0], H, Q, R, Y_list[0], x_0, P_0, X_list[0], P_smooth_list[0], V_list[0],K_list[0], max_it,
-                                                tol_likelihood, tol_params)
-
-
-    return F_est, likelihood, iterations
-
-
+# def EMKF_F(F_0_matrices, H, Q, R, Y_list, x_0, P_0, X_list, P_smooth_list, V_list, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+#     """
+#     Run EMKF_F_solo across a list of sequences.
+#
+#     Args:
+#         F_0_matrices (List[Tensor]): List of F_0 matrices, each (n, n)
+#         H, Q, R (Tensor): System model parameters
+#         Y_list (List[Tensor]): Observation sequences, each (m, T)
+#         X_list (List[Tensor]): Smoothed states, each (n, T)
+#         P_smooth_list (List[Tensor]): Smoothed covariances, each (n, n, T)
+#         V_list (List[Tensor]): Lag-1 autocovariances, each (n, n, T)
+#         K_list (List[Tensor]): Kalman gains
+#
+#     Returns:
+#         Tuple of (List of estimated F, List of likelihoods, List of iteration counts)
+#     """
+#
+#     # print(f"Running EMKF on sequence {j + 1}/{len(X_list)} using F[{index}]")
+#
+#     F_est, likelihood, iterations = EMKF_F_solo(F_0_matrices[0], H, Q, R, Y_list[0], x_0, P_0, X_list[0], P_smooth_list[0], V_list[0],K_list[0], max_it,
+#                                                 tol_likelihood, tol_params)
+#
+#
+#     return F_est, likelihood, iterations
 
 
-def EMKF_F(F_0_matrices, H, Q, R, Y, x_0, P_0, X, P_smooth, V, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+
+
+def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100, tol_likelihood=0.01, tol_params=0.005):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -154,22 +138,33 @@ def EMKF_F(F_0_matrices, H, Q, R, Y, x_0, P_0, X, P_smooth, V, K_list, max_it=10
     F_matrices = []
     likelihoods = []
     iterations_list = []
-
+    n = sys_model.n
+    T = sys_model.T_test
     for j in range(len(X)):
         index = j // 10
-        F_0 = F_0_matrices[index]
+        F_est = F_0_matrices[index]
         Y_t = Y[j]
         X_t = X[j]
-        P_smooth_t = P_smooth[j]
-        V_t = V[j]
-        K_T = K_list[j]
+        F_all_j = []
+        F_all_j.append(F_est)
+        likelihood_j =[]
+        for q in range(max_it):
+            #############E STEP rts###############################
+            [_,_,_, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
+            #############M STEP rts###############################
+            F_est, likelihood = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),n,T,max_it, tol_likelihood, tol_params)
+            F_all_j.append(F_est)
+            likelihood_j.append(likelihood)
+            print('q_iter:', q, 'F_est:', F_est)
+            # Check convergence
+            if q > 0:
+                delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
+                if delta_F < tol_params:
+                    print(f"Converged on F at iteration {q}")
+                    break
+        F_matrices.append(F_all_j)
+        iterations_list.append(q)
+        likelihoods.append(likelihood_j)
 
-        # print(f"Running EMKF on sequence {j + 1}/{len(X_list)} using F[{index}]")
-
-        F_est, likelihood, iterations = EMKF_F_solo(F_0, H, Q, R, Y_t, x_0, P_0, X_t, P_smooth_t, V_t, K_T, max_it,
-                                                    tol_likelihood, tol_params)
-        F_matrices.append(F_est)
-        likelihoods.append(likelihood)
-        iterations_list.append(iterations)
 
     return F_matrices, likelihoods, iterations_list

@@ -62,7 +62,7 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
     print("Kalman Filter - STD:", KF_std_dB, "[dB]")
     # Print Run Time
     print("Inference Time:", t)
-    return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, last_gains]
+    return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg]
 
 
 

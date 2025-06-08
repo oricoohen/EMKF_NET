@@ -6,7 +6,7 @@ from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
-from emkf.main_emkf_func import EMKF_F, EMKF_F_solo
+from emkf.main_emkf_func import EMKF_F_analitic, EMKF_F_solo
 from Simulations.utils import DataLoader, DataGen
 
 
@@ -27,9 +27,8 @@ print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 # True model
 Q = q2 * Q_structure
 R = r2 * R_structure
-F = torch.tensor([[1, 0.1],[1, 1]]) # State transition matrix
-H = torch.tensor([[1., 1.],
-                  [0.25, 1.]])
+F = torch.tensor([[1, 0.1], [1, 1]]) # State transition matrix
+H = torch.tensor([[1., 1.], [0.25, 1.]])
 
 SystemModel.F_gen = False
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
@@ -54,22 +53,20 @@ print("testset size:",test_target.size())
 
 F_initial_1 = torch.tensor([[1., 1.], [0.1, 1.]])
 F_initial_2  = torch.tensor([[1., 1.], [0.1, 1.]])
-
+F_test_mat =[]
+F_test_mat.append(F_initial_1)
+F_test_mat.append(F_initial_2)
 ############kalman_TRUE############################
-[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg, K_list] = KFTest(args, sys_model, test_input, test_target,F =F_test_mat)
+[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F =F_test_mat)
 ############rts_TRUE###############################
-[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,P_smooth,V] = S_Test(sys_model, test_input, test_target,F= F_test_mat,K_T_list = K_list)
-
-
-
+[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,P_smooth,V] = S_Test(sys_model, test_input, test_target,F= F_test_mat)
 
 ########EMKF##########
 #####TRUE######
-
-F_matrices, likelihoods, iterations_list = EMKF_F(F_test_mat, H, Q, R, test_input, m1_0, m2_0, test_target, P_smooth, V, K_list, max_it=100, tol_likelihood=0.01, tol_params=0.005)
+print('start EMKF')
+F_matrices, likelihoods, iterations_list = EMKF_F_analitic(sys_model,F_test_mat, H, Q, R, test_input, m1_0, m2_0, test_target, max_it=100, tol_likelihood=0.01, tol_params=0.005)
 print('True F matrices 1', F_test_mat[0])
 print('end of EMKF',F_matrices )
-
 
 ######mse with emkf F #######
 
