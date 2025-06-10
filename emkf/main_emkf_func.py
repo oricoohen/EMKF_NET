@@ -35,10 +35,11 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=100,
     A_1 = compute_A1(x_0, X_s, V_s,n,T)  # (n, n)
     A_2 = compute_A2(x_0, P_0, X_s, P_smooth_s,n,T)  # (n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
-    F_fin = A_1 @ torch.linalg.pinv(A_2)
+    eps = 1e-4 * torch.eye(n, device=A_2.device)
+    A_2inv = torch.linalg.pinv(A_2+eps)
+    F_fin = A_1 @ A_2inv
     # print('f_i shape',F_i.shape)
-
-    return F_fin,0
+    return F_fin
 
 
 
@@ -151,8 +152,11 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100,
         for q in range(max_it):
             #############E STEP rts###############################
             [_,_,_, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
+            likelihood = 0
             #############M STEP rts###############################
-            F_est, likelihood = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),n,T,max_it, tol_likelihood, tol_params)
+            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),n,T,max_it, tol_likelihood, tol_params)
+            alpha = 0.2/(q+1)  # 0 < α ≤ 1  (smaller = safer)
+            F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
             likelihood_j.append(likelihood)
             print('q_iter:', q, 'F_est:', F_est)
