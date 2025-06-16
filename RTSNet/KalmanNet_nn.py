@@ -92,7 +92,7 @@ class KalmanNetNN(torch.nn.Module):
         self.d_output_FC5 = self.m * args.in_mult_KNet
         self.FC5 = nn.Sequential(
                 nn.Linear(self.d_input_FC5, self.d_output_FC5),
-                nn.ReLU())
+               nn.ReLU())
 
         # Fully connected 6
         self.d_input_FC6 = self.m
@@ -278,6 +278,7 @@ class KalmanNetNN(torch.nn.Module):
         # Sigma_GRU
         in_Sigma = torch.cat((out_Q, out_FC6, out_FC8), 2)#ori changed
         out_Sigma, self.h_Sigma = self.GRU_Sigma(in_Sigma, self.h_Sigma)
+
 
         # FC 1
         in_FC1 = out_Sigma

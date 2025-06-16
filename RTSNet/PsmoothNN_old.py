@@ -3,38 +3,18 @@ import torch.nn as nn
 
 
 class PsmoothNN(nn.Module):
-    def _init_(self, m, args):
-        super()._init_()
+    def __init__(self, m, args):
+        super(PsmoothNN, self).__init__()
 
         self.m = m  # Dimension of state space
         self.seq_len_input = 1
         self.batch_size = 1
-        self.mult = 4  # You mentioned mult=4
-
-        # Define input size for the DNN layer (self.m ** 2) * mult
-        self.d_input_FC8 = (self.m ** 2)*self.mult
-        self.d_output_FC8 = self.m**2
-        # New hidden dimensions for the DNN layers (not using specific constants like 4 and 2, but adjustable)
-        self.d_hidden_FC8_1 = self.d_input_FC8
-        self.d_hidden_FC8_2 = self.d_input_FC8// 2
-
-        # Fully connected layers for DNN with normalization
-        self.FC8 = nn.Sequential(
-            nn.Linear(self.d_input_FC8, self.d_hidden_FC8_1),  # Input size: (self.m ** 2) * mult
-            nn.LayerNorm(self.d_hidden_FC8_1),
-            nn.ReLU(),
-            nn.Linear(self.d_hidden_FC8_1, self.d_hidden_FC8_2),  # Second hidden layer
-            nn.LayerNorm(self.d_hidden_FC8_2),
-            nn.ReLU(),
-            nn.Linear(self.d_hidden_FC8_2, self.d_output_FC8),  # Output layer
-            nn.LayerNorm(self.d_output_FC8),
-            nn.ReLU())
 
         # GRU for P_smooth
-        self.d_input_Psmooth = 2 * (self.m ** 2) # m² for Sigma_bw + m² for SGain ori
+        self.d_input_Psmooth = 2 * (self.m ** 2)  # m² for Sigma_bw + m² for SGain
         self.d_hidden_Psmooth = self.m ** 2
         self.GRU_Psmooth = nn.GRU(self.d_input_Psmooth, self.d_hidden_Psmooth)
-        self.h_Psmooth = torch.zeros(self.seq_len_input, self.batch_size, self.d_hidden_Psmooth)
+        self.h_Psmooth = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Psmooth)
 
         ####normelize the input in leranable way
         self.layernorm_Psmooth = nn.LayerNorm(self.d_input_Psmooth)  # Normalize both covariance matrices
@@ -45,7 +25,6 @@ class PsmoothNN(nn.Module):
         self.FC_Psmooth = nn.Linear(self.d_input_FC_P, self.d_output_FC_P)
         self.activation = nn.ReLU()
 
-
     def forward(self, Sigma_bw, SGain):
         """
         Forward pass of the P_smooth estimation
@@ -54,16 +33,12 @@ class PsmoothNN(nn.Module):
         :return: P_smooth estimate
         """
         # Ensure inputs have correct shape
-        Sigma_bw = Sigma_bw.view(1, -1)  # [1, m²#mult]
+        Sigma_bw = Sigma_bw.view(1, 1, -1)  # [1, 1, m²]
         SGain = SGain.view(1, 1, -1)  # [1, 1, m²]
-        ##reduce dimentions
-        Sigma_in = self.FC8(Sigma_bw).view(1, 1, -1)
 
         # Concatenate and normalize
-        in_Psmooth = torch.cat((Sigma_in, SGain), dim=2)  # [1, 1, 2*m²]
+        in_Psmooth = torch.cat((Sigma_bw, SGain), dim=2)  # [1, 1, 2*m²]
         in_Psmooth = self.layernorm_Psmooth(in_Psmooth)  # normalize the input
-        if torch.all(self.h_Psmooth == 0):####if this is the first t step put inside the hiddenstate the P[T]
-            self.h_Psmooth = in_Psmooth[:,:,self.d_hidden_Psmooth].clone()
         out_Psmooth, self.h_Psmooth = self.GRU_Psmooth(in_Psmooth, self.h_Psmooth)
         P_smooth = self.FC_Psmooth(out_Psmooth)# [1, 1, m²]
         return P_smooth
@@ -118,3 +93,10 @@ class PsmoothNN(nn.Module):
             P = eigenvectors @ torch.diag(eigenvalues) @ eigenvectors.T
 
         return P
+
+
+
+
+
+
+

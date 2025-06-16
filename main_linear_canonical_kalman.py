@@ -161,9 +161,9 @@ else:
 
 print("Evaluate RTS Smoother True")
 if InitIsRandom_test:
-   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
 else:
-   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 PlotfolderName = 'Smoothers' + '/'
 ComparedmodelName = 'Dataset'

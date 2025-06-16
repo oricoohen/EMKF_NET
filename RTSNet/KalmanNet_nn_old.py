@@ -12,7 +12,7 @@ class KalmanNetNN(torch.nn.Module):
     ###################
     def __init__(self):
         super().__init__()
-        d
+
     
     def NNBuild(self, SysModel, args):
 

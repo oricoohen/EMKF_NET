@@ -134,7 +134,6 @@ class Pipeline_ERTS:
                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T)
                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
-                self.PsmoothNN.h_Psmooth = self.model.sigma_list[-1].view(1, 1, -1) # shape: [1, 1, m²] initial hidden state
                 ####compute the P(T)
                 P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)# shape: [1, 1, m²] to [m²]
                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m,SysModel.m))# shape: [m, m]
@@ -235,7 +234,6 @@ class Pipeline_ERTS:
                     P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)  # [m, m, T_test]
                     dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                     sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-                    self.PsmoothNN.h_Psmooth = self.model.sigma_list[-1].view(1, 1,-1)  # shape: [1, 1, m²] initial hidden state
                     # Handle initial P-smooth at time T_test
                     P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
                     P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
@@ -519,11 +517,11 @@ class Pipeline_ERTS:
 
         # Load models
         if load_model:
-            self.model = torch.load(load_model_path)
+            self.model = torch.load(load_model_path,weights_only=False)
             self.PsmoothNN = torch.load(load_p_smoothe_model_path)
         else:
-            self.model = torch.load(path_results + 'best-model.pt')
-            self.PsmoothNN = torch.load(path_results + 'best-psmooth.pt')
+            self.model = torch.load(path_results + 'best-model.pt',weights_only=False)
+            self.PsmoothNN = torch.load(path_results + 'best-psmooth.pt',weights_only=False)
 
         self.model.eval()
         self.PsmoothNN.eval()
@@ -577,7 +575,6 @@ class Pipeline_ERTS:
             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)
             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
             sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-            self.PsmoothNN.h_Psmooth = self.model.sigma_list[-1].view(1, 1,-1)  # shape: [1, 1, m²] initial hidden state
             # Handle initial P-smooth at time T_test
             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]

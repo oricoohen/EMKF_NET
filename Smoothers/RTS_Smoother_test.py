@@ -6,6 +6,7 @@ from Smoothers.RTS_Smoother import rts_smoother
 
 
 
+
 def enforce_covariance_properties( P, eps=1e-6):
     """
     Ensure that the covariance matrix P is positive    definite (PSD).
@@ -87,7 +88,6 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     last_gains = torch.empty(N_T, SysModel.n, SysModel.m)
 
 
-
     if not allStates:
         loc = torch.tensor([True,False,False]) # for position only
         if SysModel.m == 2:
@@ -132,16 +132,18 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     end = time.time()
     t = end - start
 
+
     # Average
     MSE_RTS_linear_avg = torch.mean(MSE_RTS_linear_arr)
     MSE_RTS_dB_avg = 10 * torch.log10(MSE_RTS_linear_avg)
 
     # Standard deviation
-    MSE_RTS_linear_std = torch.std(MSE_RTS_linear_arr, unbiased=True)
-
-    # Confidence interval
-    RTS_std_dB = 10 * torch.log10(MSE_RTS_linear_std + MSE_RTS_linear_avg) - MSE_RTS_dB_avg
-
+    if N_T > 1:  # at least two samples
+        MSE_RTS_linear_std = torch.std(MSE_RTS_linear_arr, unbiased=True)
+        RTS_std_dB = 10 * torch.log10(MSE_RTS_linear_std + MSE_RTS_linear_avg) - MSE_RTS_dB_avg
+    else:  # only one sequence
+        MSE_RTS_linear_std = torch.zeros_like(MSE_RTS_linear_avg)
+        RTS_std_dB = torch.zeros_like(MSE_RTS_dB_avg)
 
     print("RTS Smoother - MSE LOSS:", MSE_RTS_dB_avg, "[dB]")
     print("RTS Smoother - STD:", RTS_std_dB, "[dB]")
