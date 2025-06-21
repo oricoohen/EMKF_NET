@@ -86,13 +86,13 @@ class KalmanNetNN(torch.nn.Module):
         self.FC4 = nn.Sequential(
                 nn.Linear(self.d_input_FC4, self.d_output_FC4),
                 nn.ReLU())
-        
+
         # Fully connected 5
         self.d_input_FC5 = self.m
         self.d_output_FC5 = self.m * args.in_mult_KNet
         self.FC5 = nn.Sequential(
                 nn.Linear(self.d_input_FC5, self.d_output_FC5),
-               nn.ReLU())
+                nn.ReLU())
 
         # Fully connected 6
         self.d_input_FC6 = self.m
@@ -100,7 +100,7 @@ class KalmanNetNN(torch.nn.Module):
         self.FC6 = nn.Sequential(
                 nn.Linear(self.d_input_FC6, self.d_output_FC6),
                 nn.ReLU())
-        
+
         # Fully connected 7
         self.d_input_FC7 = 2 * self.n
         self.d_output_FC7 = 2 * self.n * args.in_mult_KNet
@@ -141,7 +141,7 @@ class KalmanNetNN(torch.nn.Module):
 
 
     def InitSystemDynamics(self, f, h, m, n):
-        
+
         # Set State Evolution Function
         self.f = f
         self.m = m
@@ -337,6 +337,5 @@ class KalmanNetNN(torch.nn.Module):
         hidden = weight.new(1, self.batch_size, self.d_hidden_Q).zero_()
         self.h_Q = hidden.data
         self.h_Q[0, 0, :] = self.prior_Q.flatten()
-
 
 
