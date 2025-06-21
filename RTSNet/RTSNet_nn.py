@@ -1,4 +1,4 @@
-"""# *Class: RTSNet*"""
+"""# **Class: RTSNet**"""
 
 import torch
 import torch.nn as nn
@@ -13,8 +13,8 @@ class RTSNetNN(KalmanNetNN):
     ###################
     ### Constructor ###
     ###################
-    def _init_(self):
-        super()._init_()
+    def __init__(self):
+        super().__init__()
 
     #############
     ### Build ###
@@ -275,3 +275,4 @@ class RTSNetNN(KalmanNetNN):
         hidden = weight.new(1, self.batch_size, self.d_hidden_Sigma_bw).zero_()
         self.h_Sigma_bw = hidden.data
         self.h_Sigma_bw[0, 0, :self.m ** 2] = self.prior_Sigma.flatten()
+

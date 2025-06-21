@@ -3,9 +3,9 @@ import torch.nn as nn
 
 
 class PsmoothNN(nn.Module):
-    def _init_(self, m, args):
-        super()._init_()
-
+    def __init__(self, m, args):
+        super().__init__()
+        self.start = 0
         self.m = m  # Dimension of state space
         self.seq_len_input = 1
         self.batch_size = 1
@@ -34,7 +34,7 @@ class PsmoothNN(nn.Module):
         self.d_input_Psmooth = 2 * (self.m ** 2) # m² for Sigma_bw + m² for SGain ori
         self.d_hidden_Psmooth = self.m ** 2
         self.GRU_Psmooth = nn.GRU(self.d_input_Psmooth, self.d_hidden_Psmooth)
-        self.h_Psmooth = torch.zeros(self.seq_len_input, self.batch_size, self.d_hidden_Psmooth)
+
 
         ####normelize the input in leranable way
         self.layernorm_Psmooth = nn.LayerNorm(self.d_input_Psmooth)  # Normalize both covariance matrices
@@ -54,19 +54,22 @@ class PsmoothNN(nn.Module):
         :return: P_smooth estimate
         """
         # Ensure inputs have correct shape
-        Sigma_bw = Sigma_bw.view(1, -1)  # [1, m²#mult]
-        SGain = SGain.view(1, 1, -1)  # [1, 1, m²]
+        Sigma_bw = self.standardize(Sigma_bw.view(1, -1))  # [1, m²#mult]
+        SGain = self.standardize(SGain.view(1, 1, -1))  # [1, 1, m²]
         ##reduce dimentions
         Sigma_in = self.FC8(Sigma_bw).view(1, 1, -1)
 
         # Concatenate and normalize
         in_Psmooth = torch.cat((Sigma_in, SGain), dim=2)  # [1, 1, 2*m²]
         in_Psmooth = self.layernorm_Psmooth(in_Psmooth)  # normalize the input
-        if torch.all(self.h_Psmooth == 0):####if this is the first t step put inside the hiddenstate the P[T]
-            self.h_Psmooth = in_Psmooth[:,:,self.d_hidden_Psmooth].clone()
+        if self.start == 0:####if this is the first t step put inside the hiddenstate the P[T]
+            self.h_Psmooth = in_Psmooth[:,:,:self.d_hidden_Psmooth].clone()
+            self.start = 1
         out_Psmooth, self.h_Psmooth = self.GRU_Psmooth(in_Psmooth, self.h_Psmooth)
         P_smooth = self.FC_Psmooth(out_Psmooth)# [1, 1, m²]
         return P_smooth
+    def standardize(self, x, eps=1e-5):
+        return (x - x.mean()) / (x.std() + eps)
 
     def compute_loss(self, P_pred_seq, x_target, x_smooth):
         """

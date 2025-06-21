@@ -107,6 +107,7 @@ class Pipeline_ERTS:
                 x_out_training_forward = torch.empty(SysModel.m, SysModel.T)
                 x_out_training = torch.empty(SysModel.m, SysModel.T)
 
+
                 if (randomInit):
                     self.model.InitSequence(train_init[n_e], SysModel.T)
                 else:
@@ -134,6 +135,7 @@ class Pipeline_ERTS:
                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T)
                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
+                self.PsmoothNN.start = 0
                 ####compute the P(T)
                 P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)# shape: [1, 1, m²] to [m²]
                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m,SysModel.m))# shape: [m, m]
@@ -191,7 +193,6 @@ class Pipeline_ERTS:
                 for j in range(0, self.N_CV):
                     y_cv = cv_input[j]
                     SysModel.T_test = y_cv.size()[-1]
-
                     x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test)
                     x_out_cv = torch.empty(SysModel.m, SysModel.T_test)
 
@@ -234,11 +235,11 @@ class Pipeline_ERTS:
                     P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)  # [m, m, T_test]
                     dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                     sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
+                    self.PsmoothNN.start = 0
                     # Handle initial P-smooth at time T_test
                     P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
                     P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
                     P_smoothed_seq[:, :, SysModel.T_test - 1] = P_matrix  # shape: [m, m]
-
                     # Compute P-smooth for remaining time steps
                     for t in range(SysModel.T_test - 2, -1, -1):
                         sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # [1, 1, m²]
@@ -303,6 +304,7 @@ class Pipeline_ERTS:
 
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0
+        nan_streak = 0
 
         for ti in range(0, self.N_steps):
 
@@ -312,7 +314,7 @@ class Pipeline_ERTS:
             # Zero gradients for both optimizers
             self.optimizer.zero_grad()
 
-
+            self.model.init_hidden()
 
             Batch_Optimizing_LOSS_sum = 0
 
@@ -362,17 +364,32 @@ class Pipeline_ERTS:
 
             # Average losses for this batch
             Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
-
-            #ori
-            if torch.isnan(Batch_Optimizing_LOSS_mean):
-                print(f"NaN detected in training loss at iteration {ti}")
-                continue
-            elif  torch.isinf(Batch_Optimizing_LOSS_mean):
-                print(f"inf detected in training loss at iteration {ti}")
-                continue
-
             # Train RTSNet first
             Batch_Optimizing_LOSS_mean.backward()
+            # 1) check every gradient tensor ori 2 blocks
+            bad_grad = False
+            for p in self.model.parameters():
+                if p.grad is None:  # this param wasn’t used this pass
+                    continue
+                if torch.isnan(p.grad).any() or torch.isinf(p.grad).any():
+                    bad_grad = True
+                    break
+
+            if bad_grad:  # → skip this batch
+                print("NaN/Inf gradients → batch skipped")
+                nan_streak += 1
+                if nan_streak >= 3:  # three bad batches in a row
+                    print("Stopping training (3 consecutive bad batches).")
+                    return  # leave NNTrain early
+                self.model.zero_grad(set_to_none=True)  # throw away bad grads
+                continue  # start next epoch iteration
+
+
+                # Calling the step function on an Optimizer makes an update to its
+                # parameters
+                nan_streak = 0
+
+
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)#ori
             self.optimizer.step()
 
@@ -537,10 +554,8 @@ class Pipeline_ERTS:
         for j in range(0, self.N_T):
             y_mdl_tst = test_input[j]
             SysModel.T_test = y_mdl_tst.size()[-1]
-
             x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test)
             x_out_test = torch.empty(SysModel.m, SysModel.T_test)
-
             if (randomInit):
                 self.model.InitSequence(test_init[j], SysModel.T_test)
             else:
@@ -575,6 +590,7 @@ class Pipeline_ERTS:
             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)
             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
             sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
+            self.PsmoothNN.start = 0
             # Handle initial P-smooth at time T_test
             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
