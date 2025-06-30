@@ -54,10 +54,10 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
         # F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
         # F[0, 0] = 1 + torch.randn(1).item() * delta_t*0.5  # random
         # F[1, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
-        F[0, 1] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
-        F[1, 0] = 0.1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
-        F[0, 0] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
-        F[1, 1] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
+        # F[0, 1] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
+        # F[1, 0] = 0.1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
+        # F[0, 0] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
+        # F[1, 1] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
         F_matrices.append(F)
     return F_matrices
 

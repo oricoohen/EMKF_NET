@@ -206,7 +206,7 @@ if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
 
 else:#e
     [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True)
-    [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
+    [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,randomInit=False, cv_init=None, train_init=None)
     # ## Test Neural Network
     print("trsnet test11111111111111")
     [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list,K,MSE_test_p_smooth_dB_avg,MSE_test_p_smooth_std] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True)
@@ -268,7 +268,7 @@ RTSNet_Pipeline.setTrainingParams(args_big)         # replaces optimiser with ne
 # 6) ─── SECOND (big) TRAIN PASS (FINE-TUNE) ──────────────────────────────────
 ###############################################################################
 [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_full,True)
-[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
+[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,randomInit=False, cv_init=None, train_init=None)
 # ## Test Neural Network
 print("trsnet test222222222")
 [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime, P_smooth_list, V_list, K,MSE_test_p_smooth_dB_avg, MSE_test_p_smooth_std] = (
