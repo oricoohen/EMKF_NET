@@ -26,19 +26,18 @@ def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5):
     """
     F_matrices = []
     for _ in range(num_F):
-        F = torch.tensor([[1, 1],
-                          [0.1, 1]])
         # F = torch.eye(state_dim)
-        F[0, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # random
-        F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
-        F[0, 0] = 1 + torch.randn(1).item() * delta_t*0.5  # random
-        F[1, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 1] = 1+ torch.randn(1).item() * delta_t  # random  velocity structure
+        # # F[0, 1] = 1   # random  velocity structure
+        # F[1, 0] = torch.randn(1).item() * delta_t*0.1  # Add random coupling
+        F = torch.tensor([[0.6, 0.2],
+                          [0.2, 0.6]])
         F_matrices.append(F)
     return F_matrices
 
 
 
-def rotate_F(F, i=0, j=1, theta=0.2,mult=1, many=True, randomit=True):
+def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=True):
     """
     Apply Givens rotation to matrix F (or list of matrices) in (i,j) plane.
 
@@ -134,15 +133,15 @@ class SystemModel:
             self.prior_S = torch.eye(self.n)
         else:
             self.prior_S = prior_S
-        
+
 
     def f(self, x):
         # print(self.F,'oiriiiiiiiii')
         return torch.matmul(self.F, x)
-    
+
     def h(self, x):
         return torch.matmul(self.H, x)
-        
+
     #####################
     ### Init Sequence ###
     #####################
@@ -237,7 +236,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, randomInit=False, randomLength=False,F_gen=None):
+    def GenerateBatch(self, size, T,delta=0.5, randomInit=False, randomLength=False,F_gen=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []

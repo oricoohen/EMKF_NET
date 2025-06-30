@@ -1,10 +1,9 @@
-####the old one without the f
 import torch
 import torch.nn as nn
 from datetime import datetime
 
-from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
-# from emkf.main_emkf_func import EMKF_F
+from Simulations.Linear_sysmdl import SystemModel, rotate_F
+from emkf.main_emkf import EMKF_F
 
 from Simulations.utils import DataLoader, DataGen
 
@@ -43,15 +42,15 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 500  # Number of training examples (size of the training dataset).50
-args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
+args.N_E = 50  # Number of training examples (size of the training dataset).50
+args.N_CV = 30  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30    # Length of the time series for training and cross-validation sequences.
-args.T_test = 30 # Length of the time series for test sequences.
+args.T_test = 100 # Length of the time series for test sequences.
 
 ### training parameters
-args.n_steps = 400  # Number of training steps or iterations for optimization.
+args.n_steps = 500  # Number of training steps or iterations for optimization.
 args.n_batch = 10    # Batch size: the number of sequences processed at each training step.10
 args.lr = 1e-4       # Learning rate: controls how quickly the model updates during training.
 args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
@@ -67,9 +66,6 @@ print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 # True model
 Q = q2 * Q_structure
 R = r2 * R_structure
-F = torch.tensor([[1, 0.1],[1, 1]]) # State transition matrix
-H = torch.tensor([[1., 1.],
-                  [0.25, 1.]])
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
 SystemModel.F_gen = True
 sys_model.InitSequence(m1_0, m2_0)
@@ -83,7 +79,7 @@ dataFolderName = 'Simulations/Linear_canonical/data/v0dB' + '/'
 dataFileName = '2x2_rq3030_T100.pt'
 dataFileName_F = '2x2_F'
 print("Start Data Gen")
-DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta =0.3, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
 print("Data Load")
 
 
@@ -113,16 +109,12 @@ else:
 sys_model.F_train = F_train_mat
 sys_model.F_valid = F_val_mat
 sys_model.F_test = F_test_mat
-# print(F_train_mat,'111111111111111')
-# print(F_val_mat,'22222222222222222222')
-# print(F_test_mat,'333333333333333')
+print(F_train_mat,'111111111111111')
+print(F_val_mat,'22222222222222222222')
+print(F_test_mat,'333333333333333')
 ########################################
 ### Evaluate Observation Noise Floor ###
 ########################################
-
-
-
-
 loss_obs = nn.MSELoss(reduction='mean')
 MSE_obs_linear_arr = torch.empty(args.N_T)# MSE [Linear]
 for j in range(0, args.N_T):
@@ -139,39 +131,30 @@ obs_std_dB = 10 * torch.log10(MSE_obs_linear_std + MSE_obs_linear_avg) - MSE_obs
 print("Observation Noise Floor - MSE LOSS:", MSE_obs_dB_avg, "[dB]")
 print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
 
-# ##############################
-# ### Evaluate Kalman Filter ###
-# ##############################
+##############################
+### Evaluate Kalman Filter ###
+##############################
 print("Evaluate Kalman Filter True")
 if InitIsRandom_test:
    [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F = F_test_mat, randomInit = True, test_init=test_init)
 else:
    [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
 
-#
-# #############################
+
+#############################
 ### Evaluate RTS Smoother ###
 #############################
-
-
-
 print("Evaluate RTS Smoother True")
 if InitIsRandom_test:
    [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
 else:
-    [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target, F=F_test_mat)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 PlotfolderName = 'Smoothers' + '/'
 ComparedmodelName = 'Dataset'
 Plot = Plot(PlotfolderName, ComparedmodelName)
 print("Plot")
 Plot.NNPlot_Hist(MSE_KF_linear_arr, MSE_RTS_linear_arr, MSE_obs_linear_arr)
-
-
-
-
-
-
 
 #######################
 ### RTSNet Pipeline ###
@@ -188,77 +171,52 @@ RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
 RTSNet_Pipeline.setssModel(sys_model)
 RTSNet_Pipeline.setModel(RTSNet_model)
 RTSNet_Pipeline.setTrainingParams(args)
-#
+
 if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True, randomInit = True, cv_init=cv_init,train_init=train_init)
-   [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,
+   RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,
                  randomInit=True, cv_init=None, train_init=None)
    ## Test Neural Network
    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True,randomInit=True,test_init=test_init)
 
 else:#e
     #[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True)
-    #[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,randomInit=False, cv_init=None, train_init=None)
-    # ## Test Neural Network
-    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list,K,MSE_test_p_smooth_dB_avg,MSE_test_p_smooth_std] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True)
-d
+    RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
+    ## Test Neural Network
+    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list,K] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True)
+
 RTSNet_Pipeline.save()
-
-# MSE_KF_dB_avg_true = MSE_KF_dB_avg          # KF  (true F)
-# MSE_RTS_dB_avg_true = MSE_RTS_dB_avg         # E/RTS (true F)
-# MSE_test_RTSNet_dB_avg_true = MSE_test_dB_avg
-# MSE_cv_RTSNet_dB_avg_true = MSE_cv_dB_epoch
-# MSE_train_RTSNet_dB_avg_true = MSE_train_dB_epoch
-# MSE_test_p_smooth_dB_avg_true = MSE_test_p_smooth_dB_avg
-# MSE_std_test_p_smooth_dB_true= MSE_test_p_smooth_std
-# MSE_cv_p_smooth_dB_avg_true = MSE_cv_p_smooth_dB_epoch
-# MSE_train_p_smooth_dB_avg_true = MSE_train_p_smooth_dB_epoch
-
-
 ### RTSNet with wrong F info ##############################################################################################
 # Build Neural Network
 # Create a new instance for the wrong model
-
 sys_model_wrongF = SystemModel(F, Q, H, R, args.T, args.T_test)
 sys_model_wrongF.InitSequence(m1_0, m2_0)
 
-# # Wrong F
-# sys_model_wrongF.F_train = rotate_F(F_train_mat,theta=0.03*torch.pi,mult=1.,many=True)
-# sys_model_wrongF.F_valid = rotate_F(F_val_mat,theta=0.03*torch.pi,mult=1.,many=True)
-# sys_model_wrongF.F_test= rotate_F(F_test_mat,theta=0.03*torch.pi,mult=1.,many=True)
-
-sys_model_wrongF.F_train = change_F(F_train_mat,many=True)
-sys_model_wrongF.F_valid = change_F(F_val_mat,many=True)
-sys_model_wrongF.F_test= change_F(F_test_mat,many=True)
-
-
-#sys_model_wrongF.F_test = [torch.tensor([[10., 0.],[20., 0.]]) for _ in range(len(F_test_mat))]
+# Wrong F
+sys_model_wrongF.F_train = rotate_F(F_train_mat,theta=0.75*torch.pi,mult=1.15,many=True)
+sys_model_wrongF.F_valid = rotate_F(F_val_mat,theta=0.75*torch.pi,mult=1.15,many=True)
+sys_model_wrongF.F_test = rotate_F(F_test_mat,theta=0.75*torch.pi,mult=1.15,many=True)
 
 # Assume F_train_mat is a tensor of shape [N, m, m]
 # Replace all F matrices with zeros of same shape
-#
-# zero_like_F_train = [torch.tensor([[1.4012,  0.8262],
-#                   [-0.0738, 0.5988]]) for _ in range(len(F_train_mat))]
-# zero_like_F_val = [torch.tensor([[1.4012,  0.8262],
-#                   [-0.0738, 0.5988]]) for _ in range(len(F_val_mat))]
-# zero_like_F_test = [torch.tensor([[1.4012,  0.8262],
-#                   [-0.0738, 0.5988]]) for _ in range(len(F_test_mat))]
 
-# Assign to wrongF system model
+# zero_like_F_train = [torch.ones_like(F_train_mat[0]) for _ in range(len(F_train_mat))]
+# zero_like_F_val = [torch.ones_like(F_val_mat[0]) for _ in range(len(F_val_mat))]
+# zero_like_F_test = [torch.ones_like(F_test_mat[0]) for _ in range(len(F_test_mat))]
+#
+# # Assign to wrongF system model
 # sys_model_wrongF.F_train = zero_like_F_train
 # sys_model_wrongF.F_valid = zero_like_F_val
 # sys_model_wrongF.F_test = zero_like_F_test
 
 
-[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model_wrongF, test_input, test_target,F =sys_model_wrongF.F_test)
+print("Zero F example:\n", sys_model_wrongF.F_train[0])
 
-[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg2, RTS_out] = S_Test(sys_model_wrongF, test_input, test_target,F = sys_model_wrongF.F_test)
-print('oriiiiiiiii wrong',MSE_RTS_dB_avg2)
-print("Zero F example:\n", sys_model_wrongF.F_test[0])
 
 
 
 print('ori to checkkkkkkkkkkkkkkkkkkkkkkkkkk first',F_train_mat[3],'versoso',sys_model_wrongF.F_train[3] )
+
 
 print("RTSNet with with wrong F")
 RTSNet_model = RTSNetNN()
@@ -273,30 +231,18 @@ RTSNet_Pipeline.setTrainingParams(args)
 
 if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF,generate_f=True, randomInit = True, cv_init=cv_init,train_init=train_init)
-   [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF, generate_f=True,
+   RTSNet_Pipeline.P_smooth_Train(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF, generate_f=True,
                   randomInit=True, cv_init=None, train_init=None)
     ## Test Neural Network
    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_test_list, V_test_list] = RTSNet_Pipeline.NNTest(sys_model_wrongF, test_input, test_target, path_results_wrongF,generate_f=True, randomInit=True,test_init=test_init)
 else:
    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF,generate_f=True)
-   # [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF,
-   #                                 generate_f=True, randomInit=False, cv_init=None, train_init=None)
-   # # Test Neural Network
-   [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_test_list, V_test_list, K_T,MSE_test_p_smooth_dB_avg,MSE_test_p_smooth_std] = RTSNet_Pipeline.NNTest(sys_model_wrongF, test_input, test_target, path_results_wrongF,generate_f=True)
+   RTSNet_Pipeline.P_smooth_Train(sys_model_wrongF, cv_input, cv_target, train_input, train_target, path_results_wrongF,
+                                   generate_f=True, randomInit=False, cv_init=None, train_init=None)
+   ## Test Neural Network
+   [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_test_list, V_test_list, K_T] = RTSNet_Pipeline.NNTest(sys_model_wrongF, test_input, test_target, path_results_wrongF,generate_f=True)
 
 RTSNet_Pipeline.save()
-
-
-
-MSE_KF_dB_avg_wrong = MSE_KF_dB_avg          # KF  (true F)
-MSE_RTS_dB_avg_wrong = MSE_RTS_dB_avg         # E/RTS (true F)
-MSE_test_RTSNet_dB_avg_wrong = MSE_test_dB_avg
-MSE_cv_RTSNet_dB_avg_wrong = MSE_cv_dB_epoch
-MSE_train_RTSNet_dB_avg_wrong = MSE_train_dB_epoch
-MSE_test_p_smooth_dB_avg_wrong = MSE_test_p_smooth_dB_avg
-MSE_std_test_p_smooth_dB_wrong= MSE_test_p_smooth_std
-MSE_cv_p_smooth_dB_avg_wrong = MSE_cv_p_smooth_dB_epoch
-MSE_train_p_smooth_dB_avg_wrong = MSE_train_p_smooth_dB_epoch
 
 print('emkf in the pipeline')
 #####do emkf###############
@@ -321,38 +267,3 @@ for i in range(len(EMKF_F_model)):
     dist_emkf.append(d_emkf.item())
 
     print(f"F[{i}] → Wrong Dist: {d_wrong.item():.6f}, EMKF Dist: {d_emkf.item():.6f} → Closer: {'EMKF' if d_emkf < d_wrong else 'Wrong'}")
-
-
-    #summeration
-    # 2.  Pretty‑print ------------------------------------------------------
-    def _fmt(x):
-        """Return a nicely formatted string for scalars or 'N/A' otherwise."""
-        try:
-            return f"{float(x):.3f}"
-        except Exception:
-            return "   N/A   "
-
-    print("\n" + "=" * 106)
-    print("{:^106}".format("PERFORMANCE SUMMARY (ALL IN dB UNLESS NOTED)"))
-    print("=" * 106)
-    print("{:<36}|{:^16}|{:^16}|".format("Metric", "True‑F", "Wrong‑F"))
-    print("-" * 106)
-    print("{:<36}|{:>16}|{:>16}|".format("KF – Test MSE",
-                                         _fmt(MSE_KF_dB_avg_true), _fmt(MSE_KF_dB_avg_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("RTS / ERTS – Test MSE",
-                                         _fmt(MSE_RTS_dB_avg_true), _fmt(MSE_RTS_dB_avg_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("RTSNet – Test MSE",
-                                         _fmt(MSE_test_RTSNet_dB_avg_true), _fmt(MSE_test_RTSNet_dB_avg_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("RTSNet – Best CV MSE",
-                                         _fmt(min(MSE_cv_RTSNet_dB_avg_true)), _fmt(min(MSE_cv_RTSNet_dB_avg_wrong))))
-    print("{:<36}|{:>16}|{:>16}|".format("RTSNet – Final Train MSE",_fmt(MSE_train_RTSNet_dB_avg_true[-1]),
-                                         _fmt(MSE_train_RTSNet_dB_avg_wrong[-1])))
-    print("{:<36}|{:>16}|{:>16}|".format("P‑smooth – Test mean MSE",
-                                         _fmt(MSE_test_p_smooth_dB_avg_true), _fmt(MSE_test_p_smooth_dB_avg_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("P‑smooth – Test std (±)",
-                                         _fmt(MSE_std_test_p_smooth_dB_true), _fmt(MSE_std_test_p_smooth_dB_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("P‑smooth – CV mean MSE",
-                                         _fmt(MSE_cv_p_smooth_dB_avg_true), _fmt(MSE_cv_p_smooth_dB_avg_wrong)))
-    print("{:<36}|{:>16}|{:>16}|".format("P‑smooth – Train mean MSE",
-                                         _fmt(MSE_train_p_smooth_dB_avg_true), _fmt(MSE_train_p_smooth_dB_avg_wrong)))
-    print("=" * 106 + "\n")

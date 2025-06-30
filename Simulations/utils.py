@@ -7,13 +7,14 @@ import torch
 
 
 
-def DataGen(args, SysModel_data, fileName,fileName_F, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False):
+def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False):
 
     ##################################
     ### Generate Training Sequence ###
     ##################################
     #ori generate F
-    F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, randomInit=randomInit_train,randomLength=randomLength,F_gen=True)
+
+    F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=True)
     training_input = SysModel_data.Input
     training_target = SysModel_data.Target
     if(randomInit_train):
@@ -25,7 +26,7 @@ def DataGen(args, SysModel_data, fileName,fileName_F, randomInit_train=False,ran
     ####################################
     ### Generate Validation Sequence ###
     ####################################
-    F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, randomInit=randomInit_cv,randomLength=randomLength,F_gen=True)
+    F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=True)
     cv_input = SysModel_data.Input
     cv_target = SysModel_data.Target
     if(randomInit_cv):
@@ -37,7 +38,7 @@ def DataGen(args, SysModel_data, fileName,fileName_F, randomInit_train=False,ran
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, randomInit=randomInit_test,randomLength=randomLength,F_gen=True)
+    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=True)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     if(randomInit_test):
@@ -45,6 +46,7 @@ def DataGen(args, SysModel_data, fileName,fileName_F, randomInit_train=False,ran
     else:
         x0 = torch.squeeze(SysModel_data.m1x_0)
         test_init = x0.repeat(args.N_T,1) #size: N_T x m
+
 
     #################
     ### Save Data ###

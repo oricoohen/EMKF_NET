@@ -45,7 +45,7 @@ class Pipeline_KF:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
 
 
-    def NNTrain(self, n_Examples, train_input, train_target, n_CV, cv_input, cv_target):
+    def NNTrain(self, n_Examples, train_input, train_target, n_CV, cv_input, cv_target, many_F = True):
 
         self.N_E = n_Examples
         self.N_CV = n_CV
@@ -57,6 +57,9 @@ class Pipeline_KF:
         MSE_train_linear_batch = torch.empty([self.N_B])
         self.MSE_train_linear_epoch = torch.empty([self.N_steps])
         self.MSE_train_dB_epoch = torch.empty([self.N_steps])
+
+        nan_streak = 0  # <-- consecutive bad batches
+
 
         ##############
         ### Epochs ###
@@ -75,8 +78,14 @@ class Pipeline_KF:
             self.model.eval()
 
             for j in range(0, self.N_CV):
+
+                if many_F:
+                    index = j // 10
+                    self.ssModel.F = self.ssModel.F_valid[index]
+                    self.model.update_F(self.ssModel.F)
+
                 y_cv = cv_input[j, :, :]
-                self.model.InitSequence(self.ssModel.m1x_0)
+                self.model.InitSequence(self.ssModel.m1x_0, self.ssModel.T)
 
                 x_out_cv = torch.empty(self.ssModel.m, self.ssModel.T)
                 for t in range(0, self.ssModel.T):
@@ -106,11 +115,19 @@ class Pipeline_KF:
 
             Batch_Optimizing_LOSS_sum = 0
 
+            valid_batches = 0  # only count good batches
+
             for j in range(0, self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
 
+                if many_F:
+                    index = n_e // 10
+                    self.ssModel.F = self.ssModel.F_train[index]
+                    self.model.update_F(self.ssModel.F)
+
                 y_training = train_input[n_e, :, :]
-                self.model.InitSequence(self.ssModel.m1x_0)
+                self.model.InitSequence(self.ssModel.m1x_0, self.ssModel.T)
+
 
                 x_out_training = torch.empty(self.ssModel.m, self.ssModel.T)
                 for t in range(0, self.ssModel.T):
@@ -118,6 +135,7 @@ class Pipeline_KF:
 
                 # Compute Training Loss
                 LOSS = self.loss_fn(x_out_training, train_target[n_e, :, :])
+
                 MSE_train_linear_batch[j] = LOSS.item()
 
                 Batch_Optimizing_LOSS_sum = Batch_Optimizing_LOSS_sum + LOSS
@@ -142,8 +160,29 @@ class Pipeline_KF:
             Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
             Batch_Optimizing_LOSS_mean.backward()
 
+            # 1) check every gradient tensor ori 2 blocks
+            bad_grad = False
+            for p in self.model.parameters():
+                if p.grad is None:  # this param wasn’t used this pass
+                    continue
+                if torch.isnan(p.grad).any() or torch.isinf(p.grad).any():
+                    bad_grad = True
+                    break
+
+            if bad_grad:  # → skip this batch
+                print("NaN/Inf gradients → batch skipped")
+                nan_streak += 1
+                if nan_streak >= 3:  # three bad batches in a row
+                    print("Stopping training (3 consecutive bad batches).")
+                    return  # leave NNTrain early
+                self.model.zero_grad(set_to_none=True)  # throw away bad grads
+                continue  # start next epoch iteration
+
+
             # Calling the step function on an Optimizer makes an update to its
             # parameters
+            nan_streak = 0
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
             ########################
@@ -159,28 +198,46 @@ class Pipeline_KF:
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
-    def NNTest(self, n_Test, test_input, test_target):
+    def NNTest(self, n_Test, test_input, test_target,sysmodel = None, many_F = True):
 
         self.N_T = n_Test
+
+
+        if sysmodel is not None:
+            self.setssModel(sysmodel)
 
         self.MSE_test_linear_arr = torch.empty([self.N_T])
 
         # MSE LOSS Function
         loss_fn = nn.MSELoss(reduction='mean')
 
-        self.model = torch.load(self.modelFileName)
+        self.model = torch.load(self.modelFileName, weights_only=False)
 
         self.model.eval()
 
         torch.no_grad()
-        
+
         start = time.time()
+
+        # --------- NEW: trackers for the worst sequence ----------ori
+        worst_mse = -float("inf")  # start lower than any real MSE
+        worst_idx = -1
+        worst_F = None
+        # ----------------------------------------------------------
+
+
+
 
         for j in range(0, self.N_T):
 
+            if many_F:
+                index = j // 10
+                self.ssModel.F = self.ssModel.F_test[index]
+                self.model.update_F(self.ssModel.F)
+
             y_mdl_tst = test_input[j, :, :]
 
-            self.model.InitSequence(self.ssModel.m1x_0)
+            self.model.InitSequence(self.ssModel.m1x_0, self.ssModel.T)
 
             x_out_test = torch.empty(self.ssModel.m, self.ssModel.T)
 
@@ -188,6 +245,17 @@ class Pipeline_KF:
                 x_out_test[:, t] = self.model(y_mdl_tst[:, t])
 
             self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j, :, :]).item()
+
+            # ------------ NEW: keep the worst ----------------ori
+            if self.MSE_test_linear_arr[j] > worst_mse:
+                worst_mse = self.MSE_test_linear_arr[j]
+                worst_idx = j
+                worst_F   = self.ssModel.F.clone()  # make a copy
+            # -------------------------------------------------
+
+
+
+
 
         end = time.time()
         t = end - start
@@ -210,6 +278,16 @@ class Pipeline_KF:
         print(str, self.test_std_dB, "[dB]")
         # Print Run Time
         print("Inference Time:", t)
+
+        # ------------ NEW: report the worst sequence ------------ori
+        worst_mse_dB = 10 * torch.log10(torch.tensor(worst_mse))
+        print(f"Worst sequence index : {worst_idx}")
+        print(f"Worst MSE            : {worst_mse:.6e}  ({worst_mse_dB:.3f} dB)")
+        print("Associated F matrix  :")
+        print(worst_F)
+        # ---------------------------------------------------------
+
+
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, x_out_test]
 

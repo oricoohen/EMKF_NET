@@ -31,8 +31,8 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_full = 'RTSNet/full_info/'
-path_results_wrongF = 'RTSNet/wrong_F/'
+path_results_full = 'RTSNet/full_info/W'
+path_results_wrongF = 'RTSNet/wrong_F/W'
 
 ####################
 ### Design Model ###
@@ -43,7 +43,7 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 500  # Number of training examples (size of the training dataset).50
+args.N_E = 2000  # Number of training examples (size of the training dataset).50
 args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
@@ -51,12 +51,27 @@ args.T = 30    # Length of the time series for training and cross-validation seq
 args.T_test = 30 # Length of the time series for test sequences.
 
 ### training parameters
-args.n_steps = 400  # Number of training steps or iterations for optimization.
+args.n_steps = 100  # Number of training steps or iterations for optimization.
 args.n_batch = 10    # Batch size: the number of sequences processed at each training step.10
 args.lr = 1e-4       # Learning rate: controls how quickly the model updates during training.
 args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
 
+###################ORI CHANGE
+args_big   = config.general_settings()
 
+args_big.N_E    =  2000       # larger training set
+args_big.N_CV   =   100
+args_big.N_T    =   100       # test size can stay the same
+args_big.T      =    30
+args_big.T_test =    30
+
+args_big.n_steps = 400        # extra epochs for fine-tune
+args_big.n_batch =  30        # maybe different batch size
+args_big.lr      = 1e-4       # usually ↓ a bit for fine-tune
+args_big.wd      = 1e-3
+
+
+###########################################################
 r2 = torch.tensor([1e-3])
 vdB = 0 # ratio v=q2/r2
 v = 10**(vdB/10)
@@ -83,7 +98,7 @@ dataFolderName = 'Simulations/Linear_canonical/data/v0dB' + '/'
 dataFileName = '2x2_rq3030_T100.pt'
 dataFileName_F = '2x2_F'
 print("Start Data Gen")
-DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta =0.3, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta =1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
 print("Data Load")
 
 
@@ -119,9 +134,6 @@ sys_model.F_test = F_test_mat
 ########################################
 ### Evaluate Observation Noise Floor ###
 ########################################
-
-
-
 
 loss_obs = nn.MSELoss(reduction='mean')
 MSE_obs_linear_arr = torch.empty(args.N_T)# MSE [Linear]
@@ -169,10 +181,6 @@ Plot.NNPlot_Hist(MSE_KF_linear_arr, MSE_RTS_linear_arr, MSE_obs_linear_arr)
 
 
 
-
-
-
-
 #######################
 ### RTSNet Pipeline ###
 #######################
@@ -186,7 +194,7 @@ print("Number of trainable parameters for RTSNet:",sum(p.numel() for p in RTSNet
 ## Train Neural Network
 RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
 RTSNet_Pipeline.setssModel(sys_model)
-RTSNet_Pipeline.setModel(RTSNet_model)
+RTSNet_Pipeline.setModel(RTSNet_model,args)
 RTSNet_Pipeline.setTrainingParams(args)
 #
 if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
@@ -198,12 +206,12 @@ if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
 
 else:#e
     #[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True)
-    #[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,randomInit=False, cv_init=None, train_init=None)
+    [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
     # ## Test Neural Network
+    print("trsnet test11111111111111")
     [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list,K,MSE_test_p_smooth_dB_avg,MSE_test_p_smooth_std] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True)
-d
-RTSNet_Pipeline.save()
 
+RTSNet_Pipeline.save()
 # MSE_KF_dB_avg_true = MSE_KF_dB_avg          # KF  (true F)
 # MSE_RTS_dB_avg_true = MSE_RTS_dB_avg         # E/RTS (true F)
 # MSE_test_RTSNet_dB_avg_true = MSE_test_dB_avg
@@ -215,6 +223,62 @@ RTSNet_Pipeline.save()
 # MSE_train_p_smooth_dB_avg_true = MSE_train_p_smooth_dB_epoch
 
 
+
+##################second training
+sys_model_2 = SystemModel(F, Q, H, R, args_big.T, args_big.T_test)
+sys_model_2.InitSequence(m1_0, m2_0)
+######create new data
+
+
+dataFolderName_2 = 'Simulations/Linear_canonical/data/v0dB' + '/'
+dataFileName_2 = '2x2_rq3030_T100_2.pt'
+dataFileName_F_2 = '2x2_F_2'
+print("Start Data Gen")
+DataGen(args_big, sys_model_2, dataFolderName_2 + dataFileName_2,dataFolderName_2 + dataFileName_F_2,delta = 0.5, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+print("Data Load")
+
+
+[train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName_2 + dataFileName_2)
+[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName_2 + dataFileName_F_2)
+sys_model_2.F_train = F_train_mat
+sys_model_2.F_valid = F_val_mat
+sys_model_2.F_test = F_test_mat
+
+
+#########change to wrong f
+sys_model_2.F_train = change_F(F_train_mat,many=True)
+sys_model_2.F_valid = change_F(F_val_mat,many=True)
+sys_model_2.F_test= change_F(F_test_mat,many=True)
+###################check the regu;ar rts
+print('regular kalman and rts with wrong F')
+[MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model_2, test_input, test_target,F =sys_model_2.F_test)
+
+[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg2, RTS_out] = S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+#############
+
+
+
+###############################################################################
+# 5) RE-USE **THE SAME** MODEL ─ tell the pipeline about new data + hyper-params
+###############################################################################
+RTSNet_Pipeline.setssModel(sys_model_2)           # new system matrices & F list
+RTSNet_Pipeline.setTrainingParams(args_big)         # replaces optimiser with new LR, etc.
+
+###############################################################################
+# 6) ─── SECOND (big) TRAIN PASS (FINE-TUNE) ──────────────────────────────────
+###############################################################################
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_full,True)
+[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
+# ## Test Neural Network
+print("trsnet test222222222")
+[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime, P_smooth_list, V_list, K,MSE_test_p_smooth_dB_avg, MSE_test_p_smooth_std] = (
+    RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, path_results_full, True))
+
+###############################################################################
+RTSNet_Pipeline.save()
+
+
+D
 ### RTSNet with wrong F info ##############################################################################################
 # Build Neural Network
 # Create a new instance for the wrong model
@@ -267,8 +331,8 @@ print("Number of trainable parameters for RTSNet:",sum(p.numel() for p in RTSNet
 ## Train Neural Network
 RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
 RTSNet_Pipeline.setssModel(sys_model_wrongF)
-RTSNet_Pipeline.setModel(RTSNet_model)
-RTSNet_Pipeline.setTrainingParams(args)
+RTSNet_Pipeline.setModel(RTSNet_model,args_big)
+RTSNet_Pipeline.setTrainingParams(args_big)
 
 
 if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):

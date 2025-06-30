@@ -1,5 +1,4 @@
 """# **Class: KalmanNet**"""
-#the old one
 
 import torch
 import torch.nn as nn
@@ -12,7 +11,7 @@ class KalmanNetNN(torch.nn.Module):
     ###################
     def __init__(self):
         super().__init__()
-    
+
     def NNBuild(self, SysModel, args):
 
         self.F = SysModel.F
@@ -37,7 +36,7 @@ class KalmanNetNN(torch.nn.Module):
         self.prior_Q = prior_Q
         self.prior_Sigma = prior_Sigma
         self.prior_S = prior_S
-        
+
 
 
         # GRU to track Q
@@ -87,7 +86,7 @@ class KalmanNetNN(torch.nn.Module):
         self.FC4 = nn.Sequential(
                 nn.Linear(self.d_input_FC4, self.d_output_FC4),
                 nn.ReLU())
-        
+
         # Fully connected 5
         self.d_input_FC5 = self.m
         self.d_output_FC5 = self.m * args.in_mult_KNet
@@ -101,7 +100,7 @@ class KalmanNetNN(torch.nn.Module):
         self.FC6 = nn.Sequential(
                 nn.Linear(self.d_input_FC6, self.d_output_FC6),
                 nn.ReLU())
-        
+
         # Fully connected 7
         self.d_input_FC7 = 2 * self.n
         self.d_output_FC7 = 2 * self.n * args.in_mult_KNet
