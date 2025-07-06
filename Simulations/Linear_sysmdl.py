@@ -47,8 +47,8 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
     """
     F_matrices = []
     for _ in range(num_F):
-        F = torch.tensor([[1, 1],
-                           [0.1, 1]])
+        # F = torch.tensor([[1., 0.],
+        #                    [0., 1.]])
         # F = torch.eye(state_dim)
         # F[0, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # random
         # F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
@@ -58,6 +58,8 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
         # F[1, 0] = 0.1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
         # F[0, 0] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
         # F[1, 1] = 1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
+        F = torch.tensor([[0.999, 0.1],
+                          [0.0, 0.999]])  # State transition matrix
         F_matrices.append(F)
     return F_matrices
 
@@ -88,7 +90,7 @@ def change_F(F, mult=0.0001, many=True):
 
 
 
-def rotate_F(F, i=0, j=1, theta=0.2,mult=1, many=True, randomit=True):
+def rotate_F(F, i=0, j=1, theta=0.05876,mult=1, many=True, randomit=True):
     """
     Apply Givens rotation to matrix F (or list of matrices) in (i,j) plane.
 

@@ -10,7 +10,7 @@ from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1
 from Simulations.utils import DataLoader, DataGen
 
 
-def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=20, tol_likelihood=0.01, tol_params=0.005):
     """
     Perform EM for a single sequence to estimate the state transition matrix F.
 
@@ -111,7 +111,7 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=100,
 
 
 
-def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, tol_likelihood=0.01, tol_params=0.005):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -139,7 +139,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100,
     F_matrices = []
     likelihoods = []
     iterations_list = []
-    n = sys_model.n
+    m = sys_model.m
     T = sys_model.T_test
     for j in range(len(X)):
         index = j // 10
@@ -154,8 +154,9 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100,
             [_,_,_, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
             likelihood = 0
             #############M STEP rts###############################
-            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),n,T,max_it, tol_likelihood, tol_params)
-            alpha = 0.8/(q+1)  # 0 < α ≤ 1  (smaller = safer)
+            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),m,T,max_it, tol_likelihood, tol_params)
+            #alpha = 0.8/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
+            alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
 
@@ -170,6 +171,6 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100,
         F_matrices.append(F_all_j)
         iterations_list.append(q)
         likelihoods.append(likelihood_j)
-
+    S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_all_j[-1].unsqueeze(0))
 
     return F_matrices, likelihoods, iterations_list

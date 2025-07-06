@@ -54,7 +54,6 @@ def compute_cross_covariances( F, H, Ks, Ps, SGains):
     I = torch.eye(m, dtype=Ps.dtype, device=Ps.device)
     # Cross-covariance at final time step (T-1)
     V[:, :, T - 1] = (I - Ks @ H) @ F @ Ps[:, :, T - 2]
-    V[:, :, T - 1] = enforce_covariance_properties(V[:, :, T - 1])
 
     # Backward recursion from t = T-2 down to 0
     for t in range(T - 2, -1, -1):
@@ -62,7 +61,6 @@ def compute_cross_covariances( F, H, Ks, Ps, SGains):
         St = SGains[T - 2 - t]
         Stm1_T = SGains[T - 1 - t]
         V[:, :, t] = (Pt @ Stm1_T.T + St @ (V[:, :, t + 1] - F @ Pt) @ Stm1_T.T)
-        V[:, :, t] = enforce_covariance_properties(V[:, :, t])
 
     return V
 
@@ -82,10 +80,10 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     start = time.time()
     KF = KalmanFilter(SysModel)
     RTS = rts_smoother(SysModel)
-    RTS_out = torch.zeros(N_T, n, T)
-    P_smooth = torch.zeros(N_T, n, n, T)
-    V_test = torch.zeros(N_T, n, n, T)
-    last_gains = torch.empty(N_T, SysModel.n, SysModel.m)
+    RTS_out = torch.zeros(N_T, m, T)
+    P_smooth = torch.zeros(N_T, m, m, T)
+    V_test = torch.zeros(N_T, m, m, T)
+    last_gains = torch.empty(N_T, m, n)
 
 
     if not allStates:
@@ -112,11 +110,12 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)   
 
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
+        #    KF.K should have shape (m, n)
+        last_gains[j] = KF.KG.clone()
         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
         RTS_out[j] = RTS.s_x.clone()
 
-        #    KF.K should have shape (m, n)
-        last_gains[j] = KF.KG.clone()
+
         
         if(allStates):
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x, sequence_target).item()

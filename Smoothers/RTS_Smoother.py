@@ -74,6 +74,8 @@ class rts_smoother:
         self.s_x[:, T-1] = torch.squeeze(self.s_m1x_nexttime)
         self.s_sigma[:, :, T-1] = torch.squeeze(self.s_m2x_nexttime)
 
+
+
         #T-2, T-3, T-4, …, 2, 1, 0
         for t in range(T-2,-1,-1):
             filter_xt = filter_x[:, t]

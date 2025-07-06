@@ -46,7 +46,7 @@ class PsmoothNN(nn.Module):
         self.activation = nn.ReLU()
 
 
-    def forward(self, Sigma_bw, SGain):
+    def forward(self, Sigma_bw, SGain,F=None):
         """
         Forward pass of the P_smooth estimation
         :param Sigma_bw: Smoothed Sigma from RTSNet [m, m]

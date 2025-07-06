@@ -107,7 +107,6 @@ class Pipeline_ERTS:
                 x_out_training_forward = torch.empty(SysModel.m, SysModel.T)
                 x_out_training = torch.empty(SysModel.m, SysModel.T)
 
-
                 if (randomInit):
                     self.model.InitSequence(train_init[n_e], SysModel.T)
                 else:
@@ -135,7 +134,6 @@ class Pipeline_ERTS:
                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T)
                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
-                self.PsmoothNN.start = 0
                 ####compute the P(T)
                 P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)# shape: [1, 1, m²] to [m²]
                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m,SysModel.m))# shape: [m, m]
@@ -193,6 +191,7 @@ class Pipeline_ERTS:
                 for j in range(0, self.N_CV):
                     y_cv = cv_input[j]
                     SysModel.T_test = y_cv.size()[-1]
+
                     x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test)
                     x_out_cv = torch.empty(SysModel.m, SysModel.T_test)
 
@@ -235,11 +234,11 @@ class Pipeline_ERTS:
                     P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)  # [m, m, T_test]
                     dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                     sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-                    self.PsmoothNN.start = 0
                     # Handle initial P-smooth at time T_test
                     P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
                     P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
                     P_smoothed_seq[:, :, SysModel.T_test - 1] = P_matrix  # shape: [m, m]
+
                     # Compute P-smooth for remaining time steps
                     for t in range(SysModel.T_test - 2, -1, -1):
                         sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # [1, 1, m²]
@@ -535,7 +534,7 @@ class Pipeline_ERTS:
         # Load models
         if load_model:
             self.model = torch.load(load_model_path,weights_only=False)
-            self.PsmoothNN = torch.load(load_p_smoothe_model_path,weights_only=False)
+            self.PsmoothNN = torch.load(load_p_smoothe_model_path)
         else:
             self.model = torch.load(path_results + 'best-model.pt',weights_only=False)
             self.PsmoothNN = torch.load(path_results + 'best-psmooth.pt',weights_only=False)
@@ -554,8 +553,10 @@ class Pipeline_ERTS:
         for j in range(0, self.N_T):
             y_mdl_tst = test_input[j]
             SysModel.T_test = y_mdl_tst.size()[-1]
+
             x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test)
             x_out_test = torch.empty(SysModel.m, SysModel.T_test)
+
             if (randomInit):
                 self.model.InitSequence(test_init[j], SysModel.T_test)
             else:
@@ -590,7 +591,6 @@ class Pipeline_ERTS:
             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)
             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
             sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-            self.PsmoothNN.start = 0
             # Handle initial P-smooth at time T_test
             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]

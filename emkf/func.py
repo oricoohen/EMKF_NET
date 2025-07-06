@@ -56,8 +56,8 @@ def compute_A1(x_0, x_t, V,n,T):
     A1 = torch.zeros((n, n), dtype=x_t.dtype, device=x_t.device)
     # print("x_t[:, 0] shape:", x_t[:, 0].shape)
     # print("x_0 shape:", x_0.shape)
-    # print("unsqueezed shapes:", x_t[:, 0].unsqueeze(1).shape, x_0.unsqueeze(0).shape)
-    A1 += x_t[:, 0].unsqueeze(1) @ x_0.T + V[:,:,0]
+    # print("unsqueezed shapes:", x_t[:, 0].unsqueeze(0).shape, x_0.shape)
+    A1 += x_t[:, 0].unsqueeze(1) @ x_0.unsqueeze(0) + V[:,:,0]
     for t in range(1, T):
         A1 += x_t[:, t].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + V[:,:,t]
     return nonsing_simetric(A1)
@@ -74,7 +74,7 @@ def compute_A2(x_0, P_0, x_t, P_t,n,T):
         A2: [n, n] matrix
     """
     # Compute the first term (x_0 * x_0^T + P_0)
-    A2 = x_0 @ x_0.T + P_0
+    A2 = x_0.unsqueeze(1)  @ x_0.unsqueeze(0)  + P_0
     for t in range(1, T):
         A2 += x_t[:, t - 1].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + P_t[:, :, t - 1]
     return nonsing_simetric(A2)
