@@ -82,6 +82,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
     RTS = rts_smoother(SysModel)
     RTS_out = torch.zeros(N_T, m, T)
     P_smooth = torch.zeros(N_T, m, m, T)
+    P_tilde = torch.zeros(N_T, m, m, T)
     V_test = torch.zeros(N_T, m, m, T)
     last_gains = torch.empty(N_T, m, n)
 
@@ -111,10 +112,15 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
 
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
         #    KF.K should have shape (m, n)
+        P_tilde[j] =KF.sigma.clone()
         last_gains[j] = KF.KG.clone()
         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
         RTS_out[j] = RTS.s_x.clone()
-
+        P_smooth[j] = RTS.s_sigma.clone()
+        SGains = RTS.SGains
+        # V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_smooth[j], SGains)
+        V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_tilde[j], SGains)
+        V_test[j] = V_now
 
         
         if(allStates):
@@ -123,10 +129,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x[loc,:], sequence_target[loc,:]).item()
 
 
-        P_smooth[j] = RTS.s_sigma.clone()
-        SGains = RTS.SGains
-        V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_smooth[j], SGains)
-        V_test[j] = V_now
+
 
     end = time.time()
     t = end - start

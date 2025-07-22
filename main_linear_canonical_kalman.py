@@ -4,7 +4,7 @@ import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
-from emkf.main_emkf_func import EMKF_F
+
 
 from Simulations.utils import DataLoader, DataGen
 
@@ -16,7 +16,7 @@ from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
 
-from RTSNet.KalmanNet_nn import KalmanNetNN
+from RTSNet.KalmanNet_nn_new import KalmanNetNN
 from Pipelines.Pipeline_KF import Pipeline_KF as Pipeline_Kalman
 
 
@@ -69,6 +69,7 @@ print("1/r2 [dB]: ", 10 * torch.log10(1/r2[0]))
 print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 
 # True model
+
 Q = q2 * Q_structure
 R = r2 * R_structure
 F = torch.tensor([[1, 0.1],[1, 1]]) # State transition matrix

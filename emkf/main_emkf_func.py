@@ -151,26 +151,29 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
         likelihood_j =[]
         for q in range(max_it):
             #############E STEP rts###############################
+            print('q_iter:', q, 'F_est:', F_est)
             [_,_,_, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
-            likelihood = 0
+            #likelihood = 0
             #############M STEP rts###############################
             F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),m,T,max_it, tol_likelihood, tol_params)
-            #alpha = 0.8/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
+            #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
             alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
+            #likelihood = Ell(H, R, Y_t, X_smooth, P_smooth_t)
+            #print('looglikelihood', likelihood)
+            #likelihood_j.append(likelihood)
 
-            likelihood_j.append(likelihood)
-            print('q_iter:', q, 'F_est:', F_est)
             # Check convergence
             if q > 0:
                 delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
                 if delta_F < tol_params:
                     print(f"Converged on F at iteration {q}")
+                    S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
                     break
         F_matrices.append(F_all_j)
         iterations_list.append(q)
         likelihoods.append(likelihood_j)
-    S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_all_j[-1].unsqueeze(0))
+
 
     return F_matrices, likelihoods, iterations_list

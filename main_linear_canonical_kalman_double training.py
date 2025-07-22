@@ -16,7 +16,7 @@ from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
 
-from RTSNet.KalmanNet_nn import KalmanNetNN
+from RTSNet.KalmanNet_nn_new import KalmanNetNN
 from Pipelines.Pipeline_KF import Pipeline_KF as Pipeline_Kalman
 
 
