@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 from datetime import datetime
 
-from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
+from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F,det
 from emkf.main_emkf_func_AI_no_p import EMKF_F_N
 
 from Simulations.utils import DataLoader, DataGen
@@ -43,12 +43,12 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 2000  # Number of training examples (size of the training dataset).50
+args.N_E = 500  # Number of training examples (size of the training dataset).50
 args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30    # Length of the time series for training and cross-validation sequences.
-args.T_test = 30 # Length of the time series for test sequences.
+args.T_test = 100 # Length of the time series for test sequences.
 
 ### training parameters
 args.n_steps = 100  # Number of training steps or iterations for optimization.
@@ -59,11 +59,11 @@ args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights
 ###################ORI CHANGE
 args_big   = config.general_settings()
 
-args_big.N_E    =  2000       # larger training set
+args_big.N_E    =  500       # larger training set
 args_big.N_CV   =   100
 args_big.N_T    =   100       # test size can stay the same
-args_big.T      =    30
-args_big.T_test =    30
+args_big.T      =    100
+args_big.T_test =    100
 
 args_big.n_steps = 175        # extra epochs for fine-tune
 args_big.n_batch =  30        # maybe different batch size
@@ -80,9 +80,11 @@ print("1/r2 [dB]: ", 10 * torch.log10(1/r2[0]))
 print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 
 # True model
-Q = q2 * Q_structure
-R = r2 * R_structure
-F = torch.tensor([[1, 0.1],[1, 1]]) # State transition matrix
+q2 = 0.01
+r2 =0.1
+Q = q2 * Q_structure*30
+R = r2 * R_structure*30
+F = torch.tensor([[0.999, 0.1],[0, 0.999]]) # State transition matrix
 H = torch.tensor([[1., 1.],
                   [0.25, 1.]])
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
@@ -103,26 +105,12 @@ DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFile
 print("Data Load")
 
 
-if(InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
-   [train_input, train_target, train_init, cv_input, cv_target, cv_init, test_input, test_target, test_init] = torch.load(dataFolderName + dataFileName)
-   [F_train_mat,F_val_mat,F_test_mat] = torch.load(dataFolderName + dataFileName_F)
-   # print("trainset size:",train_target.size())
-   # print("cvset size:",cv_target.size())
-   # print("testset size:",test_target.size())
-elif(LengthIsRandom):
-   [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName)
-   [F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F)
-   ### Check sequence lengths
-   # for sequences in train_target:
-   #    print("trainset size:",sequences.size())
-   # for sequences in test_target:
-   #    print("testset size:",sequences.size())
-else:
-   [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
-   [F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F)
-   print("trainset size:",train_target.size())#(seq,m,T)
-   print("cvset size:",cv_target.size())
-   print("testset size:",test_target.size())
+
+[train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
+[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F)
+print("trainset size:",train_target.size())#(seq,m,T)
+print("cvset size:",cv_target.size())
+print("testset size:",test_target.size())
 
 
 
@@ -193,16 +181,21 @@ sys_model_2.F_test = F_test_mat_2
 
 
 #########change to wrong f option A
-sys_model_2.F_train = change_F(F_train_mat_2)
-sys_model_2.F_valid = change_F(F_val_mat_2)
-sys_model_2.F_test= change_F(F_test_mat_2)
+sys_model_2.F_train = det(F_train_mat_2)
+sys_model_2.F_valid = det(F_val_mat_2)
+sys_model_2.F_test= det(F_test_mat_2)
 sys_model_2.args = args_big
 #########change to wrong f option B
 
-sys_model_2.F_train = rotate_F(F_train_mat_2, i=0,j=1,theta = 0.0587,mult = 1,many=True, randomit=True)
-sys_model_2.F_valid = rotate_F(F_val_mat_2, i=0,j=1,theta = 0.0587,mult = 1,many=True, randomit=True)
-sys_model_2.F_test= rotate_F(F_test_mat_2, i=0,j=1,theta = 0.0587,mult = 1,many=True, randomit=True)
+# sys_model_2.F_train = rotate_F(F_train_mat_2, i=0,j=1,theta = 0.087,mult = 1,many=True, randomit=True)
+# sys_model_2.F_valid = rotate_F(F_val_mat_2, i=0,j=1,theta = 0.087,mult = 1,many=True, randomit=True)
+# sys_model_2.F_test= rotate_F(F_test_mat_2, i=0,j=1,theta = 0.087,mult = 1,many=True, randomit=True)
+
+
+
+
 sys_model_2.args = args_big
+print('just to make suree', sys_model_2.F_test)
 
 
 
@@ -234,8 +227,8 @@ path_results_full_rts = path_results_full+'best-model_no.pt'
 path_results_2_rts = path_results_2+'best-rts_no.pt'
 #####TRAIN GOOD F#####
 print('rtssnet with trueeeeeeee F')
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(
-      sys_model, cv_input, cv_target, train_input, train_target, path_results_full_rts)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(
+#          sys_model, cv_input, cv_target, train_input, train_target, path_results_full_rts)
 
 ### Test Neural Network
 RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=path_results_full_rts)
@@ -250,8 +243,8 @@ RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=p
 RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet with WRONGGGGGGG F')
 # #######TRAIN BAD F########
-[MSE_cv_linear_epoch_2, MSE_cv_dB_epoch_2, MSE_train_linear_epoch_2, MSE_train_dB_epoch_2] = RTSNet_Pipeline.NNTrain(
-     sys_model_2, cv_input_2, cv_target_2, train_input_2, train_target_2, path_results = path_results_2_rts,load_model_path= path_results_full_rts,generate_f=True)
+#[MSE_cv_linear_epoch_2, MSE_cv_dB_epoch_2, MSE_train_linear_epoch_2, MSE_train_dB_epoch_2] = RTSNet_Pipeline.NNTrain(
+#         sys_model_2, cv_input_2, cv_target_2, train_input_2, train_target_2, path_results = path_results_2_rts,load_model_path= path_results_full_rts,generate_f=True)
 
 # ## Test Neural Network
 RTSNet_Pipeline.NNTest_HybridP(sys_model_2, test_input_2, test_target_2, load_model_path=path_results_2_rts)
@@ -271,13 +264,13 @@ for i in range(max_iter):
     shutil.copy2(path_results_2_rts, destination_path_RTS)
 ######START THE EMKF TRAINING##########
 #########change to very wrong f
-sys_model_2.F_train = rotate_F(F_train_mat_2, many=True)
-sys_model_2.F_valid = rotate_F(F_val_mat_2, many=True)
-sys_model_2.F_test= rotate_F(F_test_mat_2, many=True)
+# sys_model_2.F_train = rotate_F(F_train_mat_2,0,1,0.87, many=True,randomit=False)
+# sys_model_2.F_valid = rotate_F(F_val_mat_2,0,1,0.87, many=True,randomit=False)
+# sys_model_2.F_test= rotate_F(F_test_mat_2,0,1,0.87, many=True,randomit=False)
 
 sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
-
+print('start emkfffffffffffffffffff')
 EMKF_F_N(sys_model_2,RTSNet_Pipeline,train_input_2, train_target_2, cv_input_2, cv_target_2,test_input_2,
                                                               test_target_2,model_pathes,max_it=max_iter)
 

@@ -27,7 +27,6 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,n):
         likelihood (torch.Tensor): Log-likelihood per iteration, shape (num_iter+1,)
         iterations (int): Number of EM iterations
     """
-    print('is m1_x_0 = 0 mainemkf_31::::',sys_model.m1x_0)##dehil
     SEQ = X_s.shape[0]
     A_1 = compute_A1(sys_model.m1x_0, X_s, V_s)  # (seq,n, n)
     A_2 = compute_A2(sys_model.m1x_0, sys_model.m2x_0, X_s, P_smooth_s)  # (seq,n, n)
@@ -78,17 +77,24 @@ def EMKF_F_N(sys_model,RTSNet_Pipeline,train_input, train_target, cv_input, cv_t
     F_matrices = []
     F_matrices.append(torch.stack(sys_model.F_test))
     delta_F =[]
-5
+
 
     for q in range(max_it):
         #############E STEP rts###############################
         ######TRAIN RTSNET###############
-        RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results=model_pathes[q], load_model_path=model_pathes[q], generate_f=True)
+        # if q!=0:
+        # # RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results=model_pathes[q], load_model_path=model_pathes[q], generate_f=True)
+        #     F_train,F_valid = RTSNet_Pipeline.NNTrain_with_F(sys_model, cv_input, cv_target, train_input, train_target,
+        #                                path_results=model_pathes[q], load_model_path=model_pathes[q], generate_f=True, beta=0.99)
+        #     sys_model.F_train = F_train
+        #     sys_model.F_test = F_valid
         #####TEST AND PSMOOTH###########
+
         [x_out_tensor,P_smooth_tensor,V_list] = RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=model_pathes[q])
              #############M STEP rts###############################
         F_est = EMKF_F_Mstep(sys_model,x_out_tensor,P_smooth_tensor,V_list,sys_model.m)
-        alpha = 0.2/(q+1)  # 0 < α ≤ 1  (smaller = safer)
+        # alpha = 0.2/(q+1)  # 0 < α ≤ 1  (smaller = safer)
+        alpha = 1
         F_est = (1-alpha) * F_matrices[q] + alpha * F_est
         F_matrices.append(F_est)
         print('q_iter:', q, 'F_est:', F_est)
