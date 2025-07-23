@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import sys
 sys.path.append(r'C:\Users\aurh1\Desktop\כונון L\סיכומים\מיתר\codetocheck\RTSNet_TSP-master')
-from RTSNet.RTSNet_nn import RTSNetNN
+from RTSNet.RTSNet_nn1 import RTSNetNN
 
 class RTSNetNN_multipass(nn.Module):
 

@@ -20,7 +20,7 @@ class KalmanFilter:
 
         self.T = SystemModel.T
         self.T_test = SystemModel.T_test
-   
+
     # Predict
 
     def Predict(self):
@@ -41,7 +41,7 @@ class KalmanFilter:
     # Compute the Kalman Gain
     def KGain(self):
         self.KG = torch.matmul(self.m2x_prior, self.H_T)
-               
+
         self.KG = torch.matmul(self.KG, torch.inverse(self.m2y))
 
     # Innovation
@@ -83,7 +83,7 @@ class KalmanFilter:
 
         self.m1x_posterior = self.m1x_0
         self.m2x_posterior = self.m2x_0
-     
+
         for t in range(0, T):
             yt = torch.squeeze(y[:, t])
             xt,sigmat = self.Update(yt)

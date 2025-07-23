@@ -1,10 +1,10 @@
 """# **Class: System Model for Linear Cases**
 
-1 Store system model parameters: 
-    state transition matrix F, 
-    observation matrix H, 
-    process noise covariance matrix Q, 
-    observation noise covariance matrix R, 
+1 Store system model parameters:
+    state transition matrix F,
+    observation matrix H,
+    process noise covariance matrix Q,
+    observation noise covariance matrix R,
     train&CV dataset sequence length T,
     test dataset sequence length T_test, etc.
 
@@ -13,8 +13,29 @@
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
+import random
 
-def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5): #ori
+def uniform_two_ranges(a: float, b: float):
+    """
+    Draws a single sample that is uniform either in  [a , b]
+    or in [−b , −a]   (each half chosen with 50 % probability).
+
+    Requires  0 ≤ a ≤ b.
+    """
+    assert 0.0 <= a <= b, "`a` must be non-negative and ≤ `b`"
+
+    u = torch.rand(1).item()            # uniform in [0,1)
+    x = a + (b - a) * u                 # now uniform in [a , b]
+
+    if random.random() < 0.5:           # coin flip → positive half
+        return  x                       #  in  [ a ,  b]
+    else:                               # negative half
+        return -x                       #  in [−b , −a]
+
+
+
+
+def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
     """
     Generate a list of random F that looks like(1,0.1,-0.5,1) matrices for a 2D state (position and velocity).
     Args:
@@ -26,16 +47,114 @@ def generate_random_F_matrices(num_F, state_dim=2, delta_t=0.5): #ori
     """
     F_matrices = []
     for _ in range(num_F):
+        # F = torch.tensor([[1., 0.],
+        #                    [0., 1.]])
         F = torch.eye(state_dim)
-        #F[0, 1] = 1+ torch.randn(1).item() * delta_t  # random  velocity structure
-        F[0, 1] = 1   # random  velocity structure
-        F[1, 0] = torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # random
+        # F[1, 0] = 0.1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 0] = 1 + torch.randn(1).item() * delta_t*0.5  # random
+        # F[1, 1] = 1 + torch.randn(1).item() * delta_t*0.5  # Add random coupling
+        # F[0, 1] = 0.1 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
+        # F[1, 0] = 0. + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
+        # F[0, 0] = 0.999 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # random
+        # F[1, 1] = 0.999 + uniform_two_ranges(0.0, 1) * delta_t*0.5  # Add random coupling
+        F = torch.tensor([[0.83, 0.2],
+              [0.2, 0.83]])  # State transition matrix
         F_matrices.append(F)
     return F_matrices
 
+def change_F(F, mult=0.0001, many=True):
+
+    def apply_change(F_single, mult):
+
+        F_single[0, 1] = F_single[0, 1] + torch.randn(1).item()*mult
+        F_single[1, 0] = F_single[1, 0] + torch.randn(1).item()*mult
+        F_single[0, 0] = F_single[0, 0] + torch.randn(1).item()*mult
+        F_single[1, 1] = F_single[1, 1] + torch.randn(1).item()*mult
+
+        return F_single
+
+    if not many:
+        return apply_change(F, mult)
+    else:
+        LIST_F = []
+        for F_i in F:
+            F_i2=apply_change(F_i,mult)
+            LIST_F.append(F_i2)
+            #delta = (F_i- F_i2).norm()
+            #print("Deviation:", delta.item())
+
+        return LIST_F
 
 
-def rotate_F(F, i=0, j=1, theta=0.2,mult=1, many=True, randomit=True):
+
+def det(F, mult=0.0001, many=True):
+
+    def apply_change1(F_single, mult):
+
+        F_single = torch.tensor([[0.83, 0.1],
+                          [0., 0.999]])
+        F_single[0, 1] = F_single[0, 1] + uniform_two_ranges(0.0, 1) * mult * 0.5  # Add random coupling
+        F_single[1, 0] = F_single[1, 0] + uniform_two_ranges(0.0, 1) * mult * 0.5  # Add random coupling
+        F_single[0, 0] = F_single[0, 0] + uniform_two_ranges(0.0, 1) * mult * 0.5  # Add random coupling
+        F_single[1, 1] = F_single[1, 1] + uniform_two_ranges(0.0, 1) * mult * 0.5  # Add random coupling
+
+        return F_single
+
+    LIST_F = []
+    for F_i in F:
+        F_i2=apply_change1(F_i,mult)
+        LIST_F.append(F_i2)
+
+    return LIST_F
+#
+# def rotate_F(F, i=0, j=1, theta=0.78, many=True, randomit=True):
+#     """
+#     Apply Givens rotation to matrix F (or list of matrices) in (i,j) plane.
+#
+#     Args:
+#         F (torch.Tensor or list of torch.Tensor): n×n matrix or list of such.
+#         i, j (int): Indices of rotation plane.
+#         theta (float): Max rotation angle in radians.
+#         many (bool): If True, rotate each matrix in list F.
+#         randomit (bool): If True, use random angle in [0, theta*pi].
+#
+#     Returns:
+#         torch.Tensor or list of torch.Tensor: Rotated matrix/matrices.
+#     """
+#     def apply_rotation(F_single, theta, i, j):
+#         n = F_single.shape[0]
+#         R = torch.eye(n, dtype=F_single.dtype)
+#         R[i, i] = torch.cos(theta)
+#         R[i, j] = -torch.sin(theta)
+#         R[j, i] = torch.sin(theta)
+#         R[j, j] = torch.cos(theta)
+#
+#         return R @ F_single@ R.T
+#
+#     if not many:
+#         if randomit:
+#             theta = uniform_two_ranges(0.0, 1) * theta * torch.pi
+#             theta = torch.tensor(theta)
+#         return apply_rotation(F, theta, i, j)
+#     else:
+#         rotated_list = []
+#         for F_i in F:
+#             if randomit:
+#                 # angle = uniform_two_ranges(0.0, 1) * 0.78 #45 degrees
+#                 angle = 0.78
+#                 angle = torch.tensor(angle)
+#             else:
+#                 angle = torch.tensor(theta)
+#
+#             rotated_list.append(apply_rotation(F_i, angle, i, j))
+#             delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
+#             print("Deviation:", delta.item())
+#
+#         return torch.stack(rotated_list)
+
+
+def rotate_F(F, i=0, j=1, theta=0.78, many=True, randomit=True):
     """
     Apply Givens rotation to matrix F (or list of matrices) in (i,j) plane.
 
@@ -57,28 +176,17 @@ def rotate_F(F, i=0, j=1, theta=0.2,mult=1, many=True, randomit=True):
         R[j, i] = torch.sin(theta)
         R[j, j] = torch.cos(theta)
 
-        return R @ F_single*mult @ R.T
+        return R @ F_single@ R.T
 
-    if not many:
-        if randomit:
-            theta = torch.rand(1) * theta * torch.pi
+    rotated_list = []
+    for F_i in F:
+        angle = torch.tensor(theta)
 
-        return apply_rotation(F, theta, i, j)
-    else:
-        rotated_list = []
-        for F_i in F:
-            if randomit:
-                angle = torch.rand(1) * theta * torch.pi
+        rotated_list.append(apply_rotation(F_i, angle, i, j))
+        delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
+        print("Deviation:", delta.item())
 
-            else:
-                angle = torch.tensor(theta)
-
-            rotated_list.append(apply_rotation(F_i, angle, i, j))
-            delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
-            print("Deviation:", delta.item())
-
-        return torch.stack(rotated_list)
-
+    return torch.stack(rotated_list)
 
 
 
@@ -131,15 +239,15 @@ class SystemModel:
             self.prior_S = torch.eye(self.n)
         else:
             self.prior_S = prior_S
-        
+
 
     def f(self, x):
         # print(self.F,'oiriiiiiiiii')
         return torch.matmul(self.F, x)
-    
+
     def h(self, x):
         return torch.matmul(self.H, x)
-        
+
     #####################
     ### Init Sequence ###
     #####################
@@ -234,7 +342,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, randomInit=False, randomLength=False,F_gen=None):
+    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -255,8 +363,8 @@ class SystemModel:
         ### Generate Examples
         initConditions = self.m1x_0
 
-        F_matrices = generate_random_F_matrices(size//10 +1)
-
+        F_matrices = generate_random_F_matrices(size//10 +1,delta)
+        #print('11111111111111', F_matrices) dehil
 
 
 

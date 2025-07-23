@@ -4,7 +4,7 @@ import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
-# from emkf.main_emkf_func import EMKF_F
+
 
 from Simulations.utils import DataLoader, DataGen
 
@@ -15,6 +15,10 @@ from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
+
+from RTSNet.KalmanNet_nn_new import KalmanNetNN
+from Pipelines.Pipeline_KF import Pipeline_KF as Pipeline_Kalman
+
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
@@ -47,12 +51,12 @@ args.N_E = 2000  # Number of training examples (size of the training dataset).50
 args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 50    # Length of the time series for training and cross-validation sequences.
+args.T = 30    # Length of the time series for training and cross-validation sequences.
 args.T_test = 30 # Length of the time series for test sequences.
 
 ### training parameters
-args.n_steps = 100  # Number of training steps or iterations for optimization.
-args.n_batch = 10    # Batch size: the number of sequences processed at each training step.10
+args.n_steps = 400  # Number of training steps or iterations ddfor optimization.
+args.n_batch = 50    # Batch size: the number of sequences processed at each training step.10
 args.lr = 1e-4       # Learning rate: controls how quickly the model updates during training.
 args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
 
@@ -65,13 +69,15 @@ print("1/r2 [dB]: ", 10 * torch.log10(1/r2[0]))
 print("1/q2 [dB]: ", 10 * torch.log10(1/q2[0]))
 
 # True model
+
 Q = q2 * Q_structure
 R = r2 * R_structure
 F = torch.tensor([[1, 0.1],[1, 1]]) # State transition matrix
 H = torch.tensor([[1., 1.],
                   [0.25, 1.]])
-sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
+
 SystemModel.F_gen = True
+sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
 sys_model.InitSequence(m1_0, m2_0)
 print("State Evolution Matrix:",F)
 print("Observation Matrix:",H)
@@ -83,7 +89,7 @@ dataFolderName = 'Simulations/Linear_canonical/data/v0dB' + '/'
 dataFileName = '2x2_rq3030_T100.pt'
 dataFileName_F = '2x2_F'
 print("Start Data Gen")
-DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta =0.5, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
 print("Data Load")
 
 
@@ -107,7 +113,6 @@ else:
    print("trainset size:",train_target.size())
    print("cvset size:",cv_target.size())
    print("testset size:",test_target.size())
-
 
 
 sys_model.F_train = F_train_mat
@@ -157,9 +162,9 @@ else:
 
 print("Evaluate RTS Smoother True")
 if InitIsRandom_test:
-   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model, test_input, test_target,F = F_test_mat, randomInit = True,test_init=test_init)
 else:
-    [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model, test_input, test_target, F=F_test_mat)
+   [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 PlotfolderName = 'Smoothers' + '/'
 ComparedmodelName = 'Dataset'
@@ -173,47 +178,84 @@ Plot.NNPlot_Hist(MSE_KF_linear_arr, MSE_RTS_linear_arr, MSE_obs_linear_arr)
 
 
 
+
 #######################
-### RTSNet Pipeline ###
+### KalmanNet Pipeline ###
 #######################
 
-### RTSNet with full info ##############################################################################################
-# Build Neural Network
-print("RTSNet with full model info")
-RTSNet_model = RTSNetNN()
-RTSNet_model.NNBuild(sys_model, args)
-print("Number of trainable parameters for RTSNet:",sum(p.numel() for p in RTSNet_model.parameters() if p.requires_grad))
-## Train Neural Network
-RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
-RTSNet_Pipeline.setssModel(sys_model)
-RTSNet_Pipeline.setModel(RTSNet_model)
-RTSNet_Pipeline.setTrainingParams(args)
-#
-if (InitIsRandom_train or InitIsRandom_cv or InitIsRandom_test):
-   [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True, randomInit = True, cv_init=cv_init,train_init=train_init)
-   [MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=True,
-                 randomInit=True, cv_init=None, train_init=None)
-   ## Test Neural Network
-   [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True,randomInit=True,test_init=test_init)
+### KalmanNet with full info ##############################################################################################
+print('KalmanNet started')
+KalmanNet_model = KalmanNetNN()
+KalmanNet_model.NNBuild(sys_model, args)
+KalmanNet_Pipeline = Pipeline_Kalman(strTime, "RTSNet", "KalmanNet")
+KalmanNet_Pipeline.setssModel(sys_model)
+KalmanNet_Pipeline.setModel(KalmanNet_model)
+KalmanNet_Pipeline.setTrainingParams(args)
 
-else:#e
-    #[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full,True)
-    #[MSE_train_p_smooth_dB_epoch,MSE_cv_p_smooth_dB_epoch] = RTSNet_Pipeline.P_smooth_Train(sys_model, cv_input, cv_target, train_input, train_target, path_results_full, generate_f=None,randomInit=False, cv_init=None, train_init=None)
-    # ## Test Neural Network
-    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg,rtsnet_out,RunTime,P_smooth_list, V_list,K,MSE_test_p_smooth_dB_avg,MSE_test_p_smooth_std] = RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full,True)
 
-RTSNet_Pipeline.save()
 
-# MSE_KF_dB_avg_true = MSE_KF_dB_avg          # KF  (true F)
-# MSE_RTS_dB_avg_true = MSE_RTS_dB_avg         # E/RTS (true F)
-# MSE_test_RTSNet_dB_avg_true = MSE_test_dB_avg
-# MSE_cv_RTSNet_dB_avg_true = MSE_cv_dB_epoch
-# MSE_train_RTSNet_dB_avg_true = MSE_train_dB_epoch
-# MSE_test_p_smooth_dB_avg_true = MSE_test_p_smooth_dB_avg
-# MSE_std_test_p_smooth_dB_true= MSE_test_p_smooth_std
-# MSE_cv_p_smooth_dB_avg_true = MSE_cv_p_smooth_dB_epoch
-# MSE_train_p_smooth_dB_avg_true = MSE_train_p_smooth_dB_epoch
+#KalmanNet_Pipeline.NNTrain(args.N_E,train_input,train_target,args.N_CV,cv_input,cv_target,True)
+print("KalmanNet test11111111111111")
+[kl_MSE_test_linear_arr, kl_MSE_test_linear_avg, kl_MSE_test_dB_avg, kl_x_out_test] = KalmanNet_Pipeline.NNTest(args.N_T,test_input,test_target,None,True)
 
+##########wrong f
+sys_model_wrongF = SystemModel(F, Q, H, R, args.T, args.T_test)
+sys_model_wrongF.InitSequence(m1_0, m2_0)
+
+sys_model_wrongF.F_test= change_F(F_test_mat,many=True)
+
+print("KalmanNet wrotng test3333333333333333")
+[kl_MSE_test_linear_arr, kl_MSE_test_linear_avg, kl_MSE_test_dB_avg, kl_x_out_test] = KalmanNet_Pipeline.NNTest(args.N_T,test_input,test_target,sys_model_wrongF,True)
+
+
+# sys_model_wrongF.F_test= rotate_F(F_test_mat,theta=0.03*torch.pi,mult=1.,many=True)
+# print("KalmanNet test33333333333333333333333333333333")
+# [kl_MSE_test_linear_arr, kl_MSE_test_linear_avg, kl_MSE_test_dB_avg, kl_x_out_test] = KalmanNet_Pipeline.NNTest(args.N_T,test_input,test_target,sys_model_wrongF,True)
+
+
+sys_model_2 = SystemModel(F, Q, H, R, args.T, args.T_test)
+sys_model_2.InitSequence(m1_0, m2_0)
+######create new data
+
+
+dataFolderName_2 = 'Simulations/Linear_canonical/data/v0dB' + '/'
+dataFileName_2 = '2x2_rq3030_T100_2.pt'
+dataFileName_F_2 = '2x2_F_2'
+print("Start Data Gen")
+DataGen(args, sys_model_2, dataFolderName_2 + dataFileName_2,dataFolderName_2 + dataFileName_F_2,delta = 1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+print("Data Load")
+
+
+[train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName_2 + dataFileName_2)
+[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName_2 + dataFileName_F_2)
+sys_model_2.F_train = F_train_mat
+sys_model_2.F_valid = F_val_mat
+sys_model_2.F_test = F_test_mat
+
+
+print("KalmanNet true test2222222222222222")
+[kl_MSE_test_linear_arr, kl_MSE_test_linear_avg, kl_MSE_test_dB_avg, kl_x_out_test] = KalmanNet_Pipeline.NNTest(args.N_T,test_input,test_target,sys_model_2,True)
+
+
+
+
+
+KalmanNet_Pipeline.save()
+
+
+
+
+########sumeup
+MSE_KF_dB_avg_true = MSE_KF_dB_avg          # KF  (true F)
+MSE_RTS_dB_avg_true = MSE_RTS_dB_avg         # E/RTS (true F)
+MSE_test_RTSNet_dB_avg_true = MSE_test_dB_avg
+MSE_cv_RTSNet_dB_avg_true = MSE_cv_dB_epoch
+MSE_train_RTSNet_dB_avg_true = MSE_train_dB_epoch
+MSE_test_p_smooth_dB_avg_true = MSE_test_p_smooth_dB_avg
+MSE_std_test_p_smooth_dB_true= MSE_test_p_smooth_std
+MSE_cv_p_smooth_dB_avg_true = MSE_cv_p_smooth_dB_epoch
+MSE_train_p_smooth_dB_avg_true = MSE_train_p_smooth_dB_epoch
+##############
 
 ### RTSNet with wrong F info ##############################################################################################
 # Build Neural Network
@@ -222,7 +264,8 @@ RTSNet_Pipeline.save()
 sys_model_wrongF = SystemModel(F, Q, H, R, args.T, args.T_test)
 sys_model_wrongF.InitSequence(m1_0, m2_0)
 
-# # Wrong F
+
+# Wrong F
 # sys_model_wrongF.F_train = rotate_F(F_train_mat,theta=0.03*torch.pi,mult=1.,many=True)
 # sys_model_wrongF.F_valid = rotate_F(F_val_mat,theta=0.03*torch.pi,mult=1.,many=True)
 # sys_model_wrongF.F_test= rotate_F(F_test_mat,theta=0.03*torch.pi,mult=1.,many=True)
@@ -232,7 +275,8 @@ sys_model_wrongF.F_valid = change_F(F_val_mat,many=True)
 sys_model_wrongF.F_test= change_F(F_test_mat,many=True)
 
 
-#sys_model_wrongF.F_test = [torch.tensor([[10., 0.],[20., 0.]]) for _ in range(len(F_test_mat))]
+
+# sys_model_wrongF.F_test = [torch.tensor([[10., 0.],[20., 0.]]) for _ in range(len(F_test_mat))]
 
 # Assume F_train_mat is a tensor of shape [N, m, m]
 # Replace all F matrices with zeros of same shape
@@ -252,9 +296,17 @@ sys_model_wrongF.F_test= change_F(F_test_mat,many=True)
 
 [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg] = KFTest(args, sys_model_wrongF, test_input, test_target,F =sys_model_wrongF.F_test)
 
-[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,_,_] = S_Test(sys_model_wrongF, test_input, test_target, F=sys_model_wrongF.F_test)
+[MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg2, RTS_out] = S_Test(sys_model_wrongF, test_input, test_target,F = sys_model_wrongF.F_test)
 print('oriiiiiiiii wrong',MSE_RTS_dB_avg2)
 print("Zero F example:\n", sys_model_wrongF.F_test[0])
+
+
+print(d)
+
+
+
+
+
 
 
 
@@ -288,15 +340,15 @@ RTSNet_Pipeline.save()
 
 
 
-MSE_KF_dB_avg_wrong = MSE_KF_dB_avg          # KF  (true F)
-MSE_RTS_dB_avg_wrong = MSE_RTS_dB_avg         # E/RTS (true F)
-MSE_test_RTSNet_dB_avg_wrong = MSE_test_dB_avg
-MSE_cv_RTSNet_dB_avg_wrong = MSE_cv_dB_epoch
-MSE_train_RTSNet_dB_avg_wrong = MSE_train_dB_epoch
-MSE_test_p_smooth_dB_avg_wrong = MSE_test_p_smooth_dB_avg
-MSE_std_test_p_smooth_dB_wrong= MSE_test_p_smooth_std
-MSE_cv_p_smooth_dB_avg_wrong = MSE_cv_p_smooth_dB_epoch
-MSE_train_p_smooth_dB_avg_wrong = MSE_train_p_smooth_dB_epoch
+# MSE_KF_dB_avg_wrong = MSE_KF_dB_avg          # KF  (true F)
+# MSE_RTS_dB_avg_wrong = MSE_RTS_dB_avg         # E/RTS (true F)
+# MSE_test_RTSNet_dB_avg_wrong = MSE_test_dB_avg
+# MSE_cv_RTSNet_dB_avg_wrong = MSE_cv_dB_epoch
+# MSE_train_RTSNet_dB_avg_wrong = MSE_train_dB_epoch
+# MSE_test_p_smooth_dB_avg_wrong = MSE_test_p_smooth_dB_avg
+# MSE_std_test_p_smooth_dB_wrong= MSE_test_p_smooth_std
+# MSE_cv_p_smooth_dB_avg_wrong = MSE_cv_p_smooth_dB_epoch
+# MSE_train_p_smooth_dB_avg_wrong = MSE_train_p_smooth_dB_epoch
 
 print('emkf in the pipeline')
 #####do emkf###############
