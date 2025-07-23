@@ -35,9 +35,10 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=20, 
     A_1 = compute_A1(x_0, X_s, V_s,n,T)  # (n, n)
     A_2 = compute_A2(x_0, P_0, X_s, P_smooth_s,n,T)  # (n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
-    eps = 1e-4 * torch.eye(n, device=A_2.device)
-    A_2inv = torch.linalg.pinv(A_2+eps) ####istead of solving linlag we will solve the equation
-    F_fin = A_1 @ A_2inv
+    #eps = 1e-4 * torch.eye(n, device=A_2.device)
+    # A_2inv = torch.linalg.pinv(A_2+eps) ####istead of solving linlag we will solve the equation
+    # F_fin = A_1 @ A_2inv
+    F_fin = torch.linalg.solve(A_2.T, A_1.T).T
     # print('f_i shape',F_i.shape)
     return F_fin
 
@@ -144,6 +145,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
     for j in range(len(X)):
         index = j // 10
         F_est = F_0_matrices[index]
+
         Y_t = Y[j]
         X_t = X[j]
         F_all_j = []
@@ -165,12 +167,12 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
             #likelihood_j.append(likelihood)
 
             # Check convergence
-            if q > 0:
-                delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
-                if delta_F < tol_params:
-                    print(f"Converged on F at iteration {q}")
-                    S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
-                    break
+            # if q > 0:
+            #     delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
+            #     if delta_F < tol_params:
+            #         print(f"Converged on F at iteration {q}")
+            #         S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
+            #         break
         F_matrices.append(F_all_j)
         iterations_list.append(q)
         likelihoods.append(likelihood_j)

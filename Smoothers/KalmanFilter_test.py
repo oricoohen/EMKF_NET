@@ -3,7 +3,7 @@ import torch.nn as nn
 import time
 from Smoothers.Linear_KF import KalmanFilter
 
-def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, randomInit = False, test_init=None):
+def KFTest(args, SysModel, test_input, test_target,F =True, allStates=True, randomInit = False, test_init=None):
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
 

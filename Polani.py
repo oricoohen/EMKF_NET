@@ -760,7 +760,7 @@ print(f"Lambda = {L_sim2}")
 x_hat_minus_sim2, P_minus_sim2, K_sim2, x_hat_sim2, P_sim2 = KalmanFilter(F_sim2, Q_sim2, H_sim2, R_sim2, z_sim2,
                                                                           xi_sim2, L_sim2)
 S_sim2, x_tilde_sim2, P_tilde_sim2 = KalmanSmoother(F_sim2, x_hat_minus_sim2, P_minus_sim2, x_hat_sim2, P_sim2)
-
+print('ori look')
 for i in range(n):
     print(mean_squared_error(x_sim2[:, i], x_hat_sim2[:, i]))
 
@@ -791,7 +791,7 @@ for i in range(iter):
     MLE_sim2 = EMKF(F_0_sim2, Q_0_sim2, H_0_sim2, R_0_sim2, z_sim2, xi_0_sim2, L_0_sim2,em_vars=["F"])
 
     it = MLE_sim2[7]
-    print(it)
+    print('iter',it)
     F_MLE_sim2 = MLE_sim2[0][it]
     Q_MLE_sim2 = MLE_sim2[1][it]
     H_MLE_sim2 = MLE_sim2[2][it]

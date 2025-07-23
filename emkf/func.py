@@ -60,7 +60,8 @@ def compute_A1(x_0, x_t, V,n,T):
     A1 += x_t[:, 0].unsqueeze(1) @ x_0.unsqueeze(0) + V[:,:,0]
     for t in range(1, T):
         A1 += x_t[:, t].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + V[:,:,t]
-    return nonsing_simetric(A1)
+    #nonsing_simetric(A1)
+    return A1
 
 def compute_A2(x_0, P_0, x_t, P_t,n,T):
     """
@@ -77,7 +78,8 @@ def compute_A2(x_0, P_0, x_t, P_t,n,T):
     A2 = x_0.unsqueeze(1)  @ x_0.unsqueeze(0)  + P_0
     for t in range(1, T):
         A2 += x_t[:, t - 1].unsqueeze(1) @ x_t[:, t - 1].unsqueeze(0) + P_t[:, :, t - 1]
-    return nonsing_simetric(A2)
+    #nonsing_simetric(A2)
+    return A2
 
 
 
