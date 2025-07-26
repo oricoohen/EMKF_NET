@@ -43,6 +43,8 @@ def Ell(H, R, y, x, P):
 
 
 
+
+
 def compute_A1(x_0, x_t, V):
     """
     Computes A1 = sum_t(x_t x_{t-1}^T + V_t_tminus1)
@@ -61,7 +63,7 @@ def compute_A1(x_0, x_t, V):
         A1[seq,:,:] += x_t[seq,:, 0].unsqueeze(1) @ x_0.T + V[seq][:,:,0]
         for t in range(1, T):
             A1[seq,:,:] += x_t[seq,:, t].unsqueeze(1) @ x_t[seq,:, t - 1].unsqueeze(0) + V[seq][:,:,t]
-        A1[seq,:,:] = nonsing_simetric(A1[seq,:,:])
+        #A1[seq,:,:] = nonsing_simetric(A1[seq,:,:])
     return A1
 
 def compute_A2(x_0, P_0, x_t, P_t):
@@ -90,9 +92,8 @@ def compute_A2(x_0, P_0, x_t, P_t):
             x_t_minus_1 = x_t[seq,:, t].unsqueeze(1)  # select state at t, which corresponds to x_{t} in sum
             P_t_minus_1 = P_t[seq,:, :, t]  # select covariance at t, which corresponds to P_{t} in sum
             A2[seq,:,:] += (x_t_minus_1 @ x_t_minus_1.T) + P_t_minus_1
-        A2[seq,:,:] = nonsing_simetric(A2[seq,:,:])
+        #A2[seq,:,:] = nonsing_simetric(A2[seq,:,:])
     return A2
-
 def compute_A3(x_t, P_t):
     """
     Computes A3 = sum_t(x_t x_t^T + P_t)

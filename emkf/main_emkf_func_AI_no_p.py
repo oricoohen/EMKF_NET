@@ -32,8 +32,13 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,n):
     A_2 = compute_A2(sys_model.m1x_0, sys_model.m2x_0, X_s, P_smooth_s)  # (seq,n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
     eps = 1e-4 * torch.eye(n, device=A_2.device)
-    F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2 + eps)
+    A_2 = A_2 + eps
+    #F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
 
+    F_estimates_tensor = torch.zeros_like(A_1)
+    for s in range(SEQ):
+        # solve A2_reg[s] @ X = A1[s]  =>  X = A2_reg[s]^{-1} @ A1[s]
+        F_estimates_tensor[s] = torch.linalg.solve(A_2[s].T, A_1[s].T).T
     averaged_blocks_list = []
     # 2. Loop through the F_estimates_tensor in steps of 10.
     for i in range(0, SEQ, 10):
@@ -47,6 +52,75 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,n):
     block_averages = torch.stack(averaged_blocks_list)
 
     return block_averages
+
+
+
+# def EMKF_F_Mstep(sys_model, X_s, P_smooth_s, V_s, n, block_size=10, eps=1e-6):
+#     """
+#     X_s        : [S, n, T]          smoothed states
+#     P_smooth_s : [S, n, n, T]        smoothed covariances
+#     V_s        : [S, n, n, T]        lag-1 cross covariances
+#     n          : state dimension
+#     block_size : how many sequences share the same F (e.g. 10)
+#     """
+#     S, n_chk, T = X_s.shape
+#     assert n_chk == n
+#
+#     F_each_seq = torch.zeros(S, n, n, device=X_s.device)
+#     V_s = torch.stack(V_s)
+#     for s in range(S):
+#         A1 = torch.zeros(n, n, device=X_s.device)
+#         A2 = torch.zeros(n, n, device=X_s.device)
+#         # sum over t = 1..T-1
+#         for t in range(1, T):
+#             x_t   = X_s[s, :, t]      # [n]
+#             x_tm1 = X_s[s, :, t-1]    # [n]
+#
+#             # add V_t
+#             A1 += V_s[s, :, :, t]
+#             # add x_t x_{t-1}^T
+#             A1 += torch.outer(x_t, x_tm1)
+#
+#             # add P_{t-1}
+#             A2 += P_smooth_s[s, :, :, t-1]
+#             # add x_{t-1} x_{t-1}^T
+#             A2 += torch.outer(x_tm1, x_tm1)
+#
+#                 # regularize and solve
+#         A2 = A2 + eps * torch.eye(n, device=X_s.device)
+#         F_each_seq[s] = torch.linalg.solve(A2.T, A1.T).T
+#         # average every block_size sequences
+#
+#     blocks = []
+#     for i in range(0, S, block_size):
+#         # take the next up to block_size estimates
+#         chunk = F_each_seq[i: i + block_size]  # shape [<=block_size, n, n]
+#         blocks.append(chunk.mean(dim=0))  # average over that chunk
+#         # blocks.append(F_each_seq[i])
+#
+#
+#     F_blocks = torch.stack(blocks)  # shape [num_blocks, n, n]
+#     return F_blocks
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -78,12 +78,12 @@ class Pipeline_ERTS:
         self.PsmoothNN.train()  # Set P-smooth network to train mode
         # Preallocate arrays for logging training performance
 
-        self.MSE_train_linear_epoch = torch.empty([self.N_steps],requires_grad= True)
-        self.MSE_train_dB_epoch = torch.empty([self.N_steps],requires_grad= True)
+        self.MSE_train_linear_epoch = torch.empty([self.N_steps])
+        self.MSE_train_dB_epoch = torch.empty([self.N_steps])
         self.MSE_cv_idx_opt = 0
         self.MSE_cv_dB_opt = 1000
-        self.MSE_cv_linear_epoch = torch.empty([self.N_steps],requires_grad= True)
-        self.MSE_cv_dB_epoch = torch.empty([self.N_steps],requires_grad= True)
+        self.MSE_cv_linear_epoch = torch.empty([self.N_steps])
+        self.MSE_cv_dB_epoch = torch.empty([self.N_steps])
         ##############
         ### Epochs ###
         ##############
@@ -110,10 +110,11 @@ class Pipeline_ERTS:
                 y_training = train_input[n_e]
                 SysModel.T = y_training.size()[-1]
 
+                self.model.init_hidden()
                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
 
-                x_out_training_forward = torch.empty(SysModel.m, SysModel.T,requires_grad= True)
-                x_out_training = torch.empty(SysModel.m, SysModel.T,requires_grad= True)
+                x_out_training_forward = torch.empty(SysModel.m, SysModel.T)
+                x_out_training = torch.empty(SysModel.m, SysModel.T)
                 ########add changes to compute P and S
                 #####compute P ori
                 self.model.sigma_list = []  # is added in every step_KGain_est(self, y) [1, 1, m²]
@@ -134,7 +135,7 @@ class Pipeline_ERTS:
                                                       x_out_training_forward[:, t + 1], x_out_training[:, t + 2])
                     self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
                 # ---- Handle initial smoothed P at time T ----
-                P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T,requires_grad= True)
+                P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T)
                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
                 self.PsmoothNN.start = 0
@@ -159,9 +160,9 @@ class Pipeline_ERTS:
                 # Compute P-smooth loss using PsmoothNN's compute_loss method
                 # Detach x_out_training to prevent gradient flow to RTSNet
                 #oprion 1
-                #psmooth_loss = self.PsmoothNN.compute_loss(P_smoothed_seq, train_target[n_e], x_out_training.detach())
+                psmooth_loss = self.PsmoothNN.compute_loss(P_smoothed_seq, train_target[n_e], x_out_training.detach())
                 #option 2
-                psmooth_loss = self.compute_gaussian_loss1(P_smoothed_seq, train_target[n_e], x_out_training.detach())
+                #psmooth_loss = self.compute_gaussian_loss1(P_smoothed_seq, train_target[n_e], x_out_training.detach())
 
                 # Accumulate losses
                 Batch_Psmooth_LOSS_sum += psmooth_loss
@@ -181,10 +182,10 @@ class Pipeline_ERTS:
             Batch_Psmooth_LOSS_mean.backward()
             # right after Batch_Psmooth_LOSS_mean.backward()
             total_grad = 0.0
-            for p in self.PsmoothNN.parameters():
-                if p.grad is not None:
-                    total_grad += p.grad.norm().item()
-            print(f"Epoch {ti:03d} – gradient L2-norm on PsmoothNN = {total_grad:.4e}")
+            # for p in self.PsmoothNN.parameters():
+            #     if p.grad is not None:
+            #         total_grad += p.grad.norm().item()
+            # print(f"Epoch {ti:03d} – gradient L2-norm on PsmoothNN = {total_grad:.4e}")
             self.PsmoothNN_optimizer.step()
 
 
@@ -213,9 +214,8 @@ class Pipeline_ERTS:
                         self.model.update_F(SysModel.F)
                         # self.PsmoothNN.update_F(SysModel.F)
 
-
-
-                    self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
+                    self.model.init_hidden()
+                    self.model.InitSequence(SysModel.m1x_0, SysModel.T)
 
                     # Forward pass and compute P-smooth
                     # Initialize lists to store intermediate values
@@ -258,9 +258,9 @@ class Pipeline_ERTS:
 
                     # Compute P-smooth validation loss
                     #option 1
-                    #MSE_cv_psmooth_batch[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, cv_target[j], x_out_cv)  # Scalar
+                    MSE_cv_psmooth_batch[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, cv_target[j], x_out_cv)  # Scalar
                     #option 2
-                    MSE_cv_psmooth_batch[j] = self.compute_gaussian_loss1(P_smoothed_seq, cv_target[j], x_out_cv)
+                    #MSE_cv_psmooth_batch[j] = self.compute_gaussian_loss1(P_smoothed_seq, cv_target[j], x_out_cv)
                 # Average
                 self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_psmooth_batch)
                 self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
@@ -1075,9 +1075,9 @@ class Pipeline_ERTS:
 
             # Compute P-smooth loss
             #option 1
-            #self.MSE_test_psmooth_arr[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, test_target[j], x_out_test).item()
+            self.MSE_test_psmooth_arr[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, test_target[j], x_out_test).item()
             #option 2
-            self.MSE_test_psmooth_arr[j] = self.compute_gaussian_loss1(P_smoothed_seq, test_target[j], x_out_test).item()
+            #self.MSE_test_psmooth_arr[j] = self.compute_gaussian_loss1(P_smoothed_seq, test_target[j], x_out_test).item()
 
 
             x_out_list.append(x_out_test)
@@ -1115,6 +1115,9 @@ class Pipeline_ERTS:
         print(str, self.MSE_test_psmooth_std, "[dB]")
         # Print Run Time
         print("Inference Time:", t)
+
+
+
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, torch.stack(P_smooth_list), V_list, self.model.K_T_list,
                 self.MSE_test_psmooth_dB_avg, self.MSE_test_psmooth_std]
@@ -1240,6 +1243,8 @@ class Pipeline_ERTS:
         self.MSE_test_dB_avg = 10 * torch.log10(self.MSE_test_linear_avg)
         print(f"Hybrid RTSNet - MSE Test: {self.MSE_test_dB_avg:.4f} [dB]")
 
+
+        #
         # Return the full tensors of results
         return torch.stack(x_out_list), torch.stack(P_smooth_list_analytical), V_list
 
@@ -1405,7 +1410,7 @@ class Pipeline_ERTS:
                 #psmooth_loss = self.compute_gaussian_loss1(P_smoothed_seq, train_target[n_e], x_out_training)
                 # Combine them into a total loss
                 # beta_change = beta/(ti/5+1)
-                beta_change =0.8
+                beta_change =0.6
                 total_loss = beta_change*rtsnet_loss + (1-beta_change)* psmooth_loss
                 # Accumulate for logging
                 Batch_RTS_LOSS_sum += rtsnet_loss
@@ -1418,16 +1423,15 @@ class Pipeline_ERTS:
             RTSNET_LOSS_mean = Batch_RTS_LOSS_sum / self.N_B
             Psmooth_LOSS_mean = Batch_Psmooth_LOSS_sum / self.N_B
             F_loss_mean = torch.stack(F_loss_batch).mean()
-            Total_LOSS_mean = Total_LOSS_mean*0.8 +F_loss_mean*0.2
+            Total_LOSS_mean = Total_LOSS_mean*1 +F_loss_mean*0
             print('F_loss is:', F_loss_mean)
             # Backward pass on the combined loss
-            Total_LOSS_mean.backward()
-            bach_to_p = Psmooth_LOSS_mean*0.3 +0.8*RTSNET_LOSS_mean + 0.8*F_loss_mean
-            bach_to_p.backward()
+            Total_LOSS_mean.backward(retain_graph=True)
             # Clip gradients and step both optimizers
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
-
+            # bach_to_p = Psmooth_LOSS_mean
+            # bach_to_p.backward()
             torch.nn.utils.clip_grad_norm_(self.PsmoothNN.parameters(), max_norm=1.0)
             self.PsmoothNN_optimizer.step()
 
@@ -1528,7 +1532,7 @@ class Pipeline_ERTS:
                     CV_Total_LOSS_sum += beta_change*self.loss_fn(x_out_cv, cv_target[j]).item() + (1 - beta_change)* psmooth_loss
 
                 f_loss = torch.stack(F_loss_batch_cv).mean()
-                CV_Total_LOSS_sum = 0.5 * CV_Total_LOSS_sum / self.N_CV + 0.5*f_loss
+                CV_Total_LOSS_sum = 0.5 * CV_Total_LOSS_sum / self.N_CV + 0*f_loss
                 self.MSE_cv_rts_dB_epoch[ti] = 10 * torch.log10(torch.tensor(CV_RTS_LOSS_sum / self.N_CV))
                 self.MSE_cv_psmooth_dB_epoch[ti] = 10 * torch.log10(torch.tensor(CV_Psmooth_LOSS_sum / self.N_CV))
                 self.MSE_cv_total_dB_epoch[ti] = 10 * torch.log10(torch.tensor(CV_Total_LOSS_sum))

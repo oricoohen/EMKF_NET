@@ -31,8 +31,8 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_full = 'RTSNet/full_info/'
-path_results_2 = 'RTSNet/wrong_F/'
+path_results_full = 'RTSNet/full_info/exp_cov'
+path_results_2 = 'RTSNet/wrong_F/exp_cov'
 
 ####################
 ### Design Model ###
@@ -43,12 +43,12 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 400  # Number of training examples (size of the training dataset).50
+args.N_E = 500  # Number of training examples (size of the training dataset).50
 args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T =30    # Length of the time series for training and cross-validation sequences.
-args.T_test =30 # Length of the time series for test sequences.
+args.T = 30    # Length of the time series for training and cross-validation sequences.
+args.T_test = 30 # Length of the time series for test sequences.
 
 ### training parameters
 args.n_steps = 175  # Number of training steps or iterations for optimization.
@@ -57,15 +57,13 @@ args.lr = 1e-4       # Learning rate: controls how quickly the model updates dur
 args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
 
 
-max_iter = 47
 ###########################################################
 # True model
 q2 = 0.01
 r2 =0.1
 Q = q2 * Q_structure
 R = r2 * R_structure
-F = torch.tensor([[0.83, 0.2],[0.2, 0.83]]) # State transition matrix
-
+F = torch.tensor([[0.7, 0.3],[0.3, 0.7]]) # State transition matrix
 H = torch.tensor([[1., 1.],
                   [0.25, 1.]])
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
@@ -139,7 +137,7 @@ KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
 ############################
 
 print("Evaluate RTS Smoother True")
-S_Test(sys_model, test_input, test_target,F = F_test_mat)
+_,_,_,RTS_TRUE,P_TRUE= S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 ######BAD F############################
 
@@ -178,22 +176,16 @@ sys_model_2.F_test= rotate_F(F_test_mat)
 print('just to make suree', sys_model_2.F_test)
 
 
-
-
-
 ###################check the regu;ar rts
 print('regular kalman and rts with wrong F')
-KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
-
-S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+# KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+#
+# _,_,_,RTS_out,P,V = S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 
 #######################
 ### RTSNet Pipeline ###
 #######################
 ########emkf#################################
-
-rtsnet_models= []
-
 
 # Create RTSNet
 RTSNet_model = RTSNetNN()
@@ -205,59 +197,55 @@ RTSNet_Pipeline.setTrainingParams(args)
 
 path_results_full_rts = path_results_full+'best-model_no.pt'
 path_results_2_rts = path_results_2+'best-rts_no.pt'
+path_results_full_PSMOOTH = path_results_full+'PSMOOTH-best-model.pt'
+path_results_full_rts2 = path_results_full+'best-model_no2.pt'
+path_results_full_PSMOOTH2 = path_results_full+'PSMOOTH-best-model2.pt'
+
+eps = 0.00001
 #####TRAIN GOOD F#####
 print('rtssnet with trueeeeeeee F')
-#RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full_rts,None,True,1)
+RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_full_rts)
+X_1,P_1,V_1 = RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=path_results_full_rts)
+######TRAIN GOOD F########
+# RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
+#                      train_input, train_target, path_results =path_results_full_PSMOOTH, path_rtsnet = path_results_full_rts,load_psmooth_path = None, generate_f=True)
+# RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_full_rts2 ,path_results_psmooth=path_results_full_PSMOOTH2,
+#                             load_rtsnet = path_results_full_rts,load_psmooth = path_results_full_PSMOOTH, generate_f=True)
+# _,_,_,_,_, P_1,_,_,_,_= RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, load_model_path=path_results_full_rts,load_p_smoothe_model_path= path_results_full_PSMOOTH)#
+
+
+
+rel_all = 0
+for Pt, Pe in zip(P_TRUE, P_1):          # Pt, Pe: [m, m, T]
+    for i in range(len(Pt)):
+        diff = Pe[i] - Pt[i]                                    # [m, m, T]
+        num = torch.linalg.norm(diff, ord='fro',dim=(0, 1))         # Frobenius ‖ΔP_t‖, shape [T]
+        den = torch.linalg.norm(Pt[i],ord='fro' ,dim=(0, 1)) + eps    # Frobenius ‖P_t‖,   shape [T]
+        err =(num / den)
+        rel_all += err
+mean_rel = rel_all/len(P_TRUE)
+mean_rel = mean_rel/args.T_test
+rel_db = 20 * torch.log10(mean_rel)
+rel_db = rel_db.item()
+
+print(f"Mean relative error = {rel_db:.2f} dB")
+
+
+
+
+
+
+
+
+
+
 
 ### Test Neural Network
-RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=path_results_2_rts)
+# X_1,P_1,V_1 = RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=path_results_full_rts)
 
-# print('seconddddddddddddddddddddddddddd')
-# RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_full_rts, generate_f=True)
-#
-# print('seconddddddddddddddddddddddddddd')
-# RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_full_rts, generate_f=True)
-
-
-RTSNet_Pipeline.setTrainingParams(args)
-print('rtssnet with WRONGGGGGGG F')
-# #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results=path_results_2_rts, load_model_path=path_results_full_rts, generate_f=True)
-#
-RTSNet_Pipeline.NNTest_HybridP(sys_model_2, test_input, test_target, load_model_path=path_results_2_rts)
-# RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_2_rts, generate_f=True)
-
-# RTSNet_Pipeline.NNTrain_with_F(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_2_rts,load_model_path= path_results_full_rts,generate_f=True,beta=0.)
-# # ## Test Neural Network
-# RTSNet_Pipeline.NNTest_HybridP(sys_model_2, test_input, test_target, load_model_path=path_results_2_rts)
-
-
-
-
-# The folder where the new copies will be saved.
-destination_folder = 'RTSNet/EMKF/'
-
-# --- Step 2: Loop 5 times and copy the file ---
-model_pathes = []
-for i in range(max_iter):
-    # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
-    file_rtsnet = f"model_{i}_no.pt"
-    # Build the full destination path
-    destination_path_RTS = destination_folder + file_rtsnet
-    model_pathes.append(destination_path_RTS)
-    # Copy the file. This creates the independent duplicate.
-    shutil.copy2(path_results_2_rts, destination_path_RTS)
-######START THE EMKF TRAINING##########
-#########change to very wrong f
-# sys_model_2.F_train = rotate_F(F_train_mat_2,0,1,0.87, many=True,randomit=False)
-# sys_model_2.F_valid = rotate_F(F_val_mat_2,0,1,0.87, many=True,randomit=False)
-# sys_model_2.F_test= rotate_F(F_test_mat_2,0,1,0.87, many=True,randomit=False)
-
-sys_model_2.args = args
-RTSNet_Pipeline.setTrainingParams(args)
-print('start emkfffffffffffffffffff')
-EMKF_F_N(sys_model_2,RTSNet_Pipeline,train_input, train_target, cv_input, cv_target,test_input,
-                                                              test_target,model_pathes,max_it=max_iter)
 
 d
+
+
+
 

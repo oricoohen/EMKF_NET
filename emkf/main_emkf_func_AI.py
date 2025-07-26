@@ -33,7 +33,12 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     A_2 = compute_A2(sys_model.m1x_0, sys_model.m2x_0, X_s, P_smooth_s)  # (seq,n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
     eps = 1e-4 * torch.eye(m, device=A_2.device)
-    F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2 + eps)
+    A_2 = A_2 + eps
+    F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
+    # F_estimates_tensor = torch.zeros_like(A_1)
+    # for s in range(SEQ):
+    #     # solve A2_reg[s] @ X = A1[s]  =>  X = A2_reg[s]^{-1} @ A1[s]
+    #     F_estimates_tensor[s] = torch.linalg.solve(A_2[s].T, A_1[s].T).T
 
     averaged_blocks_list = []
     # 2. Loop through the F_estimates_tensor in steps of 10.
