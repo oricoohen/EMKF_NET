@@ -2427,9 +2427,6 @@ class Pipeline_ERTS:
                 all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
                 all_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
 
-            # Update F for next sequence
-            F_current[f_index] = F_seq.detach().clone()
-
         # Compute final averages
         final_iter_losses = []
         final_iter_f_losses = []
