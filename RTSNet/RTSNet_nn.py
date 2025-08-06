@@ -210,6 +210,7 @@ class RTSNetNN(KalmanNetNN):
 
 
          # embed the current F ori
+
         F_vec = self.F.flatten().view(1, 1, -1)  # [1,1,m²]
         F_vec =self.standardize(F_vec)
         F_emb = self.FC_F_bw(F_vec)  # [1,1,d_hidden_FF2_bw]

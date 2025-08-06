@@ -42,17 +42,17 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
 
     averaged_blocks_list = []
     # 2. Loop through the F_estimates_tensor in steps of 10.
-    if SEQ != 1:
-        for i in range(0, SEQ, 10):
-            # 3. Get the current chunk of up to 10 matrices.
-            current_block = F_estimates_tensor[i: i + 10]
-            # 4. Calculate the average of this chunk.
-            average_of_block = current_block.mean(dim=0)
-            # 5. Add the resulting average matrix to our list.
-            averaged_blocks_list.append(average_of_block)
-        # 6. After the loop, stack the list of averaged matrices into a single tensor.
-        block_averages = torch.stack(averaged_blocks_list)
-        return block_averages
+    # if SEQ != 1:
+    #     for i in range(0, SEQ, 10):
+    #         # 3. Get the current chunk of up to 10 matrices.
+    #         current_block = F_estimates_tensor[i: i + 10]
+    #         # 4. Calculate the average of this chunk.
+    #         average_of_block = current_block.mean(dim=0)
+    #         # 5. Add the resulting average matrix to our list.
+    #         averaged_blocks_list.append(average_of_block)
+    #     # 6. After the loop, stack the list of averaged matrices into a single tensor.
+    #     block_averages = torch.stack(averaged_blocks_list)
+    #     return block_averages
     return F_estimates_tensor
 
 
@@ -96,19 +96,26 @@ def EMKF_F(sys_model,RTSNet_Pipeline,train_input, train_target, cv_input, cv_tar
         # if q != 0:
         #     RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target,path_results_rtsnet=model_pathes[q],path_results_psmooth=psmooth_pathes[q],
         #                                load_rtsnet=model_pathes[q], load_psmooth=psmooth_pathes[q],generate_f=True)
+            # sys_model.F_train = F_train
+            # sys_model.F_test = F_valid
         #####TEST AND PSMOOTH###########
-        [_,_,_,x_out_tensor,_,P_smooth_tensor,V_list,K_T_list,_,_] = RTSNet_Pipeline.NNTest(sys_model, test_input,test_target,load_model_path = model_pathes[q],
+        if q == 0:
+            [_,_,_,x_out_tensor,_,P_smooth_tensor,V_list,K_T_list,_,_] = RTSNet_Pipeline.NNTest(sys_model, test_input,test_target,load_model_path = model_pathes[q],
                 load_p_smoothe_model_path = psmooth_pathes[q], generate_f=True,)
+        else:
+            [_,_,_,x_out_tensor,_,P_smooth_tensor,V_list,K_T_list,_,_] = RTSNet_Pipeline.NNTest(sys_model, test_input,test_target,load_model_path = model_pathes[q],
+                load_p_smoothe_model_path = psmooth_pathes[q], generate_f=False,)
              #############M STEP rts###############################
+
         F_est = EMKF_F_Mstep(sys_model,x_out_tensor,P_smooth_tensor,V_list,sys_model.m)
         #alpha = 0.5/(q+1)  # 0 < α ≤ 1  (smaller = safer)
-        alpha = 1
-        F_est = (1-alpha) * F_matrices[q] + alpha * F_est
+        # alpha = 1
+        # F_est = (1-alpha) * F_matrices[q] + alpha * F_est
         F_matrices.append(F_est)
         print('q_iter:', q, 'F_est:', F_est)
         # Check convergence
-        if q > 0:
-            delta_F.append(torch.abs(F_matrices[q] - F_matrices[q-1]).max())
+        # if q > 0:
+        #     delta_F.append(torch.abs(F_matrices[q] - F_matrices[q-1]).max())
         ####return the f to a list
         new_F_list = []
         for f_matrix in F_est:

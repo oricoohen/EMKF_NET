@@ -222,7 +222,7 @@ RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_pa
 RTSNet_Pipeline.setTrainingParams(args)
 print('rtssnet with WRONGGGGGGG F')
 # #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results=path_results_2_rts, load_model_path=path_results_full_rts, generate_f=True)
+#RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results=path_results_2_rts, load_model_path=path_results_full_rts, generate_f=True)
 #
 RTSNet_Pipeline.NNTest_HybridP(sys_model_2, test_input, test_target, load_model_path=path_results_2_rts)
 # RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_2_rts, generate_f=True)

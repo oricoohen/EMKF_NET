@@ -166,6 +166,10 @@ def EMKF_F_N(sys_model,RTSNet_Pipeline,train_input, train_target, cv_input, cv_t
 
         [x_out_tensor,P_smooth_tensor,V_list] = RTSNet_Pipeline.NNTest_HybridP(sys_model, test_input, test_target, load_model_path=model_pathes[q])
              #############M STEP rts###############################
+
+        print('xxxxxx',x_out_tensor[1])
+        print('ppppppppppp',P_smooth_tensor[1])
+
         F_est = EMKF_F_Mstep(sys_model,x_out_tensor,P_smooth_tensor,V_list,sys_model.m)
         # alpha = 0.2/(q+1)  # 0 < α ≤ 1  (smaller = safer)
         alpha = 1

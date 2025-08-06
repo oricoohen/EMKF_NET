@@ -31,7 +31,7 @@ class Pipeline_twoRTSNets:
 
     
     def NNTest(self, SysModel, test_input, test_target, path_results, MaskOnState=False, randomInit=False,test_init=None):
-h
+
         self.N_T = test_input.size()[0]
 
         self.MSE_test_linear_arr = torch.empty([self.N_T])
