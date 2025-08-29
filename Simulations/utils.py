@@ -7,38 +7,49 @@ import torch
 
 
 
-def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False):
+def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True):
 
-    ##################################
-    ### Generate Training Sequence ###
-    ##################################
-    #ori generate F
+    if Test is False:
+        ##################################
+        ### Generate Training Sequence ###
+        ##################################
+        #ori generate F
 
-    F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=True)
-    training_input = SysModel_data.Input
-    training_target = SysModel_data.Target
-    if(randomInit_train):
-        training_init = SysModel_data.m1x_0_rand
+        F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=F_gen)
+        training_input = SysModel_data.Input
+        training_target = SysModel_data.Target
+        if(randomInit_train):
+            training_init = SysModel_data.m1x_0_rand
+        else:
+            x0 = torch.squeeze(SysModel_data.m1x_0)
+            training_init = x0.repeat(args.N_E,1) #size: N_E x m
+
+        ####################################
+        ### Generate Validation Sequence ###
+        ####################################
+        F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen)
+        cv_input = SysModel_data.Input
+        cv_target = SysModel_data.Target
+        if(randomInit_cv):
+            cv_init = SysModel_data.m1x_0_rand
+        else:
+            x0 = torch.squeeze(SysModel_data.m1x_0)
+            cv_init = x0.repeat(args.N_CV,1) #size: N_CV x m
+
     else:
-        x0 = torch.squeeze(SysModel_data.m1x_0)
-        training_init = x0.repeat(args.N_E,1) #size: N_E x m
-
-    ####################################
-    ### Generate Validation Sequence ###
-    ####################################
-    F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=True)
-    cv_input = SysModel_data.Input
-    cv_target = SysModel_data.Target
-    if(randomInit_cv):
-        cv_init = SysModel_data.m1x_0_rand
-    else:
-        x0 = torch.squeeze(SysModel_data.m1x_0)
-        cv_init = x0.repeat(args.N_CV,1) #size: N_CV x m
-
+        print("Generating data for test set only...")
+        F_matrices_train = None
+        F_matrices_val = None
+        training_input = None
+        training_target = None
+        training_init = None
+        cv_input = None
+        cv_target = None
+        cv_init = None
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=True)
+    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=F_gen)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     if(randomInit_test):

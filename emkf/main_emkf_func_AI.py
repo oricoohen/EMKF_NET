@@ -35,6 +35,11 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     eps = 1e-4 * torch.eye(m, device=A_2.device)
     A_2 = A_2 + eps
     F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
+
+    # F_estimates_tensor = torch.zeros_like(A_1)
+    # for s in range(SEQ):
+    #     F_estimates_tensor[s] = torch.linalg.solve(A_2[s].T, A_1[s].T).T
+
     # F_estimates_tensor = torch.zeros_like(A_1)
     # for s in range(SEQ):
     #     # solve A2_reg[s] @ X = A1[s]  =>  X = A2_reg[s]^{-1} @ A1[s]
@@ -112,7 +117,7 @@ def EMKF_F(sys_model,RTSNet_Pipeline,train_input, train_target, cv_input, cv_tar
         # alpha = 1
         # F_est = (1-alpha) * F_matrices[q] + alpha * F_est
         F_matrices.append(F_est)
-        print('q_iter:', q, 'F_est:', F_est)
+        print('q_iter:', q, 'F_est:', F_est[0])
         # Check convergence
         # if q > 0:
         #     delta_F.append(torch.abs(F_matrices[q] - F_matrices[q-1]).max())
@@ -122,5 +127,6 @@ def EMKF_F(sys_model,RTSNet_Pipeline,train_input, train_target, cv_input, cv_tar
             new_F_list.append(f_matrix)
         # new_F_list is now a Python list of 100 tensors, each with shape [2, 2]
         sys_model.F_test = new_F_list
-    RTSNet_Pipeline.NNTest(sys_model, test_input,test_target,load_model_path = model_pathes[q],load_p_smoothe_model_path = psmooth_pathes[q], generate_f=True,)
+    print('4 round')
+    RTSNet_Pipeline.NNTest(sys_model, test_input,test_target,load_model_path = model_pathes[max_it-1],load_p_smoothe_model_path = psmooth_pathes[q], generate_f=True,)
     return F_matrices, delta_F

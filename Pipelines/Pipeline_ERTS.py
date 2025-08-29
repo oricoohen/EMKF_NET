@@ -16,6 +16,7 @@ from emkf.main_emkf_func_AI import EMKF_F_Mstep
 
 class Pipeline_ERTS:
 
+
     def __init__(self, Time, folderName, modelName):
         super().__init__()
         self.Time = Time
@@ -23,6 +24,7 @@ class Pipeline_ERTS:
         self.modelName = modelName
         self.modelFileName = self.folderName + "model_" + self.modelName + ".pt"
         self.PipelineName = self.folderName + "pipeline_" + self.modelName + ".pt"
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def save(self):
         torch.save(self, self.PipelineName)
@@ -35,6 +37,8 @@ class Pipeline_ERTS:
         self.model = model # the RTSNet model contains the parameters of the RTSNet
         # Initialize PsmoothNN
         self.PsmoothNN = PsmoothNN(self.SysModel.m, self.args)
+        self.model.to(self.device)
+        self.PsmoothNN.to(self.device)
     def setTrainingParams(self, args, alpha=0.5, b=0.5):
         self.N_steps = args.n_steps  # Number of Training Steps
         self.N_B = args.n_batch  # Number of Samples in Batch
@@ -68,14 +72,14 @@ class Pipeline_ERTS:
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
 
-        self.model = torch.load(path_rtsnet, weights_only=False)  # Load the best RTSNet model
-        self.model.eval() # Freeze RTSNet if needed, so it doesn't change
+        self.model = torch.load(path_rtsnet, map_location=self.device, weights_only=False)  # Load the best RTSNet model
+        self.model.to(self.device).eval() # Freeze RTSNet if needed, so it doesn't change
         if load_psmooth_path != None:
-            self.PsmoothNN = torch.load(load_psmooth_path, weights_only=False)
+            self.PsmoothNN = torch.load(load_psmooth_path,  map_location=self.device,weights_only=False)
             # Re-link the optimizer to the parameters of the newly loaded model
             self.PsmoothNN_optimizer = torch.optim.Adam(self.PsmoothNN.parameters(), lr=self.learningRate,
                                                         weight_decay=self.weightDecay)
-        self.PsmoothNN.train()  # Set P-smooth network to train mode
+        self.PsmoothNN.to(self.device).train()  # Set P-smooth network to train mode
         # Preallocate arrays for logging training performance
 
         self.MSE_train_linear_epoch = torch.empty([self.N_steps])
@@ -305,7 +309,7 @@ class Pipeline_ERTS:
 
         if load_model_path is not None:
             print("loading model_and keep training them")
-            self.model = torch.load(load_model_path, weights_only=False)
+            self.model = torch.load(load_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
             # Re-link the optimizer to the parameters of the newly loaded model
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate,
                                               weight_decay=self.weightDecay)
@@ -997,9 +1001,9 @@ class Pipeline_ERTS:
 
         # Load models
         if load_p_smoothe_model_path is not None:
-            self.PsmoothNN = torch.load(load_p_smoothe_model_path,weights_only=False)
+            self.PsmoothNN = torch.load(load_p_smoothe_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
         else:
-            self.PsmoothNN = torch.load('RTSNet/full_info/best-model.pt', weights_only=False)
+            self.PsmoothNN = torch.load('RTSNet/full_info/best-model.pt', map_location=self.device, weights_only=False).to(self.device).eval()
         self.model = torch.load(load_model_path,weights_only=False)
 
 
@@ -1088,7 +1092,7 @@ class Pipeline_ERTS:
             P_smooth_list.append(P_smoothed_seq)
 
             #######compute V############
-            V =  self.compute_cross_covariances(SysModel.F_test[j//10], SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
+            V =  self.compute_cross_covariances(SysModel.F, SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
             V_list.append(V)#[seq](tensor(m,m,T))
 
 
@@ -1293,12 +1297,12 @@ class Pipeline_ERTS:
         self.MSE_cv_idx_opt = 0
 
         if load_rtsnet is not None:
-            self.model = torch.load(load_rtsnet, weights_only=False)
+            self.model = torch.load(load_rtsnet, map_location=self.device, weights_only=False)
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate,weight_decay=self.weightDecay)
         else:
             self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate,weight_decay=self.weightDecay)
         if load_psmooth != None:
-            self.PsmoothNN = torch.load(load_psmooth, weights_only=False)
+            self.PsmoothNN = torch.load(load_psmooth, map_location=self.device, weights_only=False)
             # Re-link the optimizer to the parameters of the newly loaded model
             self.PsmoothNN_optimizer = torch.optim.Adam(self.PsmoothNN.parameters(), lr=self.learningRate,weight_decay=self.weightDecay)
         else:
@@ -1432,7 +1436,7 @@ class Pipeline_ERTS:
             RTSNET_LOSS_mean = Batch_RTS_LOSS_sum / self.N_B
             Psmooth_LOSS_mean = Batch_Psmooth_LOSS_sum / self.N_B
             F_loss_mean = F_loss_batch/self.N_B
-            Total_LOSS_mean = Total_LOSS_mean*0.6 +F_loss_mean*0.4
+            Total_LOSS_mean = Total_LOSS_mean
             print('F_loss is:', F_loss_mean)
             # Backward pass on the combined loss
             Total_LOSS_mean.backward(retain_graph=True)
@@ -1876,6 +1880,7 @@ class Pipeline_ERTS:
     #                         p_1.view(SysModel.m, SysModel.m), eps=1e-6)  # tensor  (n×n×T)
     #                 V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, p_tilde_tensor,
     #                                                    smoother_gain_list_cv)
+    #                                                    smoother_gain_list_cv)
     #                 # 2) run M‑step on **this sequence** (batch of size 1)
     #                 X_s = x_out_cv.unsqueeze(0)  # → [1, m, T]
     #                 P_smooth_s = P_smoothed_seq_cv.unsqueeze(0)  # → [1, m, m, T]
@@ -2066,7 +2071,7 @@ class Pipeline_ERTS:
                 seq_iter_f_losses = []
 
                 # FIX 2: Start with stable F initialization
-                F_seq = F_batch[f_index].clone().detach()  # Ensure no gradients from previous sequences
+                F_seq = F_batch[f_index].clone().detach().requires_grad_(True)  # Ensure no gradients from previous sequences
 
                 # EM ITERATIONS LOOP (innermost) - Sequential F updates for this sequence
                 for em_iter in range(emkf_iterations):
@@ -2135,11 +2140,27 @@ class Pipeline_ERTS:
                         print('problemmmmmmmmmmmmmmmmmmmmmmmm')
 
                     # Compute weighted total batch loss
-                iteration_weights = [0.2, 0.3, 0.5]
+                iteration_weights = [0.0, 0.0, 1]
                 total_batch_loss = sum(w * loss for w, loss in zip(iteration_weights, batch_losses))
 
                 if torch.isfinite(total_batch_loss) and total_batch_loss < 1000.0:
-                    total_batch_loss.backward()
+
+                    #################################### ori delete
+                    # Right before total_batch_loss.backward()
+                    print("F_seq.requires_grad:",
+                          F_seq.requires_grad)  # should be True (for the last F_seq in the loop)
+                    print("F_seq.grad_fn:", F_seq.grad_fn is not None)
+
+                    total_batch_loss.backward(retain_graph=True)
+
+                    # Do we get gradient in iter-0 params when using only iter-2 loss?
+                    nz0 = sum(
+                        (p.grad is not None) and (p.grad.abs().sum() > 0) for p in self.rtsnet_models[0].parameters())
+                    print("nonzero grads in iter-0 params:", bool(nz0))
+
+                    ###################################
+
+                    # total_batch_loss.backward()
 
                     for i in range(emkf_iterations):
                         torch.nn.utils.clip_grad_norm_(self.rtsnet_models[i].parameters(), max_norm=0.5)
@@ -2200,10 +2221,10 @@ class Pipeline_ERTS:
         self.psmooth_models = []
 
         for i in range(emkf_iterations):
-            rtsnet_model = torch.load(load_base_rtsnet, weights_only=False)
+            rtsnet_model = torch.load(load_base_rtsnet, map_location=self.device, weights_only=False).to(self.device)
             self.rtsnet_models.append(rtsnet_model)
 
-            psmooth_model = torch.load(load_base_psmooth, weights_only=False)
+            psmooth_model = torch.load(load_base_psmooth, map_location=self.device, weights_only=False).to(self.device)
             self.psmooth_models.append(psmooth_model)
 
         # Create separate optimizers with LOWER learning rate for stability
@@ -2249,7 +2270,7 @@ class Pipeline_ERTS:
             train_losses = valid_train_losses
 
             # Compute weighted total training loss
-            iteration_weights = [0.1, 0.2, 0.7]
+            iteration_weights = [0.0, 0.1, 0.89]
             total_train_loss = sum(w * loss for w, loss in zip(iteration_weights, train_losses))
 
             # # FIX 9: Gradient clipping BEFORE backprop
@@ -2315,7 +2336,7 @@ class Pipeline_ERTS:
                 self.F_loss_cv_epoch]
 
     def Test_Only_EMKF(self, SysModel, test_input, test_target,
-                       load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3):
+                       load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3,generate_F= True):
         """
         Test-only version - No training, no optimization, just run EMKF on test data
         """
@@ -2325,16 +2346,16 @@ class Pipeline_ERTS:
         self.psmooth_models = []
 
         for i in range(emkf_iterations):
-            rtsnet_model = torch.load(load_base_rtsnet, weights_only=False)
+            rtsnet_model = torch.load(load_base_rtsnet[i], map_location=self.device, weights_only=False).to(self.device)
             self.rtsnet_models.append(rtsnet_model)
 
-            psmooth_model = torch.load(load_base_psmooth, weights_only=False)
+            psmooth_model = torch.load(load_base_psmooth[i], map_location=self.device,weights_only=False).to(self.device)
             self.psmooth_models.append(psmooth_model)
 
         print(f"Starting Test-Only EMKF with {emkf_iterations} EM iterations")
 
         # Run test only
-        test_losses, test_f_losses = self._run_test_simple(SysModel, test_input, test_target, emkf_iterations)
+        test_losses, test_f_losses,  final_F_list = self._run_test_simple(SysModel, test_input, test_target, emkf_iterations,generate_f = generate_F)
 
         # # Compute weighted total test loss
         # iteration_weights = [0.1, 0.2, 0.7]
@@ -2353,13 +2374,15 @@ class Pipeline_ERTS:
         for i, test_loss in enumerate(test_losses):
             print(f"    Iter {i}: {10 * torch.log10(test_loss.detach()):.2f}dB")
 
-        return test_losses, test_f_losses
+        return test_losses, test_f_losses,  final_F_list
 
-    def _run_test_simple(self, SysModel, input_data, target_data, emkf_iterations):
+    def _run_test_simple(self, SysModel, input_data, target_data, emkf_iterations,generate_f = True):
         """
         Simple test - just loop through each sequence one by one
         """
         N_data = len(input_data)
+
+        final_F_list = [None] * N_data
 
         # Initialize F matrices
         F_current = [f.clone().detach() for f in SysModel.F_test]
@@ -2373,8 +2396,9 @@ class Pipeline_ERTS:
         for seq_idx in range(N_data):
             y_seq = input_data[seq_idx]
             target_seq = target_data[seq_idx]
-            f_index = seq_idx // 10
-
+            f_index = seq_idx
+            if generate_f == True:
+                f_index = seq_idx // 10
             # Store losses for each EM iteration for this sequence
             seq_iter_losses = []
             seq_iter_f_losses = []
@@ -2422,6 +2446,34 @@ class Pipeline_ERTS:
                     f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
                     seq_iter_f_losses.append(f_loss)
 
+##########################add a last computation for after the F computation
+            # --- after the for em_iter in range(emkf_iterations) loop ---
+
+            # # Use the final F_seq (after the last M-step)
+            # SysModel.F = F_seq
+            #
+            # # Pick a model index to run the forward; reusing the last one is fine
+            # last_idx = emkf_iterations - 1
+            # self.rtsnet_models[last_idx].eval()
+            # self.psmooth_models[last_idx].eval()
+            #
+            # with torch.no_grad():
+            #     x_out_forward2, x_out_smoothed2, P_smoothed_seq2, P_filtered_seq2, smoother_gain_list2, K_t2 = \
+            #         self._run_rtsnet_sequence(SysModel, y_seq, last_idx)
+            #     final_seq_loss = self.loss_fn(x_out_smoothed2, target_seq)
+            #
+            # # Append the “after K updates” loss as the (K)-th index (i.e., emkf_iterations)
+            # seq_iter_losses.append(final_seq_loss)
+            #
+            # # Optional: F-distance for the final F
+            # F_true_seq = F_true[f_index]
+            # final_f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+            # seq_iter_f_losses.append(final_f_loss)
+
+            ################################################################
+
+            final_F_list[seq_idx] = F_seq.detach().clone()
+
             # Add this sequence's losses to accumulators
             for em_iter in range(emkf_iterations):
                 all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
@@ -2441,177 +2493,5 @@ class Pipeline_ERTS:
             final_iter_losses.append(iter_avg_loss)
             final_iter_f_losses.append(iter_avg_f_loss)
 
-        return final_iter_losses, final_iter_f_losses
+        return final_iter_losses, final_iter_f_losses,final_F_list
 
-    def Test_Only_EMKF_2(self, SysModel, test_input, test_target,
-                       load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3,generate_F = True):
-        """
-        Test-only version - Match the working EMKF exactly
-        """
-
-        # Initialize multiple models
-        self.rtsnet_models = []
-        self.psmooth_models = []
-
-        for i in range(emkf_iterations):
-            rtsnet_model = torch.load(load_base_rtsnet, weights_only=False)
-            self.rtsnet_models.append(rtsnet_model)
-
-            psmooth_model = torch.load(load_base_psmooth, weights_only=False)
-            self.psmooth_models.append(psmooth_model)
-
-        print(f"Starting Test-Only EMKF with {emkf_iterations} EM iterations")
-
-        F_matrices = []
-        F_matrices.append(torch.stack(SysModel.F_test))
-
-        for q in range(emkf_iterations):
-
-            # E-STEP: Process ALL sequences using the SAME method as your working code
-            if q > 0:
-                [_, _, _, x_out_tensor, _, P_smooth_tensor, V_list, K_T_list, _, _] = self.NNTest_modified(
-                    SysModel, test_input, test_target, self.rtsnet_models[q], self.psmooth_models[q], generate_f=generate_F)
-            else:
-                [_, _, _, x_out_tensor, _, P_smooth_tensor, V_list, K_T_list, _, _] = self.NNTest_modified(
-                SysModel, test_input, test_target,self.rtsnet_models[q], self.psmooth_models[q],generate_f=True)
-
-            # M-STEP: Use ALL data like your working code
-            F_est = EMKF_F_Mstep(SysModel, x_out_tensor, P_smooth_tensor, V_list, SysModel.m)
-
-            F_matrices.append(F_est)
-            print('q_iter:', q, 'F_est:', F_est[0])
-
-            # Update F for next iteration
-            new_F_list = []
-            for f_matrix in F_est:
-                new_F_list.append(f_matrix)
-            SysModel.F_test = new_F_list
-
-        # Final test with last F
-        [_, _, _, _, _, _, _, _, _, _] = self.NNTest_modified(SysModel, test_input, test_target,self.rtsnet_models[-1], self.psmooth_models[-1],generate_f=generate_F)
-
-        return F_matrices
-
-    def NNTest_modified(self, SysModel, test_input, test_target, rtsnet_model, psmooth_model, generate_f=True):
-        """
-        Modified NNTest to work with single models instead of self.model and self.PsmoothNN
-        """
-        print("Testing RTSNet...")
-        N_T = len(test_input)
-
-        MSE_test_linear_arr = torch.empty([N_T])
-        MSE_test_psmooth_arr = torch.empty([N_T])
-
-        # MSE LOSS Function
-        loss_fn = nn.MSELoss(reduction='mean')
-
-        rtsnet_model.eval()
-        psmooth_model.eval()
-
-        with torch.no_grad():
-            x_out_list = []
-            P_smooth_list = []
-            V_list = []
-            start = time.time()
-            K_T_list = []
-
-            print('ORICHECK DEHIL FFFFFFFFFFFFFFFF', SysModel.F_test[0])
-
-            for j in range(0, N_T):
-                y_mdl_tst = test_input[j]
-                T_test = y_mdl_tst.size()[-1]
-                x_out_test_forward_1 = torch.empty(SysModel.m, T_test)
-                x_out_test = torch.empty(SysModel.m, T_test)
-
-                rtsnet_model.InitSequence(SysModel.m1x_0, T_test)
-                rtsnet_model.init_hidden()
-
-                if generate_f == False:
-                    SysModel.F = SysModel.F_test[j]
-                    rtsnet_model.update_F(SysModel.F)
-                else:
-                    index = j // 10
-                    SysModel.F = SysModel.F_test[index]
-                    rtsnet_model.update_F(SysModel.F)
-
-                # Forward pass and compute P-smooth
-                sigma_list = []
-                smoother_gain_list = []
-
-                for t in range(0, T_test):
-                    x_out_test_forward_1[:, t] = rtsnet_model(y_mdl_tst[:, t], None, None, None)
-                    P_test_forward = rtsnet_model.h_Sigma.clone().detach()
-                    sigma_list.append(P_test_forward)  # [1, 1, m²]
-                    if t == T_test - 1:
-                        K = rtsnet_model.KGain.clone().detach()
-                        K_T_list.append(K)  # [m, n]
-
-                x_out_test[:, T_test - 1] = x_out_test_forward_1[:, T_test - 1]
-                rtsnet_model.InitBackward(x_out_test[:, T_test - 1])
-                x_out_test[:, T_test - 2] = rtsnet_model(None, x_out_test_forward_1[:, T_test - 2],
-                                                         x_out_test_forward_1[:, T_test - 1], None)
-                smoother_gain_list.append(rtsnet_model.SGain.clone().detach())
-
-                for t in range(T_test - 3, -1, -1):  # T-3 to 0
-                    x_out_test[:, t] = rtsnet_model(None, x_out_test_forward_1[:, t], x_out_test_forward_1[:, t + 1],
-                                                    x_out_test[:, t + 2])
-                    smoother_gain_list.append(rtsnet_model.SGain.clone().detach())
-
-                # Compute P-smooth predictions
-                P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, T_test)
-                dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)
-                sigma_T = sigma_list[-1]
-                psmooth_model.start = 0
-
-                # Handle initial P-smooth at time T_test
-                P_flat = psmooth_model(sigma_T, dummy_sgain).view(-1)
-                P_matrix = psmooth_model.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))
-                P_smoothed_seq[:, :, T_test - 1] = P_matrix
-
-                for t in range(T_test - 2, -1, -1):
-                    sigma_t = sigma_list[t].view(1, 1, -1)
-                    index = (T_test - 2) - t
-                    sgain_t = smoother_gain_list[index].reshape(1, 1, -1)
-                    P_flat = psmooth_model(sigma_t, sgain_t)
-                    P_matrix = psmooth_model.enforce_covariance_properties(P_flat.view(-1).view(SysModel.m, SysModel.m))
-                    P_smoothed_seq[:, :, t] = P_matrix
-
-                # Compute s(0)
-                P_1_0_pred = SysModel.F @ SysModel.m2x_0 @ SysModel.F.T + SysModel.Q
-                s_0 = SysModel.m2x_0 @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(SysModel.m, SysModel.m))
-                smoother_gain_list.append(s_0.clone().detach())
-
-                MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
-                MSE_test_psmooth_arr[j] = psmooth_model.compute_loss(P_smoothed_seq, test_target[j], x_out_test).item()
-
-                x_out_list.append(x_out_test)
-                P_smooth_list.append(P_smoothed_seq)
-
-                # Compute V
-                V = self.compute_cross_covariances(SysModel.F_test[j // 10], SysModel.H, K, P_smoothed_seq,
-                                                   smoother_gain_list)
-                V_list.append(V)
-
-            end = time.time()
-            t = end - start
-
-            # Average
-            MSE_test_linear_avg = torch.mean(MSE_test_linear_arr)
-            MSE_test_dB_avg = 10 * torch.log10(MSE_test_linear_avg)
-            MSE_test_psmooth_avg = torch.mean(MSE_test_psmooth_arr)
-            MSE_test_psmooth_dB_avg = 10 * torch.log10(MSE_test_psmooth_avg)
-
-            # Standard deviation
-            MSE_test_linear_std = torch.std(MSE_test_linear_arr, unbiased=True)
-            MSE_test_psmooth_std = torch.std(MSE_test_psmooth_arr, unbiased=True)
-
-            # Print results
-            print("RTSNet-MSE Test:", MSE_test_dB_avg, "[dB]")
-            print("RTSNet-STD Test:", 10 * torch.log10(MSE_test_linear_std + MSE_test_linear_avg) - MSE_test_dB_avg,
-                  "[dB]")
-            print("RTSNet-P-smooth MSE Test:", MSE_test_psmooth_dB_avg, "[dB]")
-            print("RTSNet-P-smooth STD Test:", MSE_test_psmooth_std, "[dB]")
-            print("Inference Time:", t)
-
-            return [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, torch.stack(x_out_list), t,
-                    torch.stack(P_smooth_list), V_list, K_T_list, MSE_test_psmooth_dB_avg, MSE_test_psmooth_std]
