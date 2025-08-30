@@ -6,9 +6,10 @@ from Smoothers.Linear_KF import KalmanFilter
 def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, randomInit = False, test_init=None):
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
-
+    dev = SysModel.F.device
+    dt  = SysModel.F.dtype
     # MSE [Linear]
-    MSE_KF_linear_arr = torch.empty(args.N_T)
+    MSE_KF_linear_arr = torch.empty(args.N_T, device=dev)
     start = time.time()
     KF = KalmanFilter(SysModel)
 
@@ -22,7 +23,7 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
     for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
         if F is not None:
             F_index = j//10
-            SysModel.F = F[F_index]
+            SysModel.F = F[F_index].to(dev, dt)
             KF.F = F[F_index]
             KF.F_T = F[F_index].T
 
@@ -31,7 +32,7 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
         else:
             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
             
-        KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
+        KF.GenerateSequence(sequence_input.to(dev, dt), sequence_input.to(dev, dt).size()[-1])
 
 
         if(allStates):

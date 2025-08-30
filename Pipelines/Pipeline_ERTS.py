@@ -12,7 +12,7 @@ from RTSNet.PsmoothNN import PsmoothNN  # Ensure the PsmoothNN class is correctl
 import torch.nn as nn
 from emkf.main_emkf_func_AI import EMKF_F_Mstep
 
-
+device =torch.device("cuda")
 
 class Pipeline_ERTS:
 
@@ -82,12 +82,12 @@ class Pipeline_ERTS:
         self.PsmoothNN.to(self.device).train()  # Set P-smooth network to train mode
         # Preallocate arrays for logging training performance
 
-        self.MSE_train_linear_epoch = torch.empty([self.N_steps])
-        self.MSE_train_dB_epoch = torch.empty([self.N_steps])
+        self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
         self.MSE_cv_idx_opt = 0
         self.MSE_cv_dB_opt = 1000
-        self.MSE_cv_linear_epoch = torch.empty([self.N_steps])
-        self.MSE_cv_dB_epoch = torch.empty([self.N_steps])
+        self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
         ##############
         ### Epochs ###
         ##############
@@ -117,8 +117,10 @@ class Pipeline_ERTS:
                 self.model.init_hidden()
                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
 
-                x_out_training_forward = torch.empty(SysModel.m, SysModel.T)
-                x_out_training = torch.empty(SysModel.m, SysModel.T)
+                x_out_training_forward = torch.empty(SysModel.m, SysModel.T,
+                                     device=y_training.device, dtype=y_training.dtype)
+                x_out_training = torch.empty(SysModel.m, SysModel.T,
+                                     device=y_training.device, dtype=y_training.dtype)
                 ########add changes to compute P and S
                 #####compute P ori
                 self.model.sigma_list = []  # is added in every step_KGain_est(self, y) [1, 1, m²]
@@ -139,8 +141,10 @@ class Pipeline_ERTS:
                                                       x_out_training_forward[:, t + 1], x_out_training[:, t + 2])
                     self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
                 # ---- Handle initial smoothed P at time T ----
-                P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T)
-                dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
+                P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T,
+                             device=sigma_T.device, dtype=sigma_T.dtype)
+                dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
+                             device=sigma_T.device, dtype=sigma_T.dtype)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
                 self.PsmoothNN.start = 0
                 ####compute the P(T)
@@ -204,13 +208,15 @@ class Pipeline_ERTS:
             # Cross Validation Mode
             self.PsmoothNN.eval()  # Set PsmoothNN to eval mode
             with torch.no_grad():
-                MSE_cv_psmooth_batch = torch.empty([self.N_CV])
+                MSE_cv_psmooth_batch = torch.empty([self.N_CV], device=self.device)
 
                 for j in range(0, self.N_CV):
                     y_cv = cv_input[j]
                     SysModel.T_test = y_cv.size()[-1]
-                    x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test)
-                    x_out_cv = torch.empty(SysModel.m, SysModel.T_test)
+                    x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test,
+                               device=y_cv.device, dtype=y_cv.dtype)
+                    x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
+                               device=y_cv.device, dtype=y_cv.dtype)
 
                     if generate_f != None:  ####if we valid with different f
                         index = j // 10
@@ -243,8 +249,10 @@ class Pipeline_ERTS:
                         self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # [m, m]
 
                     # Initialize P-smooth sequence tensor
-                    P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)  # [m, m, T_test]
-                    dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
+                    P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test,
+                             device=sigma_T.device, dtype=sigma_T.dtype)  # [m, m, T_test]
+                    dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
+                             device=sigma_T.device, dtype=sigma_T.dtype)  # shape: [1, 1, m²] input to PsmoothNN
                     sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
                     self.PsmoothNN.start = 0
                     # Handle initial P-smooth at time T_test
@@ -298,13 +306,13 @@ class Pipeline_ERTS:
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
 
-        MSE_cv_linear_batch = torch.empty([self.N_CV])
-        self.MSE_cv_linear_epoch = torch.empty([self.N_steps])
-        self.MSE_cv_dB_epoch = torch.empty([self.N_steps])
+        MSE_cv_linear_batch = torch.empty([self.N_CV], device=self.device)
+        self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
 
-        MSE_train_linear_batch = torch.empty([self.N_B])
-        self.MSE_train_linear_epoch = torch.empty([self.N_steps])
-        self.MSE_train_dB_epoch = torch.empty([self.N_steps])
+        MSE_train_linear_batch = torch.empty([self.N_B], device=self.device)
+        self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
 
 
         if load_model_path is not None:
@@ -353,8 +361,10 @@ class Pipeline_ERTS:
                 y_training = train_input[n_e]
                 SysModel.T = y_training.size()[-1]
 
-                x_out_training_forward = torch.empty(SysModel.m, SysModel.T)
-                x_out_training = torch.empty(SysModel.m, SysModel.T)
+                x_out_training_forward = torch.empty(SysModel.m, SysModel.T,
+                                     device=y_training.device, dtype=y_training.dtype)
+                x_out_training = torch.empty(SysModel.m, SysModel.T,
+                                     device=y_training.device, dtype=y_training.dtype)
 
                 # Init Hidden State
                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
@@ -372,7 +382,8 @@ class Pipeline_ERTS:
 
                 # Compute losses separately
                 if (CompositionLoss):
-                    y_hat = torch.empty([SysModel.n, SysModel.T])
+                    y_hat = torch.empty([SysModel.n, SysModel.T],
+                                     device=y_training.device, dtype=y_training.dtype)
                     for t in range(SysModel.T):
                         y_hat[:, t] = SysModel.h(x_out_training[:, t])
                     rtsnet_loss = self.alpha * self.loss_fn(x_out_training, train_target[n_e]) + (1 - self.alpha) * self.loss_fn(y_hat, train_input[n_e])
@@ -438,14 +449,16 @@ class Pipeline_ERTS:
             # Cross Validation Mode
             self.model.eval()
             with torch.no_grad():
-                MSE_cv_linear_batch = torch.empty([self.N_CV])
+                MSE_cv_linear_batch = torch.empty([self.N_CV], device=self.device)
 
                 for j in range(0, self.N_CV):
                     y_cv = cv_input[j]
                     SysModel.T_test = y_cv.size()[-1]
 
-                    x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test)
-                    x_out_cv = torch.empty(SysModel.m, SysModel.T_test)
+                    x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test,
+                               device=y_cv.device, dtype=y_cv.dtype)
+                    x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
+                               device=y_cv.device, dtype=y_cv.dtype)
 
                     if generate_f != None:  ####if we valid with different f
                         index = j // 10
@@ -993,8 +1006,8 @@ class Pipeline_ERTS:
         self.N_T = len(test_input)
 
 
-        self.MSE_test_linear_arr = torch.empty([self.N_T])
-        self.MSE_test_psmooth_arr = torch.empty([self.N_T])
+        self.MSE_test_linear_arr = torch.empty([self.N_T], device=self.device, dtype=SysModel.F.dtype)
+        self.MSE_test_psmooth_arr = torch.empty([self.N_T], device=self.device, dtype=SysModel.F.dtype)
 
              # MSE LOSS Function
         loss_fn = nn.MSELoss(reduction='mean')
@@ -1004,11 +1017,7 @@ class Pipeline_ERTS:
             self.PsmoothNN = torch.load(load_p_smoothe_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
         else:
             self.PsmoothNN = torch.load('RTSNet/full_info/best-model.pt', map_location=self.device, weights_only=False).to(self.device).eval()
-        self.model = torch.load(load_model_path,weights_only=False)
-
-
-        self.model.eval()
-        self.PsmoothNN.eval()
+        self.model = torch.load(load_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
 
         torch.no_grad()
 
@@ -1021,8 +1030,8 @@ class Pipeline_ERTS:
         for j in range(0, self.N_T):
             y_mdl_tst = test_input[j]
             SysModel.T_test = y_mdl_tst.size()[-1]
-            x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test)
-            x_out_test = torch.empty(SysModel.m, SysModel.T_test)
+            x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
+            x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
 
             self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
             self.model.init_hidden()
@@ -1056,8 +1065,8 @@ class Pipeline_ERTS:
                 self.model.smoother_gain_list.append(self.model.SGain.clone().detach())##there are T-1 s gain
 
             # Compute P-smooth predictions
-            P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test)
-            dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m)  # shape: [1, 1, m²] input to PsmoothNN
+            P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test,  device=device)
+            dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m, device=device)  # shape: [1, 1, m²] input to PsmoothNN
             sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
             self.PsmoothNN.start = 0
             # Handle initial P-smooth at time T_test
@@ -1949,10 +1958,12 @@ class Pipeline_ERTS:
         """
         T = y_seq.size()[-1]
         m = SysModel.m
+        dev = y_seq.device
+        dt = y_seq.dtype
 
         # Initialize
-        x_out_forward = torch.empty(m, T)
-        x_out_smoothed = torch.empty(m, T)
+        x_out_forward = torch.empty(m, T,device=dev, dtype=dt)
+        x_out_smoothed = torch.empty(m, T,device=dev, dtype=dt)
 
         self.rtsnet_models[model_index].init_hidden()
         self.rtsnet_models[model_index].InitSequence(SysModel.m1x_0, T)
@@ -1982,8 +1993,8 @@ class Pipeline_ERTS:
             smoother_gain_list.append(self.rtsnet_models[model_index].SGain.clone())
 
         # Run PsmoothNet
-        P_smoothed_seq = torch.empty(m, m, T)
-        dummy_sgain = torch.zeros(1, 1, m * m)
+        P_smoothed_seq = torch.empty(m, m, T, device=dev, dtype=dt)
+        dummy_sgain = torch.zeros(1, 1, m * m, device=dev, dtype=dt)
 
         # Final time step
         sigma_T = sigma_list[-1]
@@ -2007,7 +2018,7 @@ class Pipeline_ERTS:
         smoother_gain_list.append(s_0.clone())
 
         # Extract filtered covariances
-        P_filtered_seq = torch.empty(m, m, T)
+        P_filtered_seq = torch.empty(m, m, T, device=dev, dtype=dt)
         # for i, sigma in enumerate(sigma_list):
         #     sigma_processed = sigma.view(4, 4).mean(dim=1)
         #     P_filtered_seq[:, :, i] = self.psmooth_models[model_index].enforce_covariance_properties(
@@ -2198,8 +2209,8 @@ class Pipeline_ERTS:
                 iter_avg_f_loss = torch.stack(all_iter_f_losses[em_iter]).mean()
             else:
                 # Fallback values when no losses were collected
-                iter_avg_loss = torch.tensor(1000.0)  # High loss indicates problem
-                iter_avg_f_loss = torch.tensor(0.0)  # Zero F-loss as neutral value
+                iter_avg_loss = torch.tensor(1000.0, device=self.device)  # High loss indicates problem
+                iter_avg_f_loss = torch.tensor(0.0, device=self.device)  # Zero F-loss as neutral value
 
             final_iter_losses.append(iter_avg_loss)
             final_iter_f_losses.append(iter_avg_f_loss)
@@ -2241,10 +2252,10 @@ class Pipeline_ERTS:
                                                             weight_decay=self.weightDecay))
 
         # Logging arrays
-        self.MSE_train_total_dB_epoch = torch.empty([self.N_steps])
-        self.MSE_cv_total_dB_epoch = torch.empty([self.N_steps])
-        self.F_loss_train_epoch = torch.empty([self.N_steps])
-        self.F_loss_cv_epoch = torch.empty([self.N_steps])
+        self.MSE_train_total_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_total_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.F_loss_train_epoch = torch.empty([self.N_steps], device=self.device)
+        self.F_loss_cv_epoch = torch.empty([self.N_steps], device=self.device)
 
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0

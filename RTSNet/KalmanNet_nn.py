@@ -11,6 +11,8 @@ class KalmanNetNN(torch.nn.Module):
     ###################
     def __init__(self):
         super().__init__()
+        self.dev = torch.device("cuda")
+        self.dt  = torch.float32
     
     def NNBuild(self, SysModel, args):
 
@@ -22,6 +24,7 @@ class KalmanNetNN(torch.nn.Module):
 
         # Number of neurons in the 2nd hidden layer
         #H2_KNet = (SysModel.m * SysModel.n) * 1 * (4)
+
 
         self.InitKGainNet(SysModel.prior_Q, SysModel.prior_Sigma, SysModel.prior_S, args)
 
@@ -43,19 +46,19 @@ class KalmanNetNN(torch.nn.Module):
         self.d_input_Q = self.m * args.in_mult_KNet
         self.d_hidden_Q = self.m ** 2
         self.GRU_Q = nn.GRU(self.d_input_Q, self.d_hidden_Q)
-        self.h_Q = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Q)
+        self.h_Q = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Q, device=self.dev, dtype=self.dt)
 
         # GRU to track Sigma
         self.d_input_Sigma = self.d_hidden_Q + self.m * args.in_mult_KNet + (self.m ** 2) * args.in_mult_KNet # (self.m ** 2) * args.in_mult_KNet is the F output
         self.d_hidden_Sigma = (self.m ** 2) * mult
         self.GRU_Sigma = nn.GRU(self.d_input_Sigma, self.d_hidden_Sigma)
-        self.h_Sigma = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma)
+        self.h_Sigma = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma, device=self.dev, dtype=self.dt)
 
         # GRU to track S
         self.d_input_S = self.n ** 2 + 2 * self.n * args.in_mult_KNet
         self.d_hidden_S = (self.n ** 2)* mult
         self.GRU_S = nn.GRU(self.d_input_S, self.d_hidden_S)
-        self.h_S = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_S)
+        self.h_S = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_S, device=self.dev, dtype=self.dt)
 
         # Fully connected 1
         self.d_input_FC1 = self.d_hidden_Sigma
@@ -241,7 +244,7 @@ class KalmanNetNN(torch.nn.Module):
     def KGain_step(self, obs_diff, obs_innov_diff, fw_evol_diff, fw_update_diff):
 
         def expand_dim(x):
-            expanded = torch.empty(self.seq_len_input, self.batch_size, x.shape[-1])
+            expanded = torch.empty(self.seq_len_input, self.batch_size, x.shape[-1],device=x.device, dtype=x.dtype)
             expanded[0, 0, :] = x
             return expanded
 

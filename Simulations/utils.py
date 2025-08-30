@@ -4,7 +4,7 @@ The file contains utility functions for the simulations.
 
 import torch
 
-
+device = torch.device("cuda")
 
 
 def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True):
@@ -117,7 +117,7 @@ def Decimate_and_perturbate_Data(true_process, delta_t, delta_t_mod, N_examples,
 
 def getObs(sequences, h):
     i = 0
-    sequences_out = torch.zeros_like(sequences)
+    sequences_out = torch.zeros_like(sequences, device=sequences.device)
     # sequences_out = torch.zeros_like(sequences)
     for sequence in sequences:
         for t in range(sequence.size()[1]):

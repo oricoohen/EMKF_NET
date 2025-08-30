@@ -24,7 +24,7 @@ import shutil
 print("Pipeline Start")
 print(torch.cuda.is_available())  # should be True
 print(torch.cuda.get_device_name(0))
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda")
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
 
@@ -93,12 +93,24 @@ print("Data Load")
 
 
 [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
-[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F)
+[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F, map_location=device)
 print("trainset size:",train_target.size())#(seq,m,T)
 print("cvset size:",cv_target.size())
 print("testset size:",test_target.size())
 
 
+
+
+############################
+# --- GPU moves for datasets (dtype aligned with F) ---
+ddtype = F.dtype
+train_input = train_input.to(device=device, dtype=ddtype)
+train_target = train_target.to(device=device, dtype=ddtype)
+cv_input = cv_input.to(device=device, dtype=ddtype)
+cv_target = cv_target.to(device=device, dtype=ddtype)
+test_input = test_input.to(device=device, dtype=ddtype)
+test_target = test_target.to(device=device, dtype=ddtype)
+############################
 sys_model.F_train = F_train_mat
 sys_model.F_valid = F_val_mat
 sys_model.F_test = F_test_mat
@@ -116,7 +128,7 @@ print(F_test_mat,'333333333333333')
 
 
 loss_obs = nn.MSELoss(reduction='mean')
-MSE_obs_linear_arr = torch.empty(args.N_T)# MSE [Linear]
+MSE_obs_linear_arr = torch.empty(args.N_T, device=device)# MSE [Linear]
 for j in range(0, args.N_T):
    MSE_obs_linear_arr[j] = loss_obs(test_input[j], test_target[j]).item()
 MSE_obs_linear_avg = torch.mean(MSE_obs_linear_arr)
@@ -169,11 +181,11 @@ sys_model_2.F_train = F_train_mat.copy()
 sys_model_2.F_valid = F_val_mat.copy()
 sys_model_2.F_test = F_test_mat.copy()
 for i in range(len(F_train_mat)):
-    sys_model_2.F_train[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]],device=device)
+    sys_model_2.F_train[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 for i in range(len(F_val_mat)):
-    sys_model_2.F_valid[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]],device=device)
+    sys_model_2.F_valid[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 for i in range(len(F_test_mat)):
-    sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]],device=device)
+    sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 sys_model_2.args = args
 print("F WRONGGGGGG:",sys_model_2.F_test)
 
@@ -273,9 +285,9 @@ sys_model_2.F_test = rotate_F(F_test_mat)
 print('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
 sys_model_2.F_test = F_test_mat
 for i in range(len(F_test_mat)):
-    # sys_model_2.F_train =torch.tensor([[0.83, 0.2],[0.2, 0.83]])
-    # sys_model_2.F_valid =torch.tensor([[0.83, 0.2],[0.2, 0.83]])
-    sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]])
+    # sys_model_2.F_train =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+    # sys_model_2.F_valid =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+    sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 EMKF_F(sys_model_2,RTSNet_Pipeline,train_input, train_target, cv_input, cv_target,test_input, test_target,model_pathes,psmooth_pathes,3)
 
 d

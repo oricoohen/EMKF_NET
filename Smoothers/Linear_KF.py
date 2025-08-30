@@ -21,6 +21,12 @@ class KalmanFilter:
         self.T = SystemModel.T
         self.T_test = SystemModel.T_test
 
+        # >>> ADD THESE 2 LINES <<<
+        self.dev = self.F.device
+        self.dt  = self.F.dtype
+
+
+
     # Predict
 
     def Predict(self):
@@ -78,8 +84,8 @@ class KalmanFilter:
     #########################
     def GenerateSequence(self, y, T):
         # Pre allocate an array for predicted state and variance
-        self.x = torch.empty(size=[self.m, T])
-        self.sigma = torch.empty(size=[self.m, self.m, T])
+        self.x = torch.empty(size=[self.m, T], device=self.dev, dtype=self.dt)
+        self.sigma = torch.empty(size=[self.m, self.m, T], device=self.dev, dtype=self.dt)
 
         self.m1x_posterior = self.m1x_0
         self.m2x_posterior = self.m2x_0

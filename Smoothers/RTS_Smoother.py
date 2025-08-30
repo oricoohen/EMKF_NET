@@ -6,10 +6,12 @@ import torch
 class rts_smoother:
 
     def __init__(self, SystemModel): 
+
         self.F = SystemModel.F
         self.F_T = torch.transpose(self.F, 0, 1)
         self.m = SystemModel.m
-
+        self.dev = SystemModel.F.device
+        self.dt  = SystemModel.F.dtype
         self.Q = SystemModel.Q
 
         self.H = SystemModel.H
@@ -58,8 +60,8 @@ class rts_smoother:
     #########################
     def GenerateSequence(self, filter_x, filter_sigma, T):
         # Pre allocate an array for predicted state and variance
-        self.s_x = torch.empty(size=[self.m, T])
-        self.s_sigma = torch.empty(size=[self.m, self.m, T])
+        self.s_x = torch.empty(size=[self.m, T],device=self.dev, dtype=self.dt)
+        self.s_sigma = torch.empty(size=[self.m, self.m, T],device=self.dev, dtype=self.dt)
 
         self.s_m1x_nexttime = filter_x[:, T-1]
         self.s_m2x_nexttime = filter_sigma[:, :, T-1]

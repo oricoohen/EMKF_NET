@@ -15,11 +15,14 @@ class RTSNetNN(KalmanNetNN):
     ###################
     def __init__(self):
         super().__init__()
+        self.dev = torch.device("cuda")
+        self.dt  = torch.float32
 
     #############
     ### Build ###
     #############
     def NNBuild(self, ssModel, args):
+
 
         self.InitSystemDynamics(ssModel.f, ssModel.h, ssModel.m, ssModel.n)
 
@@ -32,6 +35,7 @@ class RTSNetNN(KalmanNetNN):
         # H2_RTSNet = (ssModel.m * ssModel.m) * 1 * (4)
 
         self.InitRTSGainNet(ssModel.prior_Q, ssModel.prior_Sigma, args)
+
 
     def standardize(self, x, eps: float = 1e-5):
         return (x - x.mean()) / (x.std() + eps)
@@ -62,14 +66,16 @@ class RTSNetNN(KalmanNetNN):
         self.d_input_Q_bw = self.m * args.in_mult_RTSNet
         self.d_hidden_Q_bw = self.m ** 2
         self.GRU_Q_bw = nn.GRU(self.d_input_Q_bw, self.d_hidden_Q_bw)
-        self.h_Q_bw = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Q_bw)
+        self.h_Q_bw = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Q_bw,
+                              device=self.dev, dtype=self.dt)
 
         # BW GRU to track Sigma
         #self.d_input_Sigma_bw = self.d_hidden_Q_bw + 2 * self.m * args.in_mult_RTSNet oriiiiiii
         self.d_input_Sigma_bw = (self.d_hidden_Q_bw + 2 * self.m * args.in_mult_RTSNet+ self.d_hidden_FF2_bw)
         self.d_hidden_Sigma_bw = mult_bw*self.m ** 2
         self.GRU_Sigma_bw = nn.GRU(self.d_input_Sigma_bw, self.d_hidden_Sigma_bw)
-        self.h_Sigma_bw = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma_bw)
+        self.h_Sigma_bw = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma_bw,
+                              device=self.dev, dtype=self.dt)
 
 
         # BW Fully connected 1
@@ -183,7 +189,7 @@ class RTSNetNN(KalmanNetNN):
     def RTSGain_step(self, bw_innov_diff, bw_evol_diff, bw_update_diff):
 
         def expand_dim(x):
-            expanded = torch.empty(self.seq_len_input, self.batch_size, x.shape[-1])
+            expanded = torch.empty(self.seq_len_input, self.batch_size, x.shape[-1], device = x.device, dtype = x.dtype)
             expanded[0, 0, :] = x
             return expanded
 

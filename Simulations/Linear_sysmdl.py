@@ -15,6 +15,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import random
 from torch.distributions import MultivariateNormal, Exponential
+DEVICE =torch.device("cuda")
 def uniform_two_ranges(a: float, b: float):
     """
     Draws a single sample that is uniform either in  [a , b]
@@ -43,11 +44,11 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
     """
     F_matrices = []
     F = torch.tensor([[0.999, 0.1],
-                      [0.2, 0.8]])
+                      [0.2, 0.8]], device=DEVICE)
     F = torch.tensor([[0.83, 0.2],
-                        [0.2, 0.83]])
+                        [0.2, 0.83]], device=DEVICE)
     for _ in range(num_F+1):
-        F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]])
+        F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
         # F_i = rotate_F(F, i=0, j=1, theta=1,mult=1, many=False, randomit=True)
                 # F = torch.tensor([[-0.9, 0.],
         #                    [0.05, 1.98]])
@@ -69,10 +70,10 @@ def change_F(F, mult=0.0001, many=True):
 
     def apply_change(F_single, mult):
 
-        F_single[0, 1] = F_single[0, 1] + torch.randn(1).item()*mult
-        F_single[1, 0] = F_single[1, 0] + torch.randn(1).item()*mult
-        F_single[0, 0] = F_single[0, 0] + torch.randn(1).item()*mult
-        F_single[1, 1] = F_single[1, 1] + torch.randn(1).item()*mult
+        F_single[0, 1] = F_single[0, 1] + torch.randn((1), device=DEVICE).item()*mult
+        F_single[1, 0] = F_single[1, 0] + torch.randn((1), device=DEVICE).item()*mult
+        F_single[0, 0] = F_single[0, 0] + torch.randn((1), device=DEVICE).item()*mult
+        F_single[1, 1] = F_single[1, 1] + torch.randn((1), device=DEVICE).item()*mult
 
         return F_single
 
@@ -94,7 +95,7 @@ def det(F, mult=0.0001, many=True):
 
     def apply_change1(F_single, mult):
         F_single = torch.tensor([[0.83, 0.1],
-                          [0., 0.999]])
+                          [0., 0.999]],device=F_single.device, dtype=F_single.dtype)
         F_single[0, 1] = F_single[0, 1] + uniform_two_ranges(0.0, 1) * mult * 0.25  # Add random coupling
         F_single[1, 0] = F_single[1, 0] + uniform_two_ranges(0.0, 1) * mult * 0.25  # Add random coupling
         F_single[0, 0] = F_single[0, 0] + uniform_two_ranges(0.0, 1) * mult * 0.25  # Add random coupling
@@ -131,7 +132,7 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
     """
     def apply_rotation(F_single, theta, i, j):
         n = F_single.shape[0]
-        R = torch.eye(n, dtype=F_single.dtype)
+        R = torch.eye(n, dtype=F_single.dtype, device=F_single.device)
         R[i, i] = torch.cos(theta)
         R[i, j] = -torch.sin(theta)
         R[j, i] = torch.sin(theta)
@@ -143,15 +144,15 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
         if randomit:
             theta = uniform_two_ranges(0,1)*theta
         theta = torch.tensor(theta)
-        return apply_rotation(F, torch.tensor(theta), i, j)
+        return apply_rotation(F, torch.tensor(theta, device=F.device), i, j)
     else:
         rotated_list = []
         for F_i in F:
             if randomit:
                 angle = uniform_two_ranges(0.0,1)*theta
-                angle = torch.tensor(angle)
+                angle = torch.tensor(angle, device=F.device)
             else:
-                angle = torch.tensor(theta)
+                angle = torch.tensor(theta, device=F[0].device)
             rotated_list.append(apply_rotation(F_i, angle, i, j))
             # delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
             # print("Deviation:", delta.item())
@@ -164,7 +165,7 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
 
 class SystemModel:
 
-    def __init__(self, F, Q, H, R, T, T_test,F_initial_guess=None, prior_Q=None, prior_Sigma=None, prior_S=None):
+    def __init__(self, F, Q, H, R, T, T_test,F_initial_guess=None, prior_Q=None, prior_Sigma=None, prior_S=None,device: torch.device = DEVICE):
 
         ####################
         ### Motion Model ###
@@ -176,6 +177,7 @@ class SystemModel:
         self.F_train_TRUE = None
         self.F_valid_TRUE = None
         self.F_test_TRUE = None
+        self.device = device
 
 
         self.F_gen = None
@@ -202,17 +204,17 @@ class SystemModel:
         ### Covariance Priors ###
         #########################
         if prior_Q is None:
-            self.prior_Q = torch.eye(self.m)
+            self.prior_Q = torch.eye(self.m, device=self.device, dtype=self.F.dtype)
         else:
             self.prior_Q = prior_Q
 
         if prior_Sigma is None:
-            self.prior_Sigma = torch.zeros((self.m, self.m))
+            self.prior_Sigma = torch.zeros((self.m, self.m), device=self.device, dtype=self.F.dtype)
         else:
             self.prior_Sigma = prior_Sigma
 
         if prior_S is None:
-            self.prior_S = torch.eye(self.n)
+            self.prior_S = torch.eye(self.n, device=self.device, dtype=self.H.dtype)
         else:
             self.prior_S = prior_S
 
@@ -249,9 +251,9 @@ class SystemModel:
     #########################
     def GenerateSequence(self, Q_gen, R_gen, T):
         # Pre allocate an array for current state
-        self.x = torch.empty(size=[self.m, T])
+        self.x = torch.empty(size=[self.m, T], device=self.device, dtype=self.F.dtype)
         # Pre allocate an array for current observation
-        self.y = torch.empty(size=[self.n, T])
+        self.y = torch.empty(size=[self.n, T], device=self.device, dtype=self.F.dtype)
         # Set x0 to be x previous
         self.x_prev = self.m1x_0
         xt = self.x_prev
@@ -264,7 +266,7 @@ class SystemModel:
             ########################
             #### State Evolution ###
             ########################
-            if torch.equal(Q_gen,torch.zeros(self.m,self.m)):# No noise
+            if torch.equal(Q_gen,torch.zeros(self.m,self.m, device=self.device)):# No noise
                 xt = self.F.matmul(self.x_prev)
             elif self.m == 1: # 1 dim noise
                 xt = self.F.matmul(self.x_prev)
@@ -291,7 +293,7 @@ class SystemModel:
             ### Emission ###
             ################
             # Observation Noise
-            if torch.equal(R_gen,torch.zeros(self.n,self.n)):# No noise
+            if torch.equal(R_gen,torch.zeros(self.n,self.n, device=self.device)):# No noise
                 yt = self.H.matmul(xt)
             elif self.n == 1: # 1 dim noise
                 yt = self.H.matmul(xt)
@@ -338,16 +340,16 @@ class SystemModel:
             # Allocate Empty list for Target
             self.Target = []
             # Init Sequence Lengths
-            T_tensor = torch.round(900*torch.rand(size)).int()+100 # Uniform distribution [100,1000]
+            T_tensor = torch.round(900*torch.rand(size, device=self.device)).int()+100 # Uniform distribution [100,1000]
         else:
             # Allocate Empty Array for Input
-            self.Input = torch.empty(size, self.n, T)
+            self.Input = torch.empty(size, self.n, T, device=self.device, dtype=self.H.dtype)
             # Allocate Empty Array for Target
-            self.Target = torch.empty(size, self.m, T)
+            self.Target = torch.empty(size, self.m, T, device=self.device, dtype=self.F.dtype)
 
         if(randomInit):
             # Allocate Empty Array for Random Initial Conditions
-            self.m1x_0_rand = torch.empty(size, self.m)
+            self.m1x_0_rand = torch.empty(size, self.m, device=self.device, dtype=self.F.dtype)
         ### Generate Examples
         initConditions = self.m1x_0
 
@@ -398,24 +400,24 @@ class SystemModel:
         if (gain != 0):
             gain_q = 0.1
             #aq = gain * q * np.random.randn(self.m, self.m)
-            aq = gain_q * q * torch.eye(self.m)
+            aq = gain_q * q * torch.eye(self.m, device=self.device)
             #aq = gain_q * q * torch.tensor([[1.0, 1.0], [1.0, 1.0]])
         else:
             aq = 0
 
-        Aq = q * torch.eye(self.m) + aq
+        Aq = q * torch.eye(self.m, device=self.device) + aq
         Q_gen = torch.transpose(Aq, 0, 1) * Aq
 
         if (gain != 0):
             gain_r = 0.5
             #ar = gain * r * np.random.randn(self.n, self.n)
-            ar = gain_r * r * torch.eye(self.n)
+            ar = gain_r * r * torch.eye(self.n, device=self.device)
             #ar = gain_r * r * torch.tensor([[1.0, 1.0], [1.0, 1.0]])
 
         else:
             ar = 0
 
-        Ar = r * torch.eye(self.n) + ar
+        Ar = r * torch.eye(self.n, device=self.device) + ar
         R_gen = torch.transpose(Ar, 0, 1) * Ar
 
         return [Q_gen, R_gen]
