@@ -173,6 +173,244 @@ sys_model_2.F_train_TRUE = F_train_mat_2
 sys_model_2.F_valid_TRUE = F_val_mat_2
 sys_model_2.F_test_TRUE = F_test_mat_2
 
+####create data######
+#
+# T = 30
+# n = 2
+# p = 2
+#
+# state = 1
+# gen = np.random.default_rng(seed=state)
+#
+#
+# F_sim2 = np.array([[0.83, 0.2],
+#                    [0.2, 0.83]])          #   [[1,1],[0.1,1]]
+#
+#
+# Q_sim2 = 0.01 * np.eye(n)               #   process-noise covariance
+# H_sim2 = np.array([[1., 1.], [0.25, 1.]])                  #   full observation
+# R_sim2 = 0.10 * np.eye(p)               #   measurement-noise covariance
+#
+# xi_sim2 = np.array([0.5, 0.5])          #   x₀ mean
+# L_sim2  = np.eye(n)
+#
+# # x_sim2 = np.array([gen.multivariate_normal(xi_sim2, L_sim2)])
+# x_sim2 = xi_sim2.reshape(1, n)  #   initial state
+# z_sim2 = np.empty((1, p))
+#
+# for t in range(T):
+#     x_sim2 = np.append(x_sim2, [F_sim2 @ x_sim2[t] + gen.multivariate_normal(np.zeros(n), Q_sim2)], axis=0)
+#     z_sim2 = np.append(z_sim2, [H_sim2 @ x_sim2[t + 1] + gen.multivariate_normal(np.zeros(p), R_sim2)], axis=0)
+# z_sim2 = np.delete(z_sim2, 0, axis=0)
+# x_0 = x_sim2[0].reshape(n, 1)  #   initial state
+# x_sim2 = np.delete(x_sim2, 0, axis=0)
+# # make PyTorch default to 32-bit floats
+# torch.set_default_dtype(torch.float32)
+#
+# x_true_t = torch.from_numpy(x_sim2.T).contiguous().float()
+# z_meas_t = torch.from_numpy(z_sim2.T).contiguous().float()
+#
+# # Pack to match S_Test/KFTest interface: (N_T, dim, T)
+# test_target = x_true_t.unsqueeze(0)    # (1, n, T)
+# test_input  = z_meas_t.unsqueeze(0)    # (1, p, T)
+
+#################################################################################################
+# Set seeds
+torch.manual_seed(1)
+
+
+# # Parameters - EXACTLY matching your NumPy code
+# T = 30
+# n = 2
+# p = 2
+#
+# # Use NumPy random generator for consistency with your original
+# gen = np.random.default_rng(seed=1)
+#
+# # System matrices - EXACTLY matching
+# F_sim2 = torch.tensor([[0.83, 0.2],
+#                        [0.2, 0.83]], dtype=torch.float32)
+#
+# Q_sim2 = 0.01 * torch.eye(n, dtype=torch.float32)
+# H_sim2 = torch.tensor([[1., 1.],
+#                        [0.25, 1.]], dtype=torch.float32)
+# R_sim2 = 0.10 * torch.eye(p, dtype=torch.float32)
+#
+# xi_sim2 = torch.tensor([0.5, 0.5], dtype=torch.float32)
+#
+# # Initialize - EXACTLY like NumPy
+# x_sim2 = xi_sim2.unsqueeze(0)  # Shape: (1, 2) like numpy reshape(1, n)
+# z_sim2 = torch.empty((1, p), dtype=torch.float32)  # Empty first row
+#
+# print("Initial state:", x_sim2)
+# print("F matrix:", F_sim2)
+# print("Q matrix:", Q_sim2)
+# print("H matrix:", H_sim2)
+# print("R matrix:", R_sim2)
+#
+# # Generate sequence - EXACTLY like NumPy loop
+# for t in range(T):
+#     # State evolution: x_{t+1} = F @ x_t + process_noise
+#     current_state = x_sim2[t]  # Current state
+#
+#     # Generate process noise using NumPy (to match exactly)
+#     process_noise_np = gen.multivariate_normal(np.zeros(n), Q_sim2.numpy())
+#     process_noise = torch.from_numpy(process_noise_np).float()
+#
+#     # Evolve state
+#     next_state = F_sim2 @ current_state + process_noise
+#     x_sim2 = torch.cat([x_sim2, next_state.unsqueeze(0)], dim=0)
+#
+#     # Generate observation: z_t = H @ x_{t+1} + measurement_noise
+#     measurement_noise_np = gen.multivariate_normal(np.zeros(p), R_sim2.numpy())
+#     measurement_noise = torch.from_numpy(measurement_noise_np).float()
+#
+#     observation = H_sim2 @ next_state + measurement_noise
+#     z_sim2 = torch.cat([z_sim2, observation.unsqueeze(0)], dim=0)
+#
+# # Remove first empty observation
+# z_sim2 = z_sim2[1:]  # Remove first empty row
+#
+# # Remove initial state (like NumPy x_sim2[1:])
+# x_0 = x_sim2[0].unsqueeze(1)  # Initial state as column vector
+# x_sim2 = x_sim2[1:]  # Remove initial state
+#
+# print("\nGenerated data shapes:")
+# print("x_sim2 shape:", x_sim2.shape)  # Should be (T, n)
+# print("z_sim2 shape:", z_sim2.shape)  # Should be (T, p)
+#
+# # Convert to final format like your NumPy code
+# x_true_t = x_sim2.T  # Transpose to (n, T)
+# z_meas_t = z_sim2.T  # Transpose to (p, T)
+#
+# # Pack to match interface
+# test_target = x_true_t.unsqueeze(0)  # (1, n, T)
+# test_input = z_meas_t.unsqueeze(0)  # (1, p, T)
+#
+# print("\nFinal shapes:")
+# print("test_target shape:", test_target.shape)
+# print("test_input shape:", test_input.shape)
+#
+# print("\nFirst few states:")
+# print("x_true_t[:, :5]:")
+# print(x_true_t[:, :5])
+#
+# print("\nFirst few observations:")
+# print("z_meas_t[:, :5]:")
+# print(z_meas_t[:, :5])
+#
+# # Verify the relationship between observations and states
+# print("\nVerification - First observation should be related to first state:")
+# print("First state x_true_t[:, 0]:", x_true_t[:, 0])
+# print("H @ first state:", H_sim2 @ x_true_t[:, 0])
+# print("First observation z_meas_t[:, 0]:", z_meas_t[:, 0])
+# print("Difference (should be noise):", z_meas_t[:, 0] - H_sim2 @ x_true_t[:, 0])
+# # #########################################################################################################
+# import torch
+# from torch.distributions.multivariate_normal import MultivariateNormal
+# #
+# # #Set seed
+# # torch.manual_seed(1)
+#
+# # Parameters - EXACTLY matching your NumPy code
+# T = 30
+# n = 2
+# p = 2
+#
+# # System matrices - EXACTLY matching
+# F_sim2 = torch.tensor([[0.83, 0.2],
+#                        [0.2, 0.83]], dtype=torch.float32)
+#
+# #Q_sim2 = 0.01 * torch.eye(n, dtype=torch.float32)
+# Q_sim2 = torch.eye(n, dtype=torch.float32)
+#
+# H_sim2 = torch.tensor([[1., 1.],
+#                        [0.25, 1.]], dtype=torch.float32)
+# # R_sim2 = 0.10 * torch.eye(p, dtype=torch.float32)
+# R_sim2 = torch.eye(p, dtype=torch.float32)
+# xi_sim2 = torch.tensor([0.5, 0.5], dtype=torch.float32)
+#
+# # Initialize - EXACTLY like NumPy
+# x_sim2 = xi_sim2.unsqueeze(0)  # Shape: (1, 2) like numpy reshape(1, n)
+# z_sim2 = torch.empty((1, p), dtype=torch.float32)  # Empty first row
+#
+# print("Initial state:", x_sim2)
+# print("F matrix:", F_sim2)
+# print("Q matrix:", Q_sim2)
+# print("H matrix:", H_sim2)
+# print("R matrix:", R_sim2)
+#
+# # Create distributions for noise generation
+# process_noise_dist = MultivariateNormal(torch.zeros(n), Q_sim2)
+#
+# measurement_noise_dist = MultivariateNormal(torch.zeros(p), R_sim2)
+#
+# lam_r = 1.
+#
+# # Generate sequence - EXACTLY like NumPy loop
+# for t in range(T):
+#     # State evolution: x_{t+1} = F @ x_t + process_noise
+#     current_state = x_sim2[t]  # Current state
+#
+#     # Generate process noise using PyTorch
+#     # process_noise = process_noise_dist.sample()
+#     # Sample from it
+#
+#     lam_vec_r = torch.full((2,), lam_r)
+#     er = Exponential(lam_vec_r).sample()    # shape (n,)
+#     process_noise = torch.reshape(er[:], z_sim2.size())
+#     # Evolve state
+#     next_state = F_sim2 @ current_state + process_noise
+#     x_sim2 = torch.cat([x_sim2, next_state.unsqueeze(0)], dim=0)
+#
+#     # Generate observation: z_t = H @ x_{t+1} + measurement_noise
+#     # measurement_noise = measurement_noise_dist.sample()
+#
+#     # measurement_noise = exp_dist.sample((1,))
+#     lam_vec_q = torch.full((2,), lam_r)
+#     eq = Exponential(lam_vec_r).sample()  # shape (n,)
+#     measurement_noise = torch.reshape(eq[:], z_sim2.size())
+#     observation = H_sim2 @ next_state + measurement_noise
+#     z_sim2 = torch.cat([z_sim2, observation.unsqueeze(0)], dim=0)
+#
+# # Remove first empty observation
+# z_sim2 = z_sim2[1:]  # Remove first empty row
+#
+# # Remove initial state (like NumPy x_sim2[1:])
+# x_0 = x_sim2[0].unsqueeze(1)  # Initial state as column vector
+# x_sim2 = x_sim2[1:]  # Remove initial state
+#
+# print("\nGenerated data shapes:")
+# print("x_sim2 shape:", x_sim2.shape)  # Should be (T, n)
+# print("z_sim2 shape:", z_sim2.shape)  # Should be (T, p)
+#
+# # Convert to final format like your NumPy code
+# x_true_t = x_sim2.T  # Transpose to (n, T)
+# z_meas_t = z_sim2.T  # Transpose to (p, T)
+#
+# # Pack to match interface
+# test_target = x_true_t.unsqueeze(0)  # (1, n, T)
+# test_input = z_meas_t.unsqueeze(0)  # (1, p, T)
+#
+# print("\nFinal shapes:")
+# print("test_target shape:", test_target.shape)
+# print("test_input shape:", test_input.shape)
+#
+# print("\nFirst few states:")
+# print("x_true_t[:, :5]:")
+# print(x_true_t[:, :5])
+#
+# print("\nFirst few observations:")
+# print("z_meas_t[:, :5]:")
+# print(z_meas_t[:, :5])
+#
+# # Verify the relationship between observations and states
+# print("\nVerification - First observation should be related to first state:")
+# print("First state x_true_t[:, 0]:", x_true_t[:, 0])
+# print("H @ first state:", H_sim2 @ x_true_t[:, 0])
+# print("First observation z_meas_t[:, 0]:", z_meas_t[:, 0])
+# print("Difference (should be noise):", z_meas_t[:, 0] - H_sim2 @ x_true_t[:, 0])
+
 
 #########change to wrong f option A
 # sys_model_2.F_train = change_F(F_train_mat_2)
@@ -238,10 +476,11 @@ print('rtssnet and psmooth with trueeeeeeee F')
 #RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_full_rts2 ,path_results_psmooth=path_results_full_psmooth,
 #                            load_rtsnet = path_results_full_rts,load_psmooth = None, generate_f=True,beta=0.)
 
-
 ### Test Neural Network
+RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full, True)
 
-#RTSNet_Pipeline.NNTest(sys_model, test_input, test_target, path_results_full, True)
+
+h
 
 RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')

@@ -66,7 +66,7 @@ def compute_cross_covariances( F, H, Ks, Ps, SGains):
 
 
 
-def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None):
+def S_Test(SysModel, test_input, test_target,F,generate_f=True, allStates=True, randomInit = False,test_init=None):
 
     # LOSS
     loss_rts = nn.MSELoss(reduction='mean')
@@ -97,7 +97,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
 
     for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
 
-        if F is not None:
+        if generate_f == True:
             F_index = j//10
             SysModel.F = F[F_index]
             SysModel.F_T = SysModel.F.T
@@ -105,6 +105,13 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
             KF.F_T = F[F_index].T
             RTS.F = F[F_index]
             RTS.F_T = F[F_index].T
+        else:
+            SysModel.F = F[j]
+            SysModel.F_T = F[j].T
+            KF.F = F[j]
+            KF.F_T = F[j].T
+            RTS.F = F[j]
+            RTS.F_T = F[j].T
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)  
         else:
@@ -120,6 +127,7 @@ def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit 
         SGains = RTS.SGains
         # V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_smooth[j], SGains)
         V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_tilde[j], SGains)
+        # print('oriiiiiiiiiiiiiii check,', V_now.shape)
         V_test[j] = V_now
 
         

@@ -10,7 +10,7 @@ from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1
 from Simulations.utils import DataLoader, DataGen
 
 
-def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=20, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelihood=0.01, tol_params=0.005):
     """
     Perform EM for a single sequence to estimate the state transition matrix F.
 
@@ -35,9 +35,10 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=20, 
     A_1 = compute_A1(x_0, X_s, V_s,n,T)  # (n, n)
     A_2 = compute_A2(x_0, P_0, X_s, P_smooth_s,n,T)  # (n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
-    #eps = 1e-4 * torch.eye(n, device=A_2.device)
+    eps = 1e-7 * torch.eye(n, device=A_2.device)
     # A_2inv = torch.linalg.pinv(A_2+eps) ####istead of solving linlag we will solve the equation
     # F_fin = A_1 @ A_2inv
+    A_2 = A_2 + eps
     F_fin = torch.linalg.solve(A_2.T, A_1.T).T
     # print('f_i shape',F_i.shape)
     return F_fin
@@ -112,7 +113,7 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=20, 
 
 
 
-def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True, tol_likelihood=0.01, tol_params=0.005):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -142,8 +143,13 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
     iterations_list = []
     m = sys_model.m
     T = sys_model.T_test
+    # Accumulators for MSE across sequences, per iteration
+    mse_sums = 0.
     for j in range(len(X)):
-        index = j // 10
+        if generate_f ==True:
+            index = j // 10
+        else:
+            index= j
         F_est = F_0_matrices[index]
 
         Y_t = Y[j]
@@ -153,19 +159,19 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
         likelihood_j =[]
         for q in range(max_it):
             #############E STEP rts###############################
+            sys_model.InitSequence(m1_0, m2_0)
             print('q_iter:', q, 'F_est:', F_est)
-            [_,_,_, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
-            #likelihood = 0
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test(sys_model,
+                                                            Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0),generate_f=False)
+            # Compute *our* MSE for this sequence & iteration (linear, not dB)
+            if q ==max_it-1:
+                mse_sums += _mse_avg.float()
             #############M STEP rts###############################
-            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),m,T,max_it, tol_likelihood, tol_params)
+            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),m,T, tol_likelihood, tol_params)
             #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
             alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
-            #likelihood = Ell(H, R, Y_t, X_smooth, P_smooth_t)
-            #print('looglikelihood', likelihood)
-            #likelihood_j.append(likelihood)
-
             # Check convergence
             # if q > 0:
             #     delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
@@ -176,6 +182,12 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=20, 
         F_matrices.append(F_all_j)
         iterations_list.append(q)
         likelihoods.append(likelihood_j)
+    # -------- After all sequences: report mean MSE per iteration --------
+    mean_mse_per_seq_lin = mse_sums/len(X)
+    mean_mse_db = 10.0 * torch.log10(mean_mse_per_seq_lin + 1e-12)
 
+    print("\n=== Mean MSE across sequences per iteration ===")
+    for q in range(max_it+1):
+        print(f"Iter {q:02d}: mean MSE = {mean_mse_db.item():.3f} dB")
 
-    return F_matrices, likelihoods, iterations_list
+    return F_matrices, likelihoods, iterations_list, mean_mse_per_seq_lin

@@ -7,39 +7,52 @@ import torch
 
 
 
-def DataGen(args, SysModel_data, fileName,fileName_F = None,delta= 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False):
-
-    ##################################
-    ### Generate Training Sequence ###
-    ##################################
-    #ori generate F
+def DataGen(args, SysModel_data, fileName,fileName_F = None,delta= 0.5, randomInit_train=False,randomInit_cv=False,
+            randomInit_test=False,randomLength=False,Test=False,F_gen=True):
 
 
-    F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T,delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=True)
-    training_input = SysModel_data.Input
-    training_target = SysModel_data.Target
-    if(randomInit_train):
-        training_init = SysModel_data.m1x_0_rand
+    if Test is False:
+        print("Generating data for training, validation and test set...")
+        ##################################
+        ### Generate Training Sequence ###
+        ##################################
+        #ori generate F
+        F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T,delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=F_gen)
+        training_input = SysModel_data.Input
+        training_target = SysModel_data.Target
+        if(randomInit_train):
+            training_init = SysModel_data.m1x_0_rand
+        else:
+            x0 = torch.squeeze(SysModel_data.m1x_0)
+            training_init = x0.repeat(args.N_E,1) #size: N_E x m
+
+        ####################################
+        ### Generate Validation Sequence ###
+        ####################################
+        F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T,delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen)
+        cv_input = SysModel_data.Input
+        cv_target = SysModel_data.Target
+        if(randomInit_cv):
+            cv_init = SysModel_data.m1x_0_rand
+        else:
+            x0 = torch.squeeze(SysModel_data.m1x_0)
+            cv_init = x0.repeat(args.N_CV,1) #size: N_CV x m
     else:
-        x0 = torch.squeeze(SysModel_data.m1x_0)
-        training_init = x0.repeat(args.N_E,1) #size: N_E x m
-
-    ####################################
-    ### Generate Validation Sequence ###
-    ####################################
-    F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T,delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=True)
-    cv_input = SysModel_data.Input
-    cv_target = SysModel_data.Target
-    if(randomInit_cv):
-        cv_init = SysModel_data.m1x_0_rand
-    else:
-        x0 = torch.squeeze(SysModel_data.m1x_0)
-        cv_init = x0.repeat(args.N_CV,1) #size: N_CV x m
-
+        print("Generating data for test set only...")
+        F_matrices_train = None
+        F_matrices_val = None
+        training_input = None
+        training_target = None
+        training_init = None
+        cv_input = None
+        cv_target = None
+        cv_init = None
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=True)
+    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,
+                                                  randomLength=randomLength,F_gen=F_gen)
+    print(F_matrices_test)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     if(randomInit_test):
@@ -73,7 +86,7 @@ def DataLoader(fileName):
     return [training_input, training_target, cv_input, cv_target, test_input, test_target]
 
 def DecimateData(all_tensors, t_gen,t_mod, offset=0):
-    
+
     # ratio: defines the relation between the sampling time of the true process and of the model (has to be an integer)
     ratio = round(t_mod/t_gen)
 
@@ -90,7 +103,7 @@ def DecimateData(all_tensors, t_gen,t_mod, offset=0):
     return all_tensors_out
 
 def Decimate_and_perturbate_Data(true_process, delta_t, delta_t_mod, N_examples, h, lambda_r, offset=0):
-    
+
     # Decimate high resolution process
     decimated_process = DecimateData(true_process, delta_t, delta_t_mod, offset)
 
