@@ -259,8 +259,11 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        lam_r = 2.
-        lam_q = 2.
+        q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
+        r2 = torch.tensor(0.10, device=self.device, dtype=self.F.dtype)  # Var(r)
+
+        lam_q = 1.0 / torch.sqrt(q2)  # = 10.0
+        lam_r = 1.0 / torch.sqrt(r2)  # ≈ 3.1622777
         # Generate Sequence Iteratively
         for t in range(0, T):
 
@@ -276,15 +279,15 @@ class SystemModel:
                 xt = torch.add(xt,eq)
             else:
                 xt = self.F.matmul(self.x_prev)
-                mean = torch.zeros([self.m], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                eq = distrib.rsample()
+                # mean = torch.zeros([self.m], device=DEVICE)
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                # eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
 
-                # lam_vec_q = torch.full((self.m,), lam_q, dtype=xt.dtype, device=xt.device)
-                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
-
+                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
+                z = Exponential(lam_vec_q).sample()  # shape (n,)
+                eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
                 # Additive Process Noise
@@ -303,13 +306,13 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                mean = torch.zeros([self.n], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                er = distrib.rsample()
+                # mean = torch.zeros([self.n], device=DEVICE)
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                # er = distrib.rsample()
                 ####################################ori added
-                # lam_vec_r = torch.full((self.n,), lam_r, dtype=yt.dtype, device=yt.device)
-                # er = Exponential(lam_vec_r).sample()  # shape (n,)
-
+                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
+                z = Exponential(lam_vec_r).sample()  # shape (n,)
+                er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())
                 # Additive Observation Noise
