@@ -125,6 +125,35 @@ class PsmoothNN(nn.Module):
 
 
 
+def enforce_covariance_properties1(P, eps=1e-6):
+    """
+    Ensure that the covariance matrix P is positive    definite (PSD).
+
+Args:
+    P: A square matrix [m, m] representing the covariance matrix.
+    eps: Small constant to ensure positive semi-definiteness if necessary.
+
+Returns:
+    P: Adjusted covariance matrix that is PSD.
+"""
+    # Check if P is positive semi-definite
+    # We will check the eigenvalues to determine if all are >= 0
+    P = (P + P.T) / 2  # Ensure P is symmetric
+    # Compute eigenvalues and eigenvectors. Use torch.linalg.eigh for symmetric tensors.
+    eigenvalues, eigenvectors = torch.linalg.eigh(P)
+    if torch.any(eigenvalues.real < 0):  # If there are negative eigenvalues
+        # Clamp eigenvalues to ensure they are at least eps.
+        eigenvalues = torch.clamp(eigenvalues, min=eps)
+        # Reconstruct the matrix
+        P = eigenvectors @ torch.diag(eigenvalues) @ eigenvectors.T
+
+    return P
+
+
+
+
+
+
 #
 #
 #

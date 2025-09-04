@@ -142,9 +142,9 @@ class Pipeline_ERTS:
                     self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
                 # ---- Handle initial smoothed P at time T ----
                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T,
-                             device=sigma_T.device, dtype=sigma_T.dtype)
+                             device=self.device)
                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
-                             device=sigma_T.device, dtype=sigma_T.dtype)  # shape: [1, 1, m²] input to PsmoothNN
+                             device=self.device)  # shape: [1, 1, m²] input to PsmoothNN
                 sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
                 self.PsmoothNN.start = 0
                 ####compute the P(T)
@@ -999,7 +999,7 @@ class Pipeline_ERTS:
         print("Inference Time:", t)
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, self.model.K_T_list,]
-    def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True):
+    def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True,init_x_list=None, init_P_list=None):
 
 
         print("Testing RTSNet...")
@@ -1033,8 +1033,19 @@ class Pipeline_ERTS:
             x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
             x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
 
-            self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
-            self.model.init_hidden()
+            # choose initials for this sequence j
+            if (init_x_list is not None) and (init_P_list is not None):
+                P0 = init_P_list[j].to(self.device)
+                x0 = init_x_list[j].to(self.device)
+            else:
+                P0 = SysModel.m2x_0.to(self.device)
+                x0 = SysModel.m1x_0.to(self.device)
+
+            # --- initialize prior Sigma and hidden for this sequence ---
+            self.model.prior_Sigma = P0  # 1) set prior_Sigma to P0 for this seq
+            self.model.InitSequence(x0, SysModel.T_test)  # 3) set mean x0, T
+            self.model.init_hidden()  # 2) reset hidden -> seeds h_Sigma from prior_Sigma
+
 
             if generate_f == False:  ####if we valid with different f
                 SysModel.F = SysModel.F_test[j]
@@ -1068,7 +1079,7 @@ class Pipeline_ERTS:
             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test,  device=device)
             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m, device=device)  # shape: [1, 1, m²] input to PsmoothNN
             sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-            self.PsmoothNN.start = 0
+            self.PsmoothNN.start = 0 #initial the model
             # Handle initial P-smooth at time T_test
             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
@@ -1083,8 +1094,8 @@ class Pipeline_ERTS:
                 P_smoothed_seq[:, :, t] = P_matrix
 
             #compute s(0) for later use, by the # S_t = P_t * F.T * (P_t+1)^-1
-            P_1_0_pred = SysModel.F @ SysModel.m2x_0 @ SysModel.F.T + SysModel.Q
-            s_0 = SysModel.m2x_0 @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(SysModel.m, SysModel.m))  ######COMPUTE S_0
+            P_1_0_pred = SysModel.F @ P0 @ SysModel.F.T + SysModel.Q
+            s_0 = P0 @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(SysModel.m, SysModel.m))  ######COMPUTE S_0
             self.model.smoother_gain_list.append(s_0.clone().detach())  # [m, m]
 
 
@@ -1952,7 +1963,7 @@ class Pipeline_ERTS:
     #     # After all epochs are done, return the logged histories for plotting
     #     return
 
-    def _run_rtsnet_sequence(self, SysModel, y_seq, model_index):
+    def _run_rtsnet_sequence(self, SysModel, y_seq, model_index, x0=None, p0=None):
         """
         Run RTSNet forward and backward pass for a single sequence.
         """
@@ -1965,9 +1976,22 @@ class Pipeline_ERTS:
         x_out_forward = torch.empty(m, T,device=dev, dtype=dt)
         x_out_smoothed = torch.empty(m, T,device=dev, dtype=dt)
 
-        self.rtsnet_models[model_index].init_hidden()
-        self.rtsnet_models[model_index].InitSequence(SysModel.m1x_0, T)
+        if x0 is not None:
+            # 1) set prior Sigma (P0) for THIS sequence
+            x0 = x0.to(dev, dtype=dt)
+            p0 = self.psmooth_models[0].enforce_covariance_properties(p0)
+            p0_use = p0.to(dev, dtype=dt)
+            self.rtsnet_models[model_index].prior_Sigma = p0_use
+            # 3) set mean/x0 and T (does NOT touch GRUs)
+            self.rtsnet_models[model_index].InitSequence(x0, T)
+            # 2) reset GRU hiddens so h_Sigma seeds from prior_Sigma == P0
+            self.rtsnet_models[model_index].init_hidden()
 
+        else:
+            p0_use = SysModel.m2x_0
+            self.rtsnet_models[model_index].prior_Sigma = SysModel.m2x_0
+            self.rtsnet_models[model_index].InitSequence(SysModel.m1x_0, T)
+            self.rtsnet_models[model_index].init_hidden()
         sigma_list = []
         smoother_gain_list = []
 
@@ -2013,8 +2037,8 @@ class Pipeline_ERTS:
                 P_flat.view(-1).view(m, m))
 
         # Compute S_0
-        P_1_0_pred = SysModel.F @ SysModel.m2x_0 @ SysModel.F.T + SysModel.Q
-        s_0 = SysModel.m2x_0 @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(m, m))
+        P_1_0_pred = SysModel.F @ p0_use@ SysModel.F.T + SysModel.Q
+        s_0 = p0_use@ SysModel.F.T @ torch.inverse(P_1_0_pred.view(m, m))
         smoother_gain_list.append(s_0.clone())
 
         # Extract filtered covariances
@@ -2025,6 +2049,196 @@ class Pipeline_ERTS:
         #         sigma_processed.view(SysModel.m, SysModel.m), eps=1e-6)
 
         return x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t
+
+    def Test_Only_EMKF(self, SysModel, test_input, test_target,
+                       load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3, generate_f=True,
+                       init_x_list=None, init_P_list=None):
+        """
+        Test-only version - No training, no optimization, just run EMKF on test data
+        """
+
+        # Initialize multiple models
+        self.rtsnet_models = []
+        self.psmooth_models = []
+
+        for i in range(emkf_iterations):
+            rtsnet_model = torch.load(load_base_rtsnet[i], map_location=self.device, weights_only=False).to(self.device)
+            self.rtsnet_models.append(rtsnet_model)
+
+            psmooth_model = torch.load(load_base_psmooth[i], map_location=self.device, weights_only=False).to(
+                self.device)
+            self.psmooth_models.append(psmooth_model)
+
+        print(f"Starting Test-Only EMKF with {emkf_iterations} EM iterations")
+
+        # Run test only
+        test_losses, test_f_losses, final_F_list, x_last, p_last,final_F_list2 = self._run_test_simple(SysModel, test_input,
+                                                                                         test_target, emkf_iterations,
+                                                                                         generate_f=generate_f,
+                                                                                         init_x_list=init_x_list,
+                                                                                         init_P_list=init_P_list)
+
+        # # Compute weighted total test loss
+        # iteration_weights = [0.1, 0.2, 0.7]
+        # total_test_loss = sum(w * loss for w, loss in zip(iteration_weights, test_losses))
+        # total_test_f_loss = sum(w * loss for w, loss in zip(iteration_weights, test_f_losses))
+
+        # # LOGGING
+        # test_loss_db = 10 * torch.log10(total_test_loss.detach())
+        #
+        # print(f"TEST RESULTS:")
+        # print(f"  Total Loss: {test_loss_db:.3f} dB")
+        # print(f"  F-loss: {total_test_f_loss:.6f}")
+
+        # Log individual iteration losses
+        for i, test_loss in enumerate(test_losses):
+            print(f"    Iter {i}: {10 * torch.log10(test_loss.detach()):.2f}dB")
+
+        return test_losses, test_f_losses, final_F_list, x_last, p_last, final_F_list2
+
+    def _run_test_simple(self, SysModel, input_data, target_data, emkf_iterations, generate_f=True, init_x_list=None,
+                         init_P_list=None):
+        """
+        Simple test - just loop through each sequence one by one
+        """
+        N_data = len(input_data)
+
+        final_F_list = [None] * N_data
+        final_F_list2 = [None] * N_data
+        # Initialize F matrices
+        F_current = [f.clone().detach() for f in SysModel.F_test]
+        F_true = SysModel.F_test_TRUE
+
+        # Accumulate losses
+        all_iter_losses = [[] for _ in range(emkf_iterations)]
+        all_iter_f_losses = [[] for _ in range(emkf_iterations)]
+
+        x_last_all = []
+        p_last_all = []
+        # SIMPLE LOOP - one sequence at a time
+        for seq_idx in range(N_data):
+            y_seq = input_data[seq_idx]
+            target_seq = target_data[seq_idx]
+            f_index = seq_idx
+
+            if (init_x_list is not None) and (init_P_list is not None):
+                P0 = init_P_list[seq_idx]
+                x0 = init_x_list[seq_idx]
+            else:
+                P0 = SysModel.m2x_0
+                x0 = SysModel.m1x_0
+
+            if generate_f == True:
+                f_index = seq_idx // 10
+            # Store losses for each EM iteration for this sequence
+            seq_iter_losses = []
+            seq_iter_f_losses = []
+
+            # Start with F
+            F_seq = F_current[f_index].clone().detach()
+
+            # EM ITERATIONS for this sequence
+            for em_iter in range(emkf_iterations):
+                # Set model modes - EVAL ONLY
+                self.rtsnet_models[em_iter].eval()
+                self.psmooth_models[em_iter].eval()
+
+                # Use current F
+                SysModel.F = F_seq
+                self.rtsnet_models[em_iter].update_F(SysModel.F)
+
+                # E-STEP: Run networks
+                with torch.no_grad():
+
+                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t = \
+                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter, x0, P0)
+
+                    # Compute losses
+                    rts_loss = self.loss_fn(x_out_smoothed, target_seq)
+                    psmooth_loss = self.psmooth_models[em_iter].compute_loss(P_smoothed_seq, target_seq, x_out_smoothed)
+                    total_seq_loss = 1 * rts_loss + 0 * psmooth_loss
+                    seq_iter_losses.append(total_seq_loss)
+
+                    # Debug print for first sequence
+                    if seq_idx == 0:
+                        print(f'EM iter: {em_iter}, loss: {total_seq_loss:.4f}')
+                        print(f'F_seq: {F_seq}')
+
+                    # M-STEP
+                    V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq, smoother_gain_list)
+                    X_s = x_out_smoothed.unsqueeze(0)
+                    P_smooth_s = P_smoothed_seq.unsqueeze(0)
+                    list_V_s = []
+                    list_V_s.append(V)
+                    F_est = EMKF_F_Mstep(SysModel, X_s, P_smooth_s, list_V_s, SysModel.m)[0]
+
+                    deltaF = (F_est - F_seq).norm()
+                    if seq_idx == 0:
+                        print(f"[EM {em_iter}] ||ΔF|| = {deltaF.item():.3e}")
+                    F_seq = F_est
+
+                    # F loss
+                    F_true_seq = F_true[f_index]
+                    f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+                    seq_iter_f_losses.append(f_loss)
+
+                    if em_iter == (emkf_iterations-2):
+                        final_F_list2[seq_idx] = F_seq.detach().clone()
+
+
+
+            ##########################add a last computation for after the F computation
+            # --- after the for em_iter in range(emkf_iterations) loop ---
+
+            # # Use the final F_seq (after the last M-step)
+            # SysModel.F = F_seq
+            #
+            # # Pick a model index to run the forward; reusing the last one is fine
+            # last_idx = emkf_iterations - 1
+            # self.rtsnet_models[last_idx].eval()
+            # self.psmooth_models[last_idx].eval()
+            #
+            # with torch.no_grad():
+            #     x_out_forward2, x_out_smoothed2, P_smoothed_seq2, P_filtered_seq2, smoother_gain_list2, K_t2 = \
+            #         self._run_rtsnet_sequence(SysModel, y_seq, last_idx)
+            #     final_seq_loss = self.loss_fn(x_out_smoothed2, target_seq)
+            #
+            # # Append the “after K updates” loss as the (K)-th index (i.e., emkf_iterations)
+            # seq_iter_losses.append(final_seq_loss)
+            #
+            # # Optional: F-distance for the final F
+            # F_true_seq = F_true[f_index]
+            # final_f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+            # seq_iter_f_losses.append(final_f_loss)
+
+            ################################################################
+
+            # terminals from the last EM iteration run above
+            x_last_all.append(x_out_smoothed[:, -1].unsqueeze(-1).detach().clone())  # [m,1]
+            p_last_all.append(P_smoothed_seq[:, :, -1].detach().clone())  # [m,m]
+
+            final_F_list[seq_idx] = F_seq.detach().clone()
+
+            # Add this sequence's losses to accumulators
+            for em_iter in range(emkf_iterations):
+                all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
+                all_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
+
+        # Compute final averages
+        final_iter_losses = []
+        final_iter_f_losses = []
+
+        for em_iter in range(emkf_iterations):
+            if all_iter_losses[em_iter]:
+                iter_avg_loss = torch.stack(all_iter_losses[em_iter]).mean()
+                iter_avg_f_loss = torch.stack(all_iter_f_losses[em_iter]).mean()
+            else:
+                print('wrongggggggggggggggggggggggggggggggggggggggg')
+
+            final_iter_losses.append(iter_avg_loss)
+            final_iter_f_losses.append(iter_avg_f_loss)
+
+        return final_iter_losses, final_iter_f_losses, final_F_list, x_last_all, p_last_all, final_F_list2
 
     def _run_sequential_emkf_epoch(self, SysModel, input_data, target_data, emkf_iterations, is_training):
         """
@@ -2151,7 +2365,7 @@ class Pipeline_ERTS:
                         print('problemmmmmmmmmmmmmmmmmmmmmmmm')
 
                     # Compute weighted total batch loss
-                iteration_weights = [0.0, 0.0, 1]
+                iteration_weights = [0.01, 0.1, 0.89]
                 total_batch_loss = sum(w * loss for w, loss in zip(iteration_weights, batch_losses))
 
                 if torch.isfinite(total_batch_loss) and total_batch_loss < 1000.0:
@@ -2281,7 +2495,7 @@ class Pipeline_ERTS:
             train_losses = valid_train_losses
 
             # Compute weighted total training loss
-            iteration_weights = [0.0, 0.1, 0.89]
+            iteration_weights = [0.01, 0.1, 0.89]
             total_train_loss = sum(w * loss for w, loss in zip(iteration_weights, train_losses))
 
             # # FIX 9: Gradient clipping BEFORE backprop
@@ -2345,164 +2559,4 @@ class Pipeline_ERTS:
 
         return [self.MSE_train_total_dB_epoch, self.MSE_cv_total_dB_epoch, self.F_loss_train_epoch,
                 self.F_loss_cv_epoch]
-
-    def Test_Only_EMKF(self, SysModel, test_input, test_target,
-                       load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3,generate_F= True):
-        """
-        Test-only version - No training, no optimization, just run EMKF on test data
-        """
-
-        # Initialize multiple models
-        self.rtsnet_models = []
-        self.psmooth_models = []
-
-        for i in range(emkf_iterations):
-            rtsnet_model = torch.load(load_base_rtsnet[i], map_location=self.device, weights_only=False).to(self.device)
-            self.rtsnet_models.append(rtsnet_model)
-
-            psmooth_model = torch.load(load_base_psmooth[i], map_location=self.device,weights_only=False).to(self.device)
-            self.psmooth_models.append(psmooth_model)
-
-        print(f"Starting Test-Only EMKF with {emkf_iterations} EM iterations")
-
-        # Run test only
-        test_losses, test_f_losses,  final_F_list = self._run_test_simple(SysModel, test_input, test_target, emkf_iterations,generate_f = generate_F)
-
-        # # Compute weighted total test loss
-        # iteration_weights = [0.1, 0.2, 0.7]
-        # total_test_loss = sum(w * loss for w, loss in zip(iteration_weights, test_losses))
-        # total_test_f_loss = sum(w * loss for w, loss in zip(iteration_weights, test_f_losses))
-
-        # # LOGGING
-        # test_loss_db = 10 * torch.log10(total_test_loss.detach())
-        #
-        # print(f"TEST RESULTS:")
-        # print(f"  Total Loss: {test_loss_db:.3f} dB")
-        # print(f"  F-loss: {total_test_f_loss:.6f}")
-
-
-        # Log individual iteration losses
-        for i, test_loss in enumerate(test_losses):
-            print(f"    Iter {i}: {10 * torch.log10(test_loss.detach()):.2f}dB")
-
-        return test_losses, test_f_losses,  final_F_list
-
-    def _run_test_simple(self, SysModel, input_data, target_data, emkf_iterations,generate_f = True):
-        """
-        Simple test - just loop through each sequence one by one
-        """
-        N_data = len(input_data)
-
-        final_F_list = [None] * N_data
-
-        # Initialize F matrices
-        F_current = [f.clone().detach() for f in SysModel.F_test]
-        F_true = SysModel.F_test_TRUE
-
-        # Accumulate losses
-        all_iter_losses = [[] for _ in range(emkf_iterations)]
-        all_iter_f_losses = [[] for _ in range(emkf_iterations)]
-
-        # SIMPLE LOOP - one sequence at a time
-        for seq_idx in range(N_data):
-            y_seq = input_data[seq_idx]
-            target_seq = target_data[seq_idx]
-            f_index = seq_idx
-            if generate_f == True:
-                f_index = seq_idx // 10
-            # Store losses for each EM iteration for this sequence
-            seq_iter_losses = []
-            seq_iter_f_losses = []
-
-            # Start with F
-            F_seq = F_current[f_index].clone().detach()
-
-            # EM ITERATIONS for this sequence
-            for em_iter in range(emkf_iterations):
-                # Set model modes - EVAL ONLY
-                self.rtsnet_models[em_iter].eval()
-                self.psmooth_models[em_iter].eval()
-
-                # Use current F
-                SysModel.F = F_seq
-                self.rtsnet_models[em_iter].update_F(SysModel.F)
-
-                # E-STEP: Run networks
-                with torch.no_grad():
-                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t = \
-                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter)
-
-                    # Compute losses
-                    rts_loss = self.loss_fn(x_out_smoothed, target_seq)
-                    psmooth_loss = self.psmooth_models[em_iter].compute_loss(P_smoothed_seq, target_seq, x_out_smoothed)
-                    total_seq_loss = 1 * rts_loss + 0 * psmooth_loss
-                    seq_iter_losses.append(total_seq_loss)
-
-                    # Debug print for first sequence
-                    if seq_idx == 0:
-                        print(f'EM iter: {em_iter}, loss: {total_seq_loss:.4f}')
-                        print(f'F_seq: {F_seq}')
-
-                    # M-STEP
-                    V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq, smoother_gain_list)
-                    X_s = x_out_smoothed.unsqueeze(0)
-                    P_smooth_s = P_smoothed_seq.unsqueeze(0)
-                    list_V_s = []
-                    list_V_s.append(V)
-                    F_est = EMKF_F_Mstep(SysModel, X_s, P_smooth_s, list_V_s, SysModel.m)[0]
-                    F_seq = F_est
-
-                    # F loss
-                    F_true_seq = F_true[f_index]
-                    f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
-                    seq_iter_f_losses.append(f_loss)
-
-##########################add a last computation for after the F computation
-            # --- after the for em_iter in range(emkf_iterations) loop ---
-
-            # # Use the final F_seq (after the last M-step)
-            # SysModel.F = F_seq
-            #
-            # # Pick a model index to run the forward; reusing the last one is fine
-            # last_idx = emkf_iterations - 1
-            # self.rtsnet_models[last_idx].eval()
-            # self.psmooth_models[last_idx].eval()
-            #
-            # with torch.no_grad():
-            #     x_out_forward2, x_out_smoothed2, P_smoothed_seq2, P_filtered_seq2, smoother_gain_list2, K_t2 = \
-            #         self._run_rtsnet_sequence(SysModel, y_seq, last_idx)
-            #     final_seq_loss = self.loss_fn(x_out_smoothed2, target_seq)
-            #
-            # # Append the “after K updates” loss as the (K)-th index (i.e., emkf_iterations)
-            # seq_iter_losses.append(final_seq_loss)
-            #
-            # # Optional: F-distance for the final F
-            # F_true_seq = F_true[f_index]
-            # final_f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
-            # seq_iter_f_losses.append(final_f_loss)
-
-            ################################################################
-
-            final_F_list[seq_idx] = F_seq.detach().clone()
-
-            # Add this sequence's losses to accumulators
-            for em_iter in range(emkf_iterations):
-                all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
-                all_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
-
-        # Compute final averages
-        final_iter_losses = []
-        final_iter_f_losses = []
-
-        for em_iter in range(emkf_iterations):
-            if all_iter_losses[em_iter]:
-                iter_avg_loss = torch.stack(all_iter_losses[em_iter]).mean()
-                iter_avg_f_loss = torch.stack(all_iter_f_losses[em_iter]).mean()
-            else:
-                print('wrongggggggggggggggggggggggggggggggggggggggg')
-
-            final_iter_losses.append(iter_avg_loss)
-            final_iter_f_losses.append(iter_avg_f_loss)
-
-        return final_iter_losses, final_iter_f_losses,final_F_list
 

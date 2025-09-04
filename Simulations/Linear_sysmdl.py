@@ -48,8 +48,9 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
     F = torch.tensor([[0.83, 0.2],
                         [0.2, 0.83]], device=DEVICE)
     for _ in range(num_F+1):
-        F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
-        # F_i = rotate_F(F, i=0, j=1, theta=1,mult=1, many=False, randomit=True)
+        # F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
+        # F_i = torch.tensor([[0.7954, 0.1970], [0.1970, 0.8646]], device=DEVICE)
+        F_i = rotate_F(F, i=0, j=1, theta=1,mult=1, many=False, randomit=True)
                 # F = torch.tensor([[-0.9, 0.],
         #                    [0.05, 1.98]])
 #         F[0, 1] = F[0, 1] + uniform_two_ranges(0.0, 1) * delta_t * 0.125  # random
@@ -275,14 +276,14 @@ class SystemModel:
                 xt = torch.add(xt,eq)
             else:
                 xt = self.F.matmul(self.x_prev)
-                # mean = torch.zeros([self.m])
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                # eq = distrib.rsample()
+                mean = torch.zeros([self.m], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
 
-                lam_vec_q = torch.full((self.m,), lam_q, dtype=xt.dtype, device=xt.device)
-                eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                # lam_vec_q = torch.full((self.m,), lam_q, dtype=xt.dtype, device=xt.device)
+                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
 
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
@@ -302,12 +303,12 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                # mean = torch.zeros([self.n])
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                # er = distrib.rsample()
+                mean = torch.zeros([self.n], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                er = distrib.rsample()
                 ####################################ori added
-                lam_vec_r = torch.full((self.n,), lam_r, dtype=yt.dtype, device=yt.device)
-                er = Exponential(lam_vec_r).sample()  # shape (n,)
+                # lam_vec_r = torch.full((self.n,), lam_r, dtype=yt.dtype, device=yt.device)
+                # er = Exponential(lam_vec_r).sample()  # shape (n,)
 
                 ######################################
                 er = torch.reshape(er[:], yt.size())
@@ -333,7 +334,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T,delta=0.5, randomInit=False, randomLength=False,F_gen=True):
+    def GenerateBatch(self, size, T,delta=0.5, randomInit=False, randomLength=False,F_gen=True, x0_list=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -361,6 +362,19 @@ class SystemModel:
         for i in range(0, size):
             index_F =i//10
             self.F = F_matrices[index_F]
+            self.F_T = F_matrices[index_F].T
+
+            if x0_list is not None:
+                x0_i = x0_list[i]
+                # ensure column shape [m,1]
+                if x0_i.dim() == 1:
+                    x0_i = x0_i.unsqueeze(-1)
+
+                initConditions = x0_i
+            else:
+                initConditions = self.m1x_0
+
+
             # Generate Sequence
 
             # Randomize initial conditions to get a rich dataset

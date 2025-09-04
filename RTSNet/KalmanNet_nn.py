@@ -341,5 +341,3 @@ class KalmanNetNN(torch.nn.Module):
         self.h_Q = hidden.data
         self.h_Q[0, 0, :] = self.prior_Q.flatten()
 
-
-

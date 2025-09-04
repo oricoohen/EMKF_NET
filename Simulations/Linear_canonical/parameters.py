@@ -21,6 +21,7 @@ n = 2 # observation dimension = 2, 5, 10, etc.
 # m1_0 = torch.zeros(m, 1)
 # m2_0 = 0 * torch.eye(m)
 m1_0 = torch.tensor([[0.5], [0.5]])
+# m1_0 = torch.tensor([[28.84], [22.05]])
 # m1_0 = m1_0.view(-1)
 m2_0 = torch.eye(m)
 

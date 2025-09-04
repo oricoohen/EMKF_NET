@@ -257,15 +257,17 @@ class SystemModel:
         ### Generate Examples
         initConditions = self.m1x_0
 
-        F_matrices = generate_random_F_matrices(size//10 +1)
-        print('11111111111111', F_matrices)
-
-
+        if F_gen ==None:
+            F_matrices = generate_random_F_matrices(size // 10 + 1)
+            print('11111111111111', F_matrices)
+        else:
+            F_matrices = F_gen
 
         for i in range(0, size):
-            if F_gen != None:
-                index_F =i//10
-                self.F = F_matrices[index_F]
+
+            index_F =i//10
+            self.F = F_matrices[index_F]
+            self.F_T = F_matrices[index_F].T
             # Generate Sequence
 
             # Randomize initial conditions to get a rich dataset

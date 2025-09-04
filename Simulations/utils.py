@@ -5,9 +5,65 @@ The file contains utility functions for the simulations.
 import torch
 
 device = torch.device("cuda")
+from RTSNet.PsmoothNN import enforce_covariance_properties1
+def estimate_QR(x, y, F, H=None, h=None, unbiased=False):
+    """
+    Standard covariance estimation of Q and R from {x_{t+1}-F x_t} and {y_t - h(x_t)}.
 
+    Args
+    ----
+    x : [seq, n, T] or [n, T]   # true states
+    y : [seq, m, T] or [m, T]   # measurements
+    F : [n, n]                # state transition
+    H : [m, n], optional      # measurement matrix (use if h is None)
+    h : callable, optional    # function mapping x->[B,m,T] or [m,T]
+    unbiased : bool           # if True, use 1/(N-1); else 1/N (MLE-style)
 
-def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True):
+    Returns
+    -------
+    Q_hat : [n, n]
+    R_hat : [m, m]
+    """
+
+    # make inputs 3D: [B, n, T], [B, m, T]
+    if x.dim() == 2: x = x.unsqueeze(0)
+    if y.dim() == 2: y = y.unsqueeze(0)
+    seq, n, T = x.shape
+    _, m, T = y.shape
+
+    Fx_tm1 = F @ x[:, :, :-1]  # shape: [B, n, T-1]
+    w = x[:, :, 1:] - Fx_tm1  # process residuals, shape [B, n, T-1]
+
+    # measurement residuals: v_t = y_t - h(x_t) -> [B, m, T]
+    if h is not None:
+        Hx = h(x)  # should return [B, m, T] or [m, T]
+        if Hx.dim() == 2: Hx = Hx.unsqueeze(0)
+    else:
+        Hx = H @ x
+    v = y - Hx
+
+    # stack over batch and time → [N, d]
+    w2 = w.permute(0, 2, 1).reshape(-1, n)   # [B(T-1), n]
+    v2 = v.permute(0, 2, 1).reshape(-1, m)   # [BT, m]
+
+    if unbiased:
+        w2 = w2 - w2.mean(0, keepdim=True)
+        v2 = v2 - v2.mean(0, keepdim=True)
+        denom_w = max(w2.shape[0] - 1, 1)
+        denom_v = max(v2.shape[0] - 1, 1)
+    else:
+        denom_w = max(w2.shape[0], 1)
+        denom_v = max(v2.shape[0], 1)
+
+    Q_hat = (w2.T @ w2) / denom_w
+    R_hat = (v2.T @ v2) / denom_v
+
+    # symmetrize (numerical hygiene)
+    Q_hat = enforce_covariance_properties1(Q_hat)
+    R_hat = enforce_covariance_properties1(R_hat)
+
+    return Q_hat, R_hat
+def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True,x0_list=None):
 
     if Test is False:
         ##################################
@@ -49,7 +105,7 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=F_gen)
+    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     if(randomInit_test):
