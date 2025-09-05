@@ -260,10 +260,10 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(0.10, device=self.device, dtype=self.F.dtype)  # Var(r)
+        r2 = torch.tensor(10, device=self.device, dtype=self.F.dtype)  # Var(r)
 
-        lam_q = 1.0 / torch.sqrt(q2)  # = 10.0
-        lam_r = 1.0 / torch.sqrt(r2)  # ≈ 3.1622777
+        lam_q = 1.0 / torch.sqrt(q2)
+        lam_r = 1.0 / torch.sqrt(r2)
         # Generate Sequence Iteratively
         for t in range(0, T):
 
@@ -286,8 +286,8 @@ class SystemModel:
                 ##################################ori added
 
                 lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                z = Exponential(lam_vec_q).sample()  # shape (n,)
-                eq = z - (1.0 / lam_vec_q)
+                eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                # eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
                 # Additive Process Noise
@@ -311,8 +311,8 @@ class SystemModel:
                 # er = distrib.rsample()
                 ####################################ori added
                 lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                z = Exponential(lam_vec_r).sample()  # shape (n,)
-                er = z -(1.0/lam_vec_r)
+                er = Exponential(lam_vec_r).sample()  # shape (n,)
+                # er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())
                 # Additive Observation Noise

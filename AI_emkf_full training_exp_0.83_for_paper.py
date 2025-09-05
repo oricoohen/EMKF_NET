@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_1/r_001/True_F/'###############################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3/r_01/True_F/'###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_1/r_001/False_F/'###############################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3/r_01/False_F/'###############################################################################################################################################
 
 
 ####################
@@ -58,13 +58,13 @@ args.T_test = 30 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
-max_iter = 3
+max_iter = 4
 
 cycles = 3
 
 # True model
 q2 = 0.01
-r2 =0.01
+r2 = 0.1
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -240,7 +240,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_1/r_001/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_3/r_01/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"
@@ -266,7 +266,7 @@ for dataset_id in range(cycles):
     test_target = all_targets_by_F[dataset_id]
     true_F_for_this_dataset = F_matrices_for_datasets[dataset_id]
 
-    print(f"True F for this dataset: {true_F_for_this_dataset}")
+    #print(f"True F for this dataset: {true_F_for_this_dataset}")
     print(f"Dataset {dataset_id + 1} input shape: {test_input.shape}")
 
     # Set up system model for this dataset++++++++++++++++++
@@ -277,7 +277,7 @@ for dataset_id in range(cycles):
     else:
         # For subsequent datasets, we would normally use AI prediction
         current_F_estimate = current_F_estimate_prev
-        print(f"Using previous dataset's F as estimate: {current_F_estimate}")
+        print(f"Using previous dataset's F as estimate: {current_F_estimate[0]}")
 
     # Create system model with current F estimate
     sys_model_ai = SystemModel(current_F_estimate[0], Q, H, R, args.T, args.T_test)
@@ -298,8 +298,8 @@ for dataset_id in range(cycles):
             load_base_rtsnet=model_pathes, load_base_psmooth=psmooth_pathes,emkf_iterations=3, generate_f= False, init_x_list=x0_em_last, init_P_list=p0_em_last)
 
     emkf_mse_lin_sum += float(test_losses[-1])
-    # current_F_estimate_prev = final_F_list
-    current_F_estimate_prev = F_initial_guess
+    current_F_estimate_prev = final_F_list
+    # current_F_estimate_prev = F_initial_guess
     # Prepare initials for NEXT dataset
 
     x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
