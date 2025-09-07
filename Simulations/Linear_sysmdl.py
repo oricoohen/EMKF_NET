@@ -260,7 +260,7 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(10, device=self.device, dtype=self.F.dtype)  # Var(r)
+        r2 = torch.tensor(0.001, device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
         lam_r = 1.0 / torch.sqrt(r2)

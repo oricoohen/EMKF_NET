@@ -11,6 +11,7 @@ from Plot import Plot_extended as Plot
 from RTSNet.PsmoothNN import PsmoothNN  # Ensure the PsmoothNN class is correctly imported
 import torch.nn as nn
 from emkf.main_emkf_func_AI import EMKF_F_Mstep
+from Simulations.Lorenz_Atractor.parameters import getJacobian
 
 device =torch.device("cuda")
 
@@ -999,7 +1000,7 @@ class Pipeline_ERTS:
         print("Inference Time:", t)
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, self.model.K_T_list,]
-    def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True,init_x_list=None, init_P_list=None):
+    def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h =False):
 
 
         print("Testing RTSNet...")
@@ -1064,6 +1065,10 @@ class Pipeline_ERTS:
                 if t == SysModel.T_test - 1:
                     K = self.model.KGain.clone().detach()
                     self.model.K_T_list.append(K)  # [m, n]
+                    if non_linear_h == True:
+                        # Compute H_last = ∂h/∂x at time T-1 (use filtered state at T-1 as approximation)
+                        x_last = x_out_test_forward_1[:, SysModel.T_test - 1].view(SysModel.m, 1)
+                        H_last = getJacobian(x_last, SysModel.h)
             x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
             self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
             x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
@@ -1111,8 +1116,12 @@ class Pipeline_ERTS:
             x_out_list.append(x_out_test)
             P_smooth_list.append(P_smoothed_seq)
 
-            #######compute V############
-            V =  self.compute_cross_covariances(SysModel.F, SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
+            if non_linear_h == True:
+                #######compute V############
+                V =  self.compute_cross_covariances(SysModel.F, H_last, K, P_smoothed_seq, self.model.smoother_gain_list)
+            else:
+                #######compute V############
+                V =  self.compute_cross_covariances(SysModel.F, SysModel.H, K, P_smoothed_seq, self.model.smoother_gain_list)
             V_list.append(V)#[seq](tensor(m,m,T))
 
 
@@ -1963,7 +1972,7 @@ class Pipeline_ERTS:
     #     # After all epochs are done, return the logged histories for plotting
     #     return
 
-    def _run_rtsnet_sequence(self, SysModel, y_seq, model_index, x0=None, p0=None):
+    def _run_rtsnet_sequence(self, SysModel, y_seq, model_index, x0=None, p0=None,non_linear_h = False):
         """
         Run RTSNet forward and backward pass for a single sequence.
         """
@@ -2001,6 +2010,13 @@ class Pipeline_ERTS:
             sigma_list.append(self.rtsnet_models[model_index].h_Sigma.clone())
             if t == T-1:
                 K_t = self.rtsnet_models[model_index].KGain.clone()
+                H_last = None
+                if non_linear_h == True:
+                    # ADD (immediately after the loop ends, before the backward pass):
+                    x_last = x_out_forward[:, T - 1].view(m, 1)
+                    # make sure getJacobian(SysModel.h) is in scope; import if needed
+                    with torch.enable_grad():
+                        H_last = getJacobian(x_last, SysModel.h)
         # Backward pass
         x_out_smoothed[:, T - 1] = x_out_forward[:, T - 1]
 
@@ -2048,11 +2064,11 @@ class Pipeline_ERTS:
         #     P_filtered_seq[:, :, i] = self.psmooth_models[model_index].enforce_covariance_properties(
         #         sigma_processed.view(SysModel.m, SysModel.m), eps=1e-6)
 
-        return x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t
+        return x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last
 
     def Test_Only_EMKF(self, SysModel, test_input, test_target,
                        load_base_rtsnet=None, load_base_psmooth=None, emkf_iterations=3, generate_f=True,
-                       init_x_list=None, init_P_list=None):
+                       init_x_list=None, init_P_list=None,non_linear_h =False):
         """
         Test-only version - No training, no optimization, just run EMKF on test data
         """
@@ -2073,10 +2089,7 @@ class Pipeline_ERTS:
 
         # Run test only
         test_losses, test_f_losses, final_F_list, x_last, p_last,final_F_list2 = self._run_test_simple(SysModel, test_input,
-                                                                                         test_target, emkf_iterations,
-                                                                                         generate_f=generate_f,
-                                                                                         init_x_list=init_x_list,
-                                                                                         init_P_list=init_P_list)
+                                  test_target, emkf_iterations, generate_f=generate_f, init_x_list=init_x_list, init_P_list=init_P_list,non_linear_h=non_linear_h)
 
         # # Compute weighted total test loss
         # iteration_weights = [0.1, 0.2, 0.7]
@@ -2097,7 +2110,7 @@ class Pipeline_ERTS:
         return test_losses, test_f_losses, final_F_list, x_last, p_last, final_F_list2
 
     def _run_test_simple(self, SysModel, input_data, target_data, emkf_iterations, generate_f=True, init_x_list=None,
-                         init_P_list=None):
+                         init_P_list=None, non_linear_h = None):
         """
         Simple test - just loop through each sequence one by one
         """
@@ -2150,8 +2163,8 @@ class Pipeline_ERTS:
                 # E-STEP: Run networks
                 with torch.no_grad():
 
-                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t = \
-                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter, x0, P0)
+                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last = \
+                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter, x0, P0,non_linear_h=non_linear_h)
 
                     # Compute losses
                     rts_loss = self.loss_fn(x_out_smoothed, target_seq)
@@ -2165,7 +2178,11 @@ class Pipeline_ERTS:
                         print(f'F_seq: {F_seq}')
 
                     # M-STEP
-                    V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq, smoother_gain_list)
+                    if non_linear_h == True:
+                        V = self.compute_cross_covariances(SysModel.F,H_last, K_t, P_smoothed_seq,
+                                                           smoother_gain_list)
+                    else:
+                        V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq, smoother_gain_list)
                     X_s = x_out_smoothed.unsqueeze(0)
                     P_smooth_s = P_smoothed_seq.unsqueeze(0)
                     list_V_s = []
@@ -2240,7 +2257,7 @@ class Pipeline_ERTS:
 
         return final_iter_losses, final_iter_f_losses, final_F_list, x_last_all, p_last_all, final_F_list2
 
-    def _run_sequential_emkf_epoch(self, SysModel, input_data, target_data, emkf_iterations, is_training):
+    def _run_sequential_emkf_epoch(self, SysModel, input_data, target_data, emkf_iterations, is_training,non_linear_h = False):
         """
         FIXED VERSION - Run one epoch with BATCH → SEQUENCE → EM order and F propagation.
         """
@@ -2316,8 +2333,8 @@ class Pipeline_ERTS:
                     self.rtsnet_models[em_iter].update_F(SysModel.F)
 
                     # E-STEP: Run networks
-                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t = \
-                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter)
+                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last = \
+                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter,non_linear_h = non_linear_h)
 
                     # Compute losses
                     rts_loss = self.loss_fn(x_out_smoothed, target_seq)
@@ -2333,7 +2350,12 @@ class Pipeline_ERTS:
 
                     # FIX 4: Stable M-STEP with regularization
                     # print(SysModel.F)
-                    V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq,smoother_gain_list)
+
+                    if non_linear_h ==True:
+                        V = self.compute_cross_covariances(SysModel.F, H_last, K_t, P_smoothed_seq,
+                                                           smoother_gain_list)
+                    else:
+                        V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_smoothed_seq,smoother_gain_list)
                     X_s = x_out_smoothed.unsqueeze(0)
                     P_smooth_s = P_smoothed_seq.unsqueeze(0)
                     list_V_s = []
@@ -2433,7 +2455,7 @@ class Pipeline_ERTS:
 
     def Train_EndToEnd_EMKF(self, SysModel, cv_input, cv_target, train_input, train_target,
                                   rtsnet_model_paths, psmooth_model_paths, emkf_iterations=3,
-                                  load_base_rtsnet=None, load_base_psmooth=None):
+                                  load_base_rtsnet=None, load_base_psmooth=None,non_linear_h = False):
         """
         FIXED VERSION - Main training function for end-to-end EMKF training.
         """
@@ -2482,7 +2504,7 @@ class Pipeline_ERTS:
 
              # TRAINING
             train_losses, train_f_losses = self._run_sequential_emkf_epoch(SysModel, train_input, train_target,
-                                                                           emkf_iterations, is_training=True)
+                                                                           emkf_iterations, is_training=True, non_linear_h=non_linear_h )
 
             # FIX 8: Check for NaN/Inf losses
             valid_train_losses = []
@@ -2520,7 +2542,7 @@ class Pipeline_ERTS:
                     self.psmooth_models[i].eval()
 
                 cv_losses, cv_f_losses = self._run_sequential_emkf_epoch(SysModel, cv_input, cv_target, emkf_iterations,
-                                                                         is_training=False)
+                                                                         is_training=False,non_linear_h=non_linear_h)
 
             # Compute weighted averages
             total_cv_loss = sum(w * loss for w, loss in zip(iteration_weights, cv_losses))

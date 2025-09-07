@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3/r_01/True_F/'###############################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_2.2/r_0001/True_F/'###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3/r_01/False_F/'###############################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_2.2/r_0001/False_F/'###############################################################################################################################################
 
 
 ####################
@@ -64,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 0.1
+r2 = 0.001
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -96,7 +96,7 @@ print("Observation Matrix:",H)
 F_matrices_for_datasets_d = []
 
 F_test_list = [F.clone().to(DEVICE) for _ in range(args.N_T)]
-a=1
+a= 1
 for i in range(cycles+1):
     F_matrices_for_datasets_d.append([(f*a).clone() for f in F_test_list])
     # a=a*0.95
@@ -240,7 +240,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3/r_01/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_2.2/r_0001/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"

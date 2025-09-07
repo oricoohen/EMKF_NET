@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_2/r_1/True_F/'######################################################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_2/r_01/True_F/'######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_2/r_1/False_F/'######################################################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_2/r_01/False_F/'######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -68,7 +68,7 @@ max_iter = 3
 
 # True model
 q2 = 0.01
-r2 =1.
+r2 = 0.1
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
@@ -238,10 +238,10 @@ path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
 #####TRAIN GOOD F#####
 print('rtssnet and psmooth with trueeeeeeee F')
-RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 #####TRAIN GOOD F########
-RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
-                 train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
+# RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
+#                  train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_psmooth,
 #                            load_rtsnet = path_results_full_rts,load_psmooth =path_results_full_psmooth , generate_f=True)
 
@@ -252,10 +252,10 @@ RTSNet_Pipeline.NNTest(sys_model, test_input, test_target,load_model_path=path_r
 # RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')
 #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
  #########TRAIN BAD F############
-[MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
-                 train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
+# [MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
+#                  train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_wrong_psmooth2,
 #                             load_rtsnet = path_results_True_rts,load_psmooth = path_results_True_psmooth, generate_f=True)
 
@@ -263,7 +263,7 @@ RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_tar
 RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_2/r_1/EMKF/False/'######################################################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_2/r_01/EMKF/False/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 model_pathes = []
@@ -272,8 +272,8 @@ for i in range(max_iter):
     # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
     # file_rtsnet = f"model_e_q{i}_no_train.pt"
     # file_psmooth = f"psmooth_e_q{i}_no_train.pt"
-    file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
-    file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"
+    file_rtsnet = f"model_e_q{i}_rand_false_trained1.pt"
+    file_psmooth = f"psmooth_e_q{i}_rand_false_trained1.pt"
     # Build the full destination path
     destination_path_RTS = destination_folder + file_rtsnet
     destination_path_PSMOOTH = destination_folder + file_psmooth

@@ -118,12 +118,12 @@ if gauss:
 ############################
 # --- GPU moves for datasets (dtype aligned with F) ---
 ddtype = F.dtype
-train_input = train_input.to(device=device, dtype=ddtype)
-train_target = train_target.to(device=device, dtype=ddtype)
-cv_input = cv_input.to(device=device, dtype=ddtype)
-cv_target = cv_target.to(device=device, dtype=ddtype)
-test_input = test_input.to(device=device, dtype=ddtype)
-test_target = test_target.to(device=device, dtype=ddtype)
+train_input = train_input
+train_target = train_target
+cv_input = cv_input
+cv_target = cv_target
+test_input = test_input
+test_target = test_target
 ############################
 sys_model.F_train = F_train_mat
 sys_model.F_valid = F_val_mat
