@@ -17,7 +17,7 @@ import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import random
 from torch.distributions import MultivariateNormal, Exponential
-
+from functools import partial
 
 DEVICE =torch.device("cuda")
 
@@ -63,23 +63,32 @@ def rotate_F(F, i=0, j=1, theta=0.78, many=True, randomit=True):
         out.append(apply_rotation(F_i, torch.tensor(ang, dtype=F_i.dtype, device=F_i.device), i, j))
     return out
 
+from functools import partial
+import torch
 
-def make_rotated_h_nonlinear(h_nonlinear,phi_deg: float):
+def h_rotate_apply(x, h_base, phi_deg: float):
     """
-    Returns h_rot(x) = R(phi) @ h_nonlinear(x), with phi in degrees.
-    Uses only torch (no math).
-    Assumes measurement dim n == 2.
+    y_rot(x) = R(phi_deg) @ h_base(x)
+    - Pure torch ops → autograd works through x
+    - Top-level function → picklable (OK with DataLoader / torch.save)
     """
-    def h_rot(x):
-        y = h_nonlinear(x)         # shape [2] or [2,1]
-        y2 = y.view(2)             # ensure shape [2]
-        # degrees -> radians using torch only
-        phi = torch.tensor(phi_deg, dtype=y2.dtype, device=y2.device) * (torch.pi / 180.0)
-        c = torch.cos(phi)
-        s = torch.sin(phi)
-        R_out = torch.stack([torch.stack([c, -s]), torch.stack([s,  c])])  # [2,2]
-        return (R_out @ y2.unsqueeze(-1)).squeeze(-1)  # return [2]
-    return h_rot
+    y = h_base(x)                      # shape [2,1] or [2]
+    y2 = y.reshape(-1)                 # [2]; reshape works on non-contiguous too
+    phi = torch.as_tensor(phi_deg, dtype=y2.dtype, device=y2.device) * (torch.pi / 180.0)
+    c = torch.cos(phi)
+    s = torch.sin(phi)
+    # 4) Rotation matrix R(φ) and apply to y
+    R_out = torch.stack((torch.stack((c, -s)), torch.stack((s, c))))  # [2,2] on correct device
+    y_rot = R_out @ y2.unsqueeze(-1)                                   # [2,1]
+    return y_rot
+
+def make_rotated_h_nonlinear(h_nonlinear, phi_deg: float = 30.0):
+    """
+    Returns a picklable callable h_rot(x) that internally calls:
+        h_rotate_apply(x, h_base=h_nonlinear, phi_deg=phi_deg)
+    """
+    return partial(h_rotate_apply, h_base=h_nonlinear, phi_deg=phi_deg)
+
 
 class SystemModel:
 

@@ -49,7 +49,7 @@ def getJacobian(x, g):
 
 # F = torch.tensor([[0.83, 0.20],
 #                   [0.20, 0.83]], dtype=torch.float32)
-F = torch.tensor([[0.63, 0.0021],[0.0021, 1.0299]], device=device) # State transition matrix
+F = torch.tensor([[0.63, 0.0021],[0.0021, 1.0299]], device=device,dtype=torch.float32) # State transition matrix
 
 ######################################################
 ### State evolution function f for Lorenz Atractor ###
@@ -94,5 +94,5 @@ h = h_nonlinear
 # -----------------------------
 # Noise structures (scaled in main)
 # -----------------------------
-Q_structure = torch.eye(m, device=device)  # process noise base (2x2)
-R_structure = torch.eye(n, device=device)  # measurement noise base (2x2)
+Q_structure = torch.eye(m, device=device,dtype=torch.float32)  # process noise base (2x2)
+R_structure = torch.eye(n, device=device,dtype=torch.float32)  # measurement noise base (2x2)

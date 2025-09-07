@@ -1,4 +1,6 @@
 ####the old one without the f
+import os
+
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -36,9 +38,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3/r_01/True_F/'  ######################################################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3/r_1/True_F/'  ######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3/r_01/False_F/'  ######################################################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3/r_1/False_F/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -67,21 +69,21 @@ max_iter = 3
 
 # True model
 q2 = 0.01
-r2 =0.1
+r2 = 1.
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
 # q2 = r2/(10.0**v_db/10.0)
 
-Q = q2 * Q_structure.to(device)
-R = r2 * R_structure.to(device)
-F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device,dtype=torch.float32) # State transition matrix
+Q = q2 * Q_structure
+R = r2 * R_structure
+F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
 f = make_f(F)
 
 h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
 
 sys_model = SystemModel(f, Q, h_nonlinear_rot, R, args.T, args.T_test,m,n)
-# SystemModel.F_gen = True
+SystemModel.F_gen = True
 m1_0 = m1_0
 m2_0 = m2_0
 sys_model.InitSequence(m1_0, m2_0)
@@ -94,6 +96,9 @@ print("State Evolution Matrix:",F)
 dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
 dataFileName = '2x2_1.pt'
 dataFileName_F = '2x2_F_reg+5_deg'
+os.makedirs(path_results_True, exist_ok=True)
+os.makedirs(path_results_False, exist_ok=True)
+os.makedirs(dataFolderName, exist_ok=True)
 print("Start Data Gen")
 DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
 print("Data Load")
@@ -246,8 +251,8 @@ RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_tar
 RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth, non_linear_h=  True)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3/r_01/EMKF/False/'######################################################################################################################################################################
-
+destination_folder = 'RTSNet/paper/exp_3/r_1/EMKF/False/'######################################################################################################################################################################
+os.makedirs(destination_folder, exist_ok=True)
 # --- Step 2: Loop 5 times and copy the file ---
 model_pathes = []
 psmooth_pathes = []
@@ -263,8 +268,8 @@ for i in range(max_iter):
     model_pathes.append(destination_path_RTS)
     psmooth_pathes.append(destination_path_PSMOOTH)
     #Copy the file. This creates the independent duplicate.
-    # shutil.copy2(path_results_True_rts, destination_path_RTS)
-    # shutil.copy2(path_results_True_psmooth, destination_path_PSMOOTH)
+    shutil.copy2(path_results_True_rts, destination_path_RTS)
+    shutil.copy2(path_results_True_psmooth, destination_path_PSMOOTH)
 ######START THE EMKF TRAINING##########
 
 
