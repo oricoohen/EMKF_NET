@@ -15,6 +15,68 @@ from Simulations.Lorenz_Atractor.parameters import getJacobian
 
 device =torch.device("cuda")
 
+
+# thresholds you can tweak
+_JAC_MAXABS_THRESH = 1e3      # entries bigger than this are "large"
+_JAC_COND_THRESH   = 1e6      # rough condition-number alarm
+_R_FLOOR_WARN      = 1e-3     # "small radius" alarm
+
+def _jacobian_watchdog(H: torch.Tensor, x: torch.Tensor, h_fn, tag: str = ""):
+    """
+    H: [n,m], x: [m,1], h_fn(x)->[n,1]
+    Prints ONLY when something looks bad.
+    """
+    with torch.no_grad():
+        nfin = not torch.isfinite(H).all()
+        maxabs = H.abs().max().item()
+        fro = H.norm().item()
+        try:
+            svals = torch.linalg.svdvals(H)
+            smin = svals.min().item()
+            smax = svals.max().item()
+            cond = (smax / max(smin, 1e-12))
+        except Exception:
+            smin = smax = 0.0
+            cond = float("inf")
+
+        # also look at measurement radius r from your h: y=[r, theta]
+        try:
+            y = h_fn(x).view(-1)
+            r = float(y[0].abs().item())
+        except Exception:
+            r = float("nan")
+
+        flags = []
+        if nfin: flags.append("non-finite")
+        if maxabs > _JAC_MAXABS_THRESH: flags.append("large|H|")
+        if cond   > _JAC_COND_THRESH:   flags.append("ill-cond(H)")
+        if r != r or r < _R_FLOOR_WARN: flags.append(f"small-r({r:.2e})")  # r!=r catches NaN
+
+        if flags:
+            print(f"[JAC] {tag} flags={','.join(flags)} "
+                  f"max|H|={maxabs:.2e} ||H||F={fro:.2e} cond≈{cond:.2e} r={r:.2e}")
+            # optional: show the worst offending row/col once
+            if maxabs > _JAC_MAXABS_THRESH:
+                i,j = torch.where(H.abs() == H.abs().max())
+                print(f"[JAC] worst H[{int(i[0])},{int(j[0])}]={H[i[0],j[0]].item():.3e}")
+
+def _rho(F):
+    try:
+        return torch.linalg.eigvals(F).abs().max().real.item()
+    except Exception:
+        return float("inf")
+
+def _cond_sym(A):
+    try:
+        s = torch.linalg.svdvals(A)
+        return (s.max() / torch.clamp(s.min(), 1e-12)).item()
+    except Exception:
+        return float("inf")
+
+
+
+
+
 class Pipeline_ERTS:
 
 
@@ -1002,13 +1064,13 @@ class Pipeline_ERTS:
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, self.model.K_T_list,]
     def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h =False):
 
-
+        tp = torch.float32
         print("Testing RTSNet...")
         self.N_T = len(test_input)
 
 
-        self.MSE_test_linear_arr = torch.empty([self.N_T], device=self.device, dtype=SysModel.F.dtype)
-        self.MSE_test_psmooth_arr = torch.empty([self.N_T], device=self.device, dtype=SysModel.F.dtype)
+        self.MSE_test_linear_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
+        self.MSE_test_psmooth_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
 
              # MSE LOSS Function
         loss_fn = nn.MSELoss(reduction='mean')
@@ -1031,8 +1093,8 @@ class Pipeline_ERTS:
         for j in range(0, self.N_T):
             y_mdl_tst = test_input[j]
             SysModel.T_test = y_mdl_tst.size()[-1]
-            x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
-            x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=SysModel.F.dtype)
+            x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+            x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
 
             # choose initials for this sequence j
             if (init_x_list is not None) and (init_P_list is not None):
@@ -1069,6 +1131,8 @@ class Pipeline_ERTS:
                         # Compute H_last = ∂h/∂x at time T-1 (use filtered state at T-1 as approximation)
                         x_last = x_out_test_forward_1[:, SysModel.T_test - 1].view(SysModel.m, 1)
                         H_last = getJacobian(x_last, SysModel.h)
+                        _jacobian_watchdog(H_last, x_last, SysModel.h,)#ori del
+
             x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
             self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
             x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
@@ -2017,6 +2081,8 @@ class Pipeline_ERTS:
                     # make sure getJacobian(SysModel.h) is in scope; import if needed
                     with torch.enable_grad():
                         H_last = getJacobian(x_last, SysModel.h)
+                        _jacobian_watchdog(H_last, x_last, SysModel.h)#ori del
+
         # Backward pass
         x_out_smoothed[:, T - 1] = x_out_forward[:, T - 1]
 

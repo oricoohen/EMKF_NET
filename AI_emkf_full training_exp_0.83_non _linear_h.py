@@ -36,9 +36,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3/r_01/True_F/'  ######################################################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3/r_001/True_F/'  ######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3/r_01/False_F/'  ######################################################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3/r_001/False_F/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -67,7 +67,7 @@ max_iter = 3
 
 # True model
 q2 = 0.01
-r2 =0.1
+r2 =0.01
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
@@ -78,9 +78,9 @@ R = r2 * R_structure.to(device)
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device,dtype=torch.float32) # State transition matrix
 f = make_f(F)
 
-h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
+# h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
 
-sys_model = SystemModel(f, Q, h_nonlinear_rot, R, args.T, args.T_test,m,n)
+sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
 # SystemModel.F_gen = True
 m1_0 = m1_0
 m2_0 = m2_0
@@ -246,7 +246,7 @@ RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_tar
 RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth, non_linear_h=  True)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3/r_01/EMKF/False/'######################################################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_3/r_001/EMKF/False/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 model_pathes = []
@@ -274,8 +274,8 @@ sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
 
 
-RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
-                            load_base_rtsnet=path_results_wrong_rts, load_base_psmooth=path_results_wrong_psmooth, non_linear_h= True)
+# RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
+#                             load_base_rtsnet=path_results_wrong_rts, load_base_psmooth=path_results_wrong_psmooth, non_linear_h= True)
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
 RTSNet_Pipeline.Test_Only_EMKF(sys_model_2, test_input, test_target,

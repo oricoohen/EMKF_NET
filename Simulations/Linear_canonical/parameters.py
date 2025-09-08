@@ -11,7 +11,7 @@ This file contains the parameters for the simulations with linear canonical mode
 """
 
 import torch
-
+device =torch.device("cuda")
 m = 2 # state dimension = 2, 5, 10, etc.
 n = 2 # observation dimension = 2, 5, 10, etc.
 
@@ -20,10 +20,10 @@ n = 2 # observation dimension = 2, 5, 10, etc.
 ##################################
 # m1_0 = torch.zeros(m, 1)
 # m2_0 = 0 * torch.eye(m)
-m1_0 = torch.tensor([[0.5], [0.5]])
+m1_0 = torch.tensor([[0.5], [0.5]],device=device)
 # m1_0 = torch.tensor([[28.84], [22.05]])
 # m1_0 = m1_0.view(-1)
-m2_0 = torch.eye(m)
+m2_0 = torch.eye(m,device=device)
 
 #########################################################
 ### state evolution matrix F and observation matrix H ###
@@ -33,7 +33,7 @@ m2_0 = torch.eye(m)
 # F[0] = torch.ones(1,m)
 #
 F = torch.tensor([[1., 1.],
-                  [0.25, 1.]])
+                  [0.25, 1.]],device=device)
 
 
 #F_initial_guess = torch.eye(m)
@@ -41,16 +41,16 @@ F_initial_guess = None
 
 if m == 2:
     # H = I
-    H = torch.eye(2)
+    H = torch.eye(2,device=device)
 else:
     # H in reverse canonical form
-    H = torch.zeros(n,n)
-    H[0] = torch.ones(1,n)
+    H = torch.zeros(n,n,device=device)
+    H[0] = torch.ones(1,n,device=device)
     for i in range(n):
         H[i,n-1-i] = 1
 
 H = torch.tensor([[1., 1.],
-                  [0.25, 1.]])
+                  [0.25, 1.]],device=device)
 
 
 #######################
@@ -75,5 +75,5 @@ if(m==2):
 ### process noise Q and observation noise R ###
 ###############################################
 # Noise variance takes the form of a diagonal matrix
-Q_structure = torch.eye(m)
-R_structure = torch.eye(n)
+Q_structure = torch.eye(m,device=device)
+R_structure = torch.eye(n,device=device)

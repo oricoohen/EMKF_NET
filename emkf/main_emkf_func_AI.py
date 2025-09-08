@@ -6,6 +6,23 @@ import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
 #from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
+def _rho(F):
+    try:
+        return torch.linalg.eigvals(F).abs().max().real.item()
+    except Exception:
+        return float("inf")
+
+def _cond_sym(A):
+    # crude but effective for 2x2
+    try:
+        s = torch.linalg.svdvals(A)
+        return (s.max() / torch.clamp(s.min(), 1e-12)).item()
+    except Exception:
+        return float("inf")
+
+
+
+
 def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     """
     Perform EM for a single sequence to estimate the state transition matrix F.
@@ -32,9 +49,23 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     A_1 = compute_A1(sys_model.m1x_0, X_s, V_s)  # (seq,n, n)
     A_2 = compute_A2(sys_model.m1x_0, sys_model.m2x_0, X_s, P_smooth_s)  # (seq,n, n)
     # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
+    ##########################################################################
+    # print(f"[M] pre-solve: ||Sxx||={A_2.norm().item():.3e} cond(Sxx)≈{_cond_sym(A_2):.2e}  rho(F_in)={_rho(sys_model.F):.3f}")
+
+    ##########################################################################
+
+
     eps = 1e-4 * torch.eye(m, device=A_2.device)
     A_2 = A_2 + eps
     F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
+
+    # print( f"[M] post-solve: rho(F_est)={_rho(F_estimates_tensor):.3f}  ||F_est - F_in||={torch.linalg.norm(F_estimates_tensor - sys_model.F).item():.3e}")
+    #
+    # rho_cand = _rho(F_estimates_tensor)
+    # if (not torch.isfinite(rho_cand)) or (rho_cand > 1.01):  # 1.01 on purpose: strict
+    #     print(f"[M] REJECT: rho(F_est)={rho_cand:.3f}  keep F_in")
+    #     F_estimates_tensor = sys_model.F  # do not update this sequence/iter
+    #     # continue the loop with this F_seq
 
     # F_estimates_tensor = torch.zeros_like(A_1)
     # for s in range(SEQ):

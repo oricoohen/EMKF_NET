@@ -12,9 +12,10 @@ device =torch.device("cuda")
 m = 2
 n = 2
 variance = 0
-m1x_0 = torch.ones(m, 1, device=device)
-m2x_0 = 0 * 0 * torch.eye(m, device=device)
-
+# m1x_0 = torch.ones(m, 1, device=device)
+m1x_0 = torch.tensor([[0.5], [0.5]],device=device)
+# m2x_0 = 0 * 0 * torch.eye(m, device=device)
+m2x_0 = torch.eye(m, device=device)
 ### Decimation
 delta_t_gen =  1e-5
 delta_t = 0.02
@@ -47,6 +48,8 @@ def getJacobian(x, g):
     return J
 
 
+
+
 # F = torch.tensor([[0.83, 0.20],
 #                   [0.20, 0.83]], dtype=torch.float32)
 F = torch.tensor([[0.63, 0.0021],[0.0021, 1.0299]], device=device,dtype=torch.float32) # State transition matrix
@@ -76,6 +79,23 @@ f = make_f(F)
 # NONLINEAR observation: 2D range–bearing on (x1, x2)
 # y = [ r, theta ]^T  with r = sqrt(x1^2 + x2^2), theta = atan2(x2, x1)
 # -----------------------------
+
+# def H_stable(x, Robs, r_floor=1e-3, r2_floor=1e-4):
+#     # x: [2] or [2,1] ; returns [2,2]
+#     xv = x.view(-1)
+#     u  = Robs @ xv
+#     u1, u2 = u[0], u[1]
+#     r2 = u1*u1 + u2*u2
+#     r  = torch.sqrt(torch.clamp(r2, min=r_floor*r_floor))
+#     r2 = torch.clamp(r2, min=r2_floor)
+#
+#     # dy/du
+#     J_u = torch.stack([torch.stack([ u1/r, u2/r]),        # ∂r/∂u
+#         torch.stack([-u2/r2,u1/r2])        # ∂θ/∂u
+#     ])
+#     # chain to x
+#     return J_u @ Robs
+
 def h_nonlinear(x):
     # accept [m] or [m,1]; return [n,1]
     x_vec = x.view(-1) if x.dim() == 2 else x  # [2]
