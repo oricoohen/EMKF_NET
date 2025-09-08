@@ -80,7 +80,7 @@ R = r2 * R_structure
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
 f = make_f(F)
 
-h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
+# h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
 
 sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
 SystemModel.F_gen = True
