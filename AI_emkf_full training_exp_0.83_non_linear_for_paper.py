@@ -4,7 +4,7 @@ import torch.nn as nn
 from datetime import datetime
 
 
-from Simulations.Extended_sysmdl import SystemModel, rotate_F, make_rotated_h_nonlinear   # your class posted above
+from Simulations.Extended_sysmdl import SystemModel, rotate_F#, make_rotated_h_nonlinear   # your class posted above
 from Simulations.Lorenz_Atractor.parameters import ( m1x_0 as m1_0, m2x_0 as m2_0,    # keep your names consistent
     m, n, F, make_f, h_nonlinear, Q_structure, R_structure
 )
