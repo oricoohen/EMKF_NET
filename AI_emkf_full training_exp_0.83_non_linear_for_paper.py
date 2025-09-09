@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3/r_01/True_F/'###############################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3.12/r_001/True_F/'###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3/r_01/False_F/'###############################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3/r_001/False_F/'###############################################################################################################################################
 
 
 ####################
@@ -64,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 0.1
+r2 = 0.01
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -80,7 +80,7 @@ Q = (q2 * Q_structure).to(DEVICE, dtype=DTYPE)
 R = (r2 * R_structure).to(DEVICE, dtype=DTYPE)
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=DEVICE, dtype=DTYPE) # State transition matrix
 # F = torch.tensor([[0.999, 0.1],[0., 0.999]], device=DEVICE, dtype=DTYPE) # State transition matrix
-h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
+# h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
 f = make_f(F)
 sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
 SystemModel.F_gen = False
@@ -232,7 +232,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3/r_01/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_3.12/r_001/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"

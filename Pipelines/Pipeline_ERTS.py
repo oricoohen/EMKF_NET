@@ -12,9 +12,8 @@ from RTSNet.PsmoothNN import PsmoothNN  # Ensure the PsmoothNN class is correctl
 import torch.nn as nn
 from emkf.main_emkf_func_AI import EMKF_F_Mstep
 from Simulations.Lorenz_Atractor.parameters import getJacobian
-
+import math
 device =torch.device("cuda")
-
 
 # thresholds you can tweak
 _JAC_MAXABS_THRESH = 1e3      # entries bigger than this are "large"
@@ -2081,7 +2080,7 @@ class Pipeline_ERTS:
                     # make sure getJacobian(SysModel.h) is in scope; import if needed
                     with torch.enable_grad():
                         H_last = getJacobian(x_last, SysModel.h)
-                        _jacobian_watchdog(H_last, x_last, SysModel.h)#ori del
+                        _jacobian_watchdog(H_last, x_last, SysModel.h)
 
         # Backward pass
         x_out_smoothed[:, T - 1] = x_out_forward[:, T - 1]
@@ -2120,7 +2119,7 @@ class Pipeline_ERTS:
 
         # Compute S_0
         P_1_0_pred = SysModel.F @ p0_use@ SysModel.F.T + SysModel.Q
-        s_0 = p0_use@ SysModel.F.T @ torch.inverse(P_1_0_pred.view(m, m))
+        s_0 = p0_use@ SysModel.F.T @ torch.inverse(P_1_0_pred.view(m, m))# ori return this and delet the tow row down
         smoother_gain_list.append(s_0.clone())
 
         # Extract filtered covariances
@@ -2242,6 +2241,7 @@ class Pipeline_ERTS:
                     if seq_idx == 0:
                         print(f'EM iter: {em_iter}, loss: {total_seq_loss:.4f}')
                         print(f'F_seq: {F_seq}')
+
 
                     # M-STEP
                     if non_linear_h == True:
@@ -2408,6 +2408,33 @@ class Pipeline_ERTS:
                                                                              x_out_smoothed)
                     total_seq_loss = 0.9 * rts_loss + 0.1 * psmooth_loss
                     seq_iter_losses.append(total_seq_loss)
+
+                    ####################################################################################################################################################ori del
+                    # # ---- after you compute total_seq_loss = 0.9*rts_loss + 0.1*psmooth_loss ----
+                    #
+                    # # print F if this sequence's loss in this EM iteration is worse than -7 dB
+                    # HIGH_LOSS_DB = -7.0
+                    # loss_db = 10.0 * torch.log10(
+                    #     total_seq_loss.detach().clamp_min(torch.tensor(1e-12, device=total_seq_loss.device)))
+                    #
+                    # if loss_db.item() > HIGH_LOSS_DB:
+                    #     # spectral radius (useful context)
+                    #     def _spectral_radius(F):
+                    #         vals = torch.linalg.eigvals(F)
+                    #         return vals.abs().max().real.item()
+                    #
+                    #     rho = _spectral_radius(F_seq)
+                    #
+                    #     # identify context, then print the F that produced this loss
+                    #     print(f"[HIGH-LOSS] batch= seq={seq_idx} em_iter={em_iter} "
+                    #           f"loss={loss_db.item():.2f} dB  rho(F)={rho:.4f}  ||F||F={torch.linalg.norm(F_seq).item():.4f}")
+                    #     print(F_seq.detach())  # F that was used for this E-step
+
+                    ####################################################################################################################################################
+
+
+
+
 
                     # Debug print for first sequence in first batch
                     if batch_idx == 0 and seq_idx == batch_indices[0]:

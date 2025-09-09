@@ -240,10 +240,10 @@ RTSNet_Pipeline.NNTest(sys_model, test_input, test_target,load_model_path=path_r
 #RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')
 #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
  #########TRAIN BAD F############
-[MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
-                 train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
+# [MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
+#                  train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_wrong_psmooth2,
 #                             load_rtsnet = path_results_True_rts,load_psmooth = path_results_True_psmooth, generate_f=True)
 
@@ -268,8 +268,8 @@ for i in range(max_iter):
     model_pathes.append(destination_path_RTS)
     psmooth_pathes.append(destination_path_PSMOOTH)
     #Copy the file. This creates the independent duplicate.
-    shutil.copy2(path_results_True_rts, destination_path_RTS)
-    shutil.copy2(path_results_True_psmooth, destination_path_PSMOOTH)
+    # shutil.copy2(path_results_True_rts, destination_path_RTS)
+    # shutil.copy2(path_results_True_psmooth, destination_path_PSMOOTH)
 ######START THE EMKF TRAINING##########
 
 
@@ -280,7 +280,7 @@ RTSNet_Pipeline.setTrainingParams(args)
 
 
 RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
-                            load_base_rtsnet=path_results_wrong_rts, load_base_psmooth=path_results_wrong_psmooth, non_linear_h= True)
+                            load_base_rtsnet=path_results_True_rts, load_base_psmooth=path_results_True_psmooth, non_linear_h= True)
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
 RTSNet_Pipeline.Test_Only_EMKF(sys_model_2, test_input, test_target,

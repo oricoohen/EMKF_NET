@@ -63,6 +63,7 @@ def compute_A1(x_0, x_t, V):
         A1[seq,:,:] += x_t[seq,:, 0].unsqueeze(1) @ x_0.T + V[seq][:,:,0]
         for t in range(1, T):
             A1[seq,:,:] += x_t[seq,:, t].unsqueeze(1) @ x_t[seq,:, t - 1].unsqueeze(0) + V[seq][:,:,t]
+        # A1[seq, :, :] += -V[seq][:,:,T-1]
         #A1[seq,:,:] = nonsing_simetric(A1[seq,:,:])
     return A1
 

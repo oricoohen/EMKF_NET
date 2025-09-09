@@ -52,12 +52,24 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     ##########################################################################
     # print(f"[M] pre-solve: ||Sxx||={A_2.norm().item():.3e} cond(Sxx)≈{_cond_sym(A_2):.2e}  rho(F_in)={_rho(sys_model.F):.3f}")
 
-    ##########################################################################
-
-
     eps = 1e-4 * torch.eye(m, device=A_2.device)
     A_2 = A_2 + eps
     F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
+
+    ##########################################################################
+    # CAP = 1.07
+    # # works for real F; returns a Python float
+    # vals = torch.linalg.eigvals(F_estimates_tensor)
+    #
+    #
+    # rho = float(vals.abs().max().real)
+    # if rho > CAP:
+    #     scale = CAP / rho
+    #     F_estimates_tensor = F_estimates_tensor * scale
+
+    # F_estimates_tensor = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=A_2.device).unsqueeze(0)
+
+    ##########################################################################
 
     # print( f"[M] post-solve: rho(F_est)={_rho(F_estimates_tensor):.3f}  ||F_est - F_in||={torch.linalg.norm(F_estimates_tensor - sys_model.F).item():.3e}")
     #
