@@ -226,10 +226,10 @@ path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
 #####TRAIN GOOD F#####
 print('rtssnet and psmooth with trueeeeeeee F')
-RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 #####TRAIN GOOD F########
-RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
-                 train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
+# RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
+#                  train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_psmooth,
 #                            load_rtsnet = path_results_full_rts,load_psmooth =path_results_full_psmooth , generate_f=True)
 
@@ -240,15 +240,15 @@ RTSNet_Pipeline.NNTest(sys_model, test_input, test_target,load_model_path=path_r
 #RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')
 #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
  #########TRAIN BAD F############
-[MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
-                 train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
+# [MSE_train_p_smooth_dB_epoch_2,MSE_cv_p_smooth_dB_epoch_2] = RTSNet_Pipeline.P_smooth_Train(sys_model_2, cv_input, cv_target, train_input,
+#                  train_target, path_results = path_results_wrong_psmooth,path_rtsnet = path_results_wrong_rts, load_psmooth_path=path_results_True_psmooth, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model_2, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_wrong_psmooth2,
 #                             load_rtsnet = path_results_True_rts,load_psmooth = path_results_True_psmooth, generate_f=True)
 
 # ## Test Neural Network
-# RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth, non_linear_h=  True)
+RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth, non_linear_h=  True)
 
 # The folder where the new copies will be saved.
 destination_folder = 'RTSNet/paper/exp_3.13/r_10/EMKF/False/'######################################################################################################################################################################
