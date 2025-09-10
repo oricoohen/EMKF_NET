@@ -280,7 +280,7 @@ RTSNet_Pipeline.setTrainingParams(args)
 
 
 RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
-                            load_base_rtsnet=path_results_wrong_psmooth, load_base_psmooth=path_results_wrong_rts, non_linear_h= True)
+                            load_base_rtsnet=path_results_wrong_rts, load_base_psmooth=path_results_wrong_psmooth, non_linear_h= True)
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
 RTSNet_Pipeline.Test_Only_EMKF(sys_model_2, test_input, test_target,
