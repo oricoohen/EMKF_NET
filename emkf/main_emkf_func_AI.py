@@ -63,6 +63,7 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     if rho > CAP:
         scale = CAP / rho
         F_estimates_tensor = F_estimates_tensor * scale
+        print('to big rho i cut it notice the model is ustable')
 
     return F_estimates_tensor
 
