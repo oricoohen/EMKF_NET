@@ -56,16 +56,18 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     A_2 = A_2 + eps
     F_estimates_tensor = A_1 @ torch.linalg.pinv(A_2)
 
+    CAP = 1.07
+    # works for real F; returns a Python float
+    vals = torch.linalg.eigvals(F_estimates_tensor)
+    rho = float(vals.abs().max().real)
+    if rho > CAP:
+        scale = CAP / rho
+        F_estimates_tensor = F_estimates_tensor * scale
+
+    return F_estimates_tensor
+
     ##########################################################################
-    # CAP = 1.07
-    # # works for real F; returns a Python float
-    # vals = torch.linalg.eigvals(F_estimates_tensor)
-    #
-    #
-    # rho = float(vals.abs().max().real)
-    # if rho > CAP:
-    #     scale = CAP / rho
-    #     F_estimates_tensor = F_estimates_tensor * scale
+
 
     # F_estimates_tensor = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=A_2.device).unsqueeze(0)
 
@@ -101,7 +103,6 @@ def EMKF_F_Mstep(sys_model,X_s, P_smooth_s, V_s,m):
     #     # 6. After the loop, stack the list of averaged matrices into a single tensor.
     #     block_averages = torch.stack(averaged_blocks_list)
     #     return block_averages
-    return F_estimates_tensor
 
 
 

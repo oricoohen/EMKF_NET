@@ -221,10 +221,10 @@ path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
 #####TRAIN GOOD F#####
 print('rtssnet and psmooth with trueeeeeeee F')
-RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 #####TRAIN GOOD F########
-RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
-                 train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
+# RTSNet_Pipeline.P_smooth_Train(sys_model,cv_input, cv_target,
+#                  train_input, train_target, path_results =path_results_True_psmooth, path_rtsnet = path_results_True_rts,load_psmooth_path = None, generate_f=True)
 # RTSNet_Pipeline.Train_Joint(sys_model, cv_input, cv_target, train_input, train_target, path_results_rtsnet=path_results_2_rts2 ,path_results_psmooth=path_results_2_psmooth,
 #                            load_rtsnet = path_results_full_rts,load_psmooth =path_results_full_psmooth , generate_f=True)
 
@@ -274,8 +274,8 @@ sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
 
 
-RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
-                            load_base_rtsnet=path_results_True_rts, load_base_psmooth=path_results_True_psmooth, non_linear_h= True)
+# RTSNet_Pipeline.Train_EndToEnd_EMKF(sys_model_2, cv_input, cv_target, train_input, train_target,rtsnet_model_paths =model_pathes, psmooth_model_paths =psmooth_pathes, emkf_iterations=3,
+#                             load_base_rtsnet=path_results_True_rts, load_base_psmooth=path_results_True_psmooth, non_linear_h= True)
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
 RTSNet_Pipeline.Test_Only_EMKF(sys_model_2, test_input, test_target,

@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3.12/r_001/True_F/'###############################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3.13/r_1/True_F/'###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3/r_001/False_F/'###############################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3.13/r_1/False_F/'###############################################################################################################################################
 
 
 ####################
@@ -64,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 0.01
+r2 = 1.
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -121,7 +121,7 @@ for dataset_id in range(1, cycles+1):
     print(F_current)
 
     # Create system model
-    SystemModel.F_gen = False
+    # SystemModel.F_gen = False
 
     sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
     sys_model.InitSequence(m1_0, m2_0)
@@ -232,7 +232,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3.12/r_001/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_3.13/r_1/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"

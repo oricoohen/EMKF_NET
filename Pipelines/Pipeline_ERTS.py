@@ -127,6 +127,7 @@ class Pipeline_ERTS:
         # P-smooth loss weight
         self.p_smooth_weight = 0.1  # Default weight for p-smooth loss
 
+
     def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results,path_rtsnet=None,load_psmooth_path = None, generate_f=True):
 
         '''train P-smooth network with RTSNet fixed. dont change the RTSNet'''
@@ -359,6 +360,241 @@ class Pipeline_ERTS:
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
         return  [self.MSE_train_dB_epoch[ti],self.MSE_cv_dB_epoch[ti]]
+
+
+
+    # def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results,path_rtsnet=None,load_psmooth_path = None, generate_f=True): just p smooth!
+    #
+    #     '''train P-smooth network with RTSNet fixed. dont change the RTSNet'''
+    #
+    #     self.N_E = len(train_input)
+    #     self.N_CV = len(cv_input)
+    #
+    #     self.model = torch.load(path_rtsnet, map_location=self.device, weights_only=False)  # Load the best RTSNet model
+    #     self.model.to(self.device).eval() # Freeze RTSNet if needed, so it doesn't change
+    #     if load_psmooth_path != None:
+    #         self.PsmoothNN = torch.load(load_psmooth_path,  map_location=self.device,weights_only=False)
+    #         # Re-link the optimizer to the parameters of the newly loaded model
+    #         self.PsmoothNN_optimizer = torch.optim.Adam(self.PsmoothNN.parameters(), lr=self.learningRate,
+    #                                                     weight_decay=self.weightDecay)
+    #     self.PsmoothNN.to(self.device).train()  # Set P-smooth network to train mode
+    #     # Preallocate arrays for logging training performance
+    #
+    #     self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
+    #     self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
+    #     self.MSE_cv_idx_opt = 0
+    #     self.MSE_cv_dB_opt = 1000
+    #     self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
+    #     self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
+    #     ##############
+    #     ### Epochs ###
+    #     ##############
+    #
+    #
+    #     for ti in range(0, self.N_steps):
+    #
+    #         ###############################
+    #         ### Training Sequence Batch ###
+    #         ###############################
+    #         # Zero gradients for both optimizers
+    #         self.PsmoothNN_optimizer.zero_grad()
+    #         self.PsmoothNN.train()
+    #         Batch_Psmooth_LOSS_sum = 0
+    #
+    #         for j in range(0, self.N_B):
+    #
+    #             n_e = random.randint(0, self.N_E - 1)
+    #             if generate_f != None:  ####if we train with different f
+    #                 index = n_e // 10
+    #                 SysModel.F = SysModel.F_train[index]
+    #                 self.model.update_F(SysModel.F)
+    #                 # self.PsmoothNN.update_F(SysModel.F)
+    #             y_training = train_input[n_e]
+    #             SysModel.T = y_training.size()[-1]
+    #
+    #             self.model.init_hidden()
+    #             self.model.InitSequence(SysModel.m1x_0, SysModel.T)
+    #
+    #             x_out_training_forward = torch.empty(SysModel.m, SysModel.T,
+    #                                  device=y_training.device, dtype=y_training.dtype)
+    #             x_out_training = torch.empty(SysModel.m, SysModel.T,
+    #                                  device=y_training.device, dtype=y_training.dtype)
+    #             ########add changes to compute P and S
+    #             #####compute P ori
+    #             self.model.sigma_list = []  # is added in every step_KGain_est(self, y) [1, 1, m²]
+    #             self.model.smoother_gain_list = []  # is added in every step_RTSGain_est(self, filter_x_nexttime, smoother_x_tplus2)
+    #             for t in range(0, SysModel.T):
+    #                 x_out_training_forward[:, t] = self.model(y_training[:, t], None, None, None)
+    #                 P_forward = self.model.h_Sigma.clone().detach()  # [1, 1, m²]
+    #                 self.model.sigma_list.append(P_forward)  # [1, 1, m²]
+    #             # -------- RTSNet Backward Pass: Compute smoother gains and smoothed states --------
+    #             # Start backward smoothing: initialize using last forward estimate
+    #             x_out_training[:, SysModel.T - 1] = x_out_training_forward[:,SysModel.T - 1]  # backward smoothing starts from x_T|T
+    #             self.model.InitBackward(x_out_training[:, SysModel.T - 1])
+    #             x_out_training[:, SysModel.T - 2] = self.model(None, x_out_training_forward[:, SysModel.T - 2],
+    #                                                            x_out_training_forward[:, SysModel.T - 1], None)
+    #             self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # ori save the T-1 sgain
+    #             for t in range(SysModel.T - 3, -1, -1):
+    #                 x_out_training[:, t] = self.model(None, x_out_training_forward[:, t],
+    #                                                   x_out_training_forward[:, t + 1], x_out_training[:, t + 2])
+    #                 self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
+    #             # ---- Handle initial smoothed P at time T ----
+    #             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T,
+    #                          device=self.device)
+    #             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
+    #                          device=self.device)  # shape: [1, 1, m²] input to PsmoothNN
+    #             sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
+    #             self.PsmoothNN.start = 0
+    #             ####compute the P(T)
+    #             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)# shape: [1, 1, m²] to [m²]
+    #             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m,SysModel.m))# shape: [m, m]
+    #             P_smoothed_seq[:, :, SysModel.T - 1] = P_matrix  # shape: [m, m]
+    #             # ---- Loop over t = 1 to T for learning P_smooth ----
+    #             for t in range(SysModel.T - 2, -1, -1):  # Loop from T-2 down to 0
+    #                 sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # sigma_t: shape [1, 1, m²]
+    #                 # Compute the proper index for smoother_gain_list
+    #                 index = (SysModel.T - 2) - t
+    #                 sgain_t = self.model.smoother_gain_list[index].reshape(1, 1, -1)  # Now sgain_t: [1, 1, m²]
+    #                 # Forward pass through PsmoothNN
+    #                 P_flat = self.PsmoothNN(sigma_t, sgain_t)  # [1, 1, m²]
+    #                 # Enforce PSD properties
+    #                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(-1).view(SysModel.m,SysModel.m))  # [m, m]
+    #                 # Save result in the sequence tensor
+    #                 P_smoothed_seq[:, :, t] = P_matrix  # [ m, m]
+    #
+    #
+    #             # Compute P-smooth loss using PsmoothNN's compute_loss method
+    #             # Detach x_out_training to prevent gradient flow to RTSNet
+    #             #oprion 1
+    #             psmooth_loss = self.PsmoothNN.compute_loss(P_smoothed_seq, train_target[n_e], x_out_training.detach())
+    #             #option 2
+    #             #psmooth_loss = self.compute_gaussian_loss1(P_smoothed_seq, train_target[n_e], x_out_training.detach())
+    #
+    #             # Accumulate losses
+    #             Batch_Psmooth_LOSS_sum += psmooth_loss
+    #
+    #         # Average losses for this batch
+    #         Batch_Psmooth_LOSS_mean = Batch_Psmooth_LOSS_sum / self.N_B
+    #         MSE_train_psmooth_batch = Batch_Psmooth_LOSS_mean
+    #
+    #
+    #         # Average
+    #         self.MSE_train_linear_epoch[ti] = torch.mean(MSE_train_psmooth_batch)
+    #         self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
+    #
+    #
+    #
+    #         # Then train PsmoothNN
+    #         Batch_Psmooth_LOSS_mean.backward()
+    #         # right after Batch_Psmooth_LOSS_mean.backward()
+    #         total_grad = 0.0
+    #         # for p in self.PsmoothNN.parameters():
+    #         #     if p.grad is not None:
+    #         #         total_grad += p.grad.norm().item()
+    #         # print(f"Epoch {ti:03d} – gradient L2-norm on PsmoothNN = {total_grad:.4e}")
+    #         self.PsmoothNN_optimizer.step()
+    #
+    #
+    #         ##################
+    #         ### Optimizing ###
+    #         ##################
+    #
+    #         #################################
+    #         ### Validation Sequence Batch ###
+    #         #################################
+    #
+    #         # Cross Validation Mode
+    #         self.PsmoothNN.eval()  # Set PsmoothNN to eval mode
+    #         with torch.no_grad():
+    #             MSE_cv_psmooth_batch = torch.empty([self.N_CV], device=self.device)
+    #
+    #             for j in range(0, self.N_CV):
+    #                 y_cv = cv_input[j]
+    #                 SysModel.T_test = y_cv.size()[-1]
+    #                 x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test,
+    #                            device=y_cv.device, dtype=y_cv.dtype)
+    #                 x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
+    #                            device=y_cv.device, dtype=y_cv.dtype)
+    #
+    #                 if generate_f != None:  ####if we valid with different f
+    #                     index = j // 10
+    #                     SysModel.F = SysModel.F_valid[index]
+    #                     self.model.update_F(SysModel.F)
+    #                     # self.PsmoothNN.update_F(SysModel.F)
+    #
+    #                 self.model.init_hidden()
+    #                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
+    #
+    #                 # Forward pass and compute P-smooth
+    #                 # Initialize lists to store intermediate values
+    #                 self.model.sigma_list = []  # List of [1, 1, m²] tensors for each time step
+    #                 self.model.smoother_gain_list = []  # List of [m, m] tensors for each time step
+    #
+    #                 # Forward pass through RTSNet
+    #                 for t in range(0, SysModel.T_test):
+    #                     x_out_cv_forward[:, t] = self.model(y_cv[:, t], None, None, None)
+    #                     P_cv_forward = self.model.h_Sigma.clone().detach()
+    #                     self.model.sigma_list.append(P_cv_forward)  # [1, 1, m²]
+    #                 # Initialize backward pass
+    #                 x_out_cv[:, SysModel.T_test-1] = x_out_cv_forward[:, SysModel.T_test-1]  # [m]
+    #                 self.model.InitBackward(x_out_cv[:, SysModel.T_test-1])
+    #                 # First backward step
+    #                 x_out_cv[:, SysModel.T_test-2] = self.model(None, x_out_cv_forward[:, SysModel.T_test-2], x_out_cv_forward[:, SysModel.T_test-1],None)  # [m]
+    #                 self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # [m, m]
+    #                 # Remaining backward steps
+    #                 for t in range(SysModel.T_test-3, -1, -1):
+    #                     x_out_cv[:, t] = self.model(None, x_out_cv_forward[:, t], x_out_cv_forward[:, t+1],x_out_cv[:, t+2])  # [m]
+    #                     self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # [m, m]
+    #
+    #                 # Initialize P-smooth sequence tensor
+    #                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test,
+    #                          device=sigma_T.device, dtype=sigma_T.dtype)  # [m, m, T_test]
+    #                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
+    #                          device=sigma_T.device, dtype=sigma_T.dtype)  # shape: [1, 1, m²] input to PsmoothNN
+    #                 sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
+    #                 self.PsmoothNN.start = 0
+    #                 # Handle initial P-smooth at time T_test
+    #                 P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
+    #                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
+    #                 P_smoothed_seq[:, :, SysModel.T_test - 1] = P_matrix  # shape: [m, m]
+    #                 # Compute P-smooth for remaining time steps
+    #                 for t in range(SysModel.T_test - 2, -1, -1):
+    #                     sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # [1, 1, m²]
+    #                     index = (SysModel.T_test - 2) - t
+    #                     sgain_t = self.model.smoother_gain_list[index].reshape(1, 1, -1)  # [1, 1, m²]
+    #                     P_flat = self.PsmoothNN(sigma_t, sgain_t)  # [1, 1, m²]
+    #                     P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(-1).view(SysModel.m,SysModel.m))  # [m, m]
+    #                     P_smoothed_seq[:, :, t] = P_matrix  # [m, m]
+    #
+    #                 # Compute P-smooth validation loss
+    #                 #option 1
+    #                 MSE_cv_psmooth_batch[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, cv_target[j], x_out_cv)  # Scalar
+    #                 #option 2
+    #                 #MSE_cv_psmooth_batch[j] = self.compute_gaussian_loss1(P_smoothed_seq, cv_target[j], x_out_cv)
+    #             # Average
+    #             self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_psmooth_batch)
+    #             self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
+    #
+    #             if (self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt):
+    #                 self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
+    #                 self.MSE_cv_idx_opt = ti
+    #                 torch.save(self.PsmoothNN, path_results)
+    #
+    #
+    #         ########################
+    #         ### Training Summary ###
+    #         ########################
+    #         print(ti, "MSE P_smoothe Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE P_smoothe Validation :", self.MSE_cv_dB_epoch[ti],
+    #               "[dB]")
+    #
+    #         if (ti > 1):
+    #             d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
+    #             d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
+    #             print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
+    #
+    #         print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
+    #
+    #     return  [self.MSE_train_dB_epoch[ti],self.MSE_cv_dB_epoch[ti]]
 
 
 
