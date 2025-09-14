@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_3.13/r_1/True_F/'###############################################################################################################################################
+path_results_True = 'RTSNet/paper/exp_3.13/r_10/True_F/'###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_3.13/r_1/False_F/'###############################################################################################################################################
+path_results_False = 'RTSNet/paper/exp_3.13/r_10/False_F/'###############################################################################################################################################
 
 
 ####################
@@ -64,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 1.
+r2 = 10.
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -232,7 +232,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_3.13/r_1/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_3.13/r_10/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"
@@ -285,14 +285,18 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         test_losses, test_f_losses, final_F_list,  last_x_list, last_P_list,final_F_list2  = RTSNet_Pipeline.Test_Only_EMKF(sys_model_ai, test_input, test_target,
             load_base_rtsnet=model_pathes, load_base_psmooth=psmooth_pathes,emkf_iterations=3,generate_f= False,non_linear_h=True)
+
     else:
         test_losses, test_f_losses, final_F_list,  last_x_list, last_P_list,final_F_list2  = RTSNet_Pipeline.Test_Only_EMKF(sys_model_ai, test_input, test_target,
             load_base_rtsnet=model_pathes, load_base_psmooth=psmooth_pathes,emkf_iterations=3, generate_f= False, init_x_list=x0_em_last, init_P_list=p0_em_last,non_linear_h=True)
 
+
+
     emkf_mse_lin_sum += float(test_losses[-1])
-    current_F_estimate_prev = final_F_list
-    # current_F_estimate_prev = F_initial_guess
+    # current_F_estimate_prev = final_F_list
+    current_F_estimate_prev = F_initial_guess
     # Prepare initials for NEXT dataset
+
 
     x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
     p0_em_last = [last_P_list[j].clone() for j in range(len(last_P_list))]
