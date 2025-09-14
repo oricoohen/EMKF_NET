@@ -66,7 +66,9 @@ def compute_cross_covariances( F, H, Ks, Ps, SGains):
 
 
 
-def S_Test(SysModel, test_input, test_target,F,generate_f=True, allStates=True, randomInit = False,test_init=None):
+def S_Test(SysModel, test_input, test_target,F,generate_f=True, allStates=True, randomInit = False,test_init=None,
+
+           init_x_list=None, init_P_list=None):
 
     # LOSS
     loss_rts = nn.MSELoss(reduction='mean')
@@ -115,7 +117,12 @@ def S_Test(SysModel, test_input, test_target,F,generate_f=True, allStates=True, 
         if(randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)  
         else:
-            KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)   
+            if init_x_list is not None:
+                x0 = init_x_list[j]  # [m,1]
+                P0 = init_P_list[j]
+                SysModel.m1x_0 = x0
+                SysModel.m2x_0 = P0
+            KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
 
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
         #    KF.K should have shape (m, n)
@@ -159,7 +166,7 @@ def S_Test(SysModel, test_input, test_target,F,generate_f=True, allStates=True, 
     print("RTS Smoother - STD:", RTS_std_dB, "[dB]")
     # Print Run Time
     print("Inference Time:", t)
-    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg ,RTS_out,P_smooth,V_test]
+    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out,P_smooth,V_test]
 
 
 

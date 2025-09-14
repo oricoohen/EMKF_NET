@@ -111,7 +111,7 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, max_it=100,
 
 
 
-def EMKF_F(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100, tol_likelihood=0.01, tol_params=0.005):
+def hhEMKF_F(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100, tol_likelihood=0.01, tol_params=0.005):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -172,3 +172,6 @@ def EMKF_F(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=100, tol_like
 
 
     return F_matrices, likelihoods, iterations_list
+
+
+

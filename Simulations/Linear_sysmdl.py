@@ -51,7 +51,7 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
         # F = torch.tensor([[1., 0.],
         #                    [0., 1.]])
         F = torch.tensor([[0.63, 0.0021],[0.0021, 1.0299]])  # State transition matrix
-        #F = torch.tensor([[0.83, 0.2],
+        # F = torch.tensor([[0.83, 0.2],
         #                  [0.2, 0.83]])
         # F = torch.tensor([[1.4, 0.5],
         #       [0.8, 1.4]])  # State transition matrix
@@ -286,6 +286,17 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
+        q2 = torch.tensor(0.01,device=self.F.device,dtype=self.F.dtype)
+        r2 = torch.tensor(0.1, device=self.F.device, dtype=self.F.dtype)
+
+        lam_q = torch.rsqrt(q2)
+        lam_r = torch.rsqrt(r2)
+
+        lam_vec_q = lam_q.expand(self.m)
+        lam_vec_r = lam_r.expand(self.n)
+
+        q_dist = Exponential(lam_vec_q)
+        r_dist = Exponential(lam_vec_r)
         # Generate Sequence Iteratively
         for t in range(0, T):
 
@@ -305,12 +316,13 @@ class SystemModel:
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
                 eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q) #leave like this
-                #############################3
-                # lam_q = 2.
-                # lam_vec_r = torch.full((self.m,), lam_q, dtype=xt.dtype, device=xt.device)
-                # eq = Exponential(lam_vec_r).sample()  # shape (n,)
-                ##############################
                 eq = torch.reshape(eq[:], xt.size())
+                ############################3
+
+                # eq = (q_dist.sample() - 1.0 / lam_vec_q).reshape_as(xt)
+                eq = (q_dist.sample()).reshape_as(xt)
+                ##############################
+
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
 
@@ -330,12 +342,12 @@ class SystemModel:
                 mean = torch.zeros([self.n])
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
                 er = distrib.rsample()
-                #############################3
-                # lam_r = 2.
-                # lam_vec_r = torch.full((self.n,), lam_r, dtype=yt.dtype, device=yt.device)
-                # er = Exponential(lam_vec_r).sample()  # shape (n,)
-                ##############################
                 er = torch.reshape(er[:], yt.size())
+                #############################3
+                # er = (r_dist.sample() - 1.0 / lam_vec_r).reshape_as(yt)
+                er = (r_dist.sample()).reshape_as(yt)
+                ##############################
+
                 # Additive Observation Noise
                 yt = torch.add(yt,er)
 
@@ -358,7 +370,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True):
+    def GeneratBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True,x0_list = None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -376,9 +388,6 @@ class SystemModel:
             # Allocate Empty Array for Random Initial Conditions
             self.m1x_0_rand = torch.empty(size, self.m)
 
-        ### Generate Examples
-        initConditions = self.m1x_0
-
         if F_gen == True:
             F_matrices = generate_random_F_matrices(size//10 +1,delta)
         else:
@@ -388,7 +397,14 @@ class SystemModel:
         for i in range(0, size):
             index_F =i//10
             self.F = F_matrices[index_F]
+            self.F_T = F_matrices[index_F].T
             # Generate Sequence
+            ### Generate Examples
+            # ---- choose init x0 for this sequence i ----ori
+            if x0_list is not None:
+                initConditions = x0_list[i]  # expected shape [m,1]
+            else:
+                initConditions = self.m1x_0  # default
 
             # Randomize initial conditions to get a rich dataset
             if(randomInit):
@@ -415,6 +431,7 @@ class SystemModel:
                 self.Target.append(self.x)
                 d
             else:
+
                 self.GenerateSequence(self.Q, self.R, T)
                 # Training sequence input
                 self.Input[i, :, :] = self.y

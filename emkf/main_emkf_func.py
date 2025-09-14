@@ -4,6 +4,7 @@ from emkf.func import  compute_A1, compute_A2, compute_A3, Ell
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext
 import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
 
@@ -40,6 +41,13 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelih
     # F_fin = A_1 @ A_2inv
     A_2 = A_2 + eps
     F_fin = torch.linalg.solve(A_2.T, A_1.T).T
+    # --- SAFETY CLAMP: spectral radius --delet if not needed-
+    eig = torch.linalg.eigvals(F_fin)  # complex tensor (2,)
+    rho = eig.abs().max().real  # scalar
+    if torch.isfinite(rho) and rho > 1.05:
+        F_fin = F_fin * (1.05 / (rho + 1e-8))  # scale down uniformly
+
+
     # print('f_i shape',F_i.shape)
     return F_fin
 
@@ -113,7 +121,8 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelih
 
 
 
-def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True, tol_likelihood=0.01,
+                    tol_params=0.005,init_x_list=None, init_P_list=None):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -142,9 +151,12 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
     likelihoods = []
     iterations_list = []
     m = sys_model.m
-    T = sys_model.T_test
+    T = Y.size(-1)
     # Accumulators for MSE across sequences, per iteration
-    mse_sums = 0.
+    sum_lin_per_iter = torch.zeros(max_it, dtype=torch.float64, device=Y.device)
+    last_x_list = []   #ori
+    last_P_list = []   #
+
     for j in range(len(X)):
         if generate_f ==True:
             index = j // 10
@@ -159,35 +171,137 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
         likelihood_j =[]
         for q in range(max_it):
             #############E STEP rts###############################
-            sys_model.InitSequence(m1_0, m2_0)
-            print('q_iter:', q, 'F_est:', F_est)
-            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test(sys_model,
-                                                            Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0),generate_f=False)
+            # pick per-seq initials if provided
+            if init_x_list is not None:
+                x_0 = init_x_list[j]
+                P_0 = init_P_list[j]
+                sys_model.InitSequence(x_0, P_0)
+                x0_j = [init_x_list[j]]
+                P0_j = [init_P_list[j]]
+            else:
+                x0_j = None
+                P0_j = None
+                sys_model.InitSequence(x_0, P_0)
+            # print('q_iter:', q, 'F_est:', F_est)
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
+                F=F_est.unsqueeze(0),generate_f=False, init_x_list=x0_j,
+                init_P_list=P0_j)
             # Compute *our* MSE for this sequence & iteration (linear, not dB)
-            if q ==max_it-1:
-                mse_sums += _mse_avg.float()
+            sum_lin_per_iter[q] += float(_mse_avg)
             #############M STEP rts###############################
-            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),m,T, tol_likelihood, tol_params)
+            F_est = EMKF_F_solo(F_est, H, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),
+                                m,T, tol_likelihood, tol_params)
             #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
             alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
-            # Check convergence
-            # if q > 0:
-            #     delta_F = torch.abs(F_all_j[q] - F_all_j[q-1]).max()
-            #     if delta_F < tol_params:
-            #         print(f"Converged on F at iteration {q}")
-            #         S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0), F=F_est.unsqueeze(0))
-            #         break
+
+
         F_matrices.append(F_all_j)
         iterations_list.append(q)
         likelihoods.append(likelihood_j)
+        # after final iteration, keep last smoothed x_T, P_T (for next dataset)
+        x_T = X_smooth[0, :, -1].unsqueeze(-1).clone()  # [m,1]
+        P_T = P_smooth_t[0, :, :, -1].clone()  # [m,m]
+        last_x_list.append(x_T)
+        last_P_list.append(P_T)
     # -------- After all sequences: report mean MSE per iteration --------
-    mean_mse_per_seq_lin = mse_sums/len(X)
+    mean_mse_per_seq_lin = (sum_lin_per_iter/len(X)).clone()
     mean_mse_db = 10.0 * torch.log10(mean_mse_per_seq_lin + 1e-12)
 
     print("\n=== Mean MSE across sequences per iteration ===")
-    for q in range(max_it+1):
-        print(f"Iter {q:02d}: mean MSE = {mean_mse_db.item():.3f} dB")
+    for q in range(max_it):
+        print(f"Iter {q:02d}: mean MSE = {mean_mse_db[q].item():.3f} dB")
 
-    return F_matrices, likelihoods, iterations_list, mean_mse_per_seq_lin
+    return F_matrices, likelihoods, iterations_list, mean_mse_per_seq_lin[-1], last_x_list, last_P_list
+
+
+
+def E_EMKF_F_analitic(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None):
+    """
+     EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
+     Notation:
+       • N_seq = number of sequences
+       • T     = length of each time series
+       • m     = measurement dimension
+       • n     = state dimension
+     Inputs:
+       F_0_matrices : list of initial F guesses, each Tensor (n×n)
+       H            : observation matrix,        Tensor (m×n)
+       Q            : process noise covariance,  Tensor (n×n)
+       R            : measurement noise covariance, Tensor (m×m)
+       Y            : all measurements,          Tensor (N_seq, m, T)
+       x_0          : prior mean of x₀,          Tensor (n, 1)
+       P_0          : prior covariance of x₀,    Tensor (n, n)
+       X            : smoothed state means,      Tensor (N_seq, n, T)
+       P_smooth     : smoothed covariances,      Tensor (N_seq, n, n, T)
+       V            : cross-covariances,         Tensor (N_seq, n, n, T)
+       K_all        : Kalman gains per time,     Tensor (N_seq, n, m, T)
+     Returns:
+       F_out        : list of estimated F, length N_seq, each (n×n)
+       ll_out       : list of final log-likelihoods, length N_seq
+       it_out       : list of iteration counts, length N_seq
+     """
+    F_matrices = []
+    iterations_list = []
+    m = sys_model.m
+    T = Y.size(-1)
+    # Accumulators for MSE across sequences, per iteration
+    sum_lin_per_iter = torch.zeros(max_it, dtype=torch.float64, device=Y.device)
+    last_x_list = []   #ori
+    last_P_list = []   #
+
+    for j in range(len(X)):
+        if generate_f ==True:
+            index = j // 10
+        else:
+            index= j
+        F_est = F_0_matrices[index]
+
+        Y_t = Y[j]
+        X_t = X[j]
+        F_all_j = []
+        F_all_j.append(F_est)
+        for q in range(max_it):
+            #############E STEP rts###############################
+            # pick per-seq initials if provided
+            if init_x_list is not None:
+                x_0 = init_x_list[j]
+                P_0 = init_P_list[j]
+                sys_model.InitSequence(x_0, P_0)
+                x0_j = [init_x_list[j]]
+                P0_j = [init_P_list[j]]
+            else:
+                x0_j = None
+                P0_j = None
+                sys_model.InitSequence(x_0, P_0)
+            # print('q_iter:', q, 'F_est:', F_est)
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test_ext(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
+                F_list=[F_est.clone()],generate_f=False, init_x_list=x0_j,
+                init_P_list=P0_j)
+            # Compute *our* MSE for this sequence & iteration (linear, not dB)
+            sum_lin_per_iter[q] += float(_mse_avg)
+            #############M STEP rts###############################
+            F_est = EMKF_F_solo(F_est, h, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),
+                                m,T)
+            #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
+            alpha = 0
+            F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
+            F_all_j.append(F_est)
+
+
+        F_matrices.append(F_all_j)
+        # after final iteration, keep last smoothed x_T, P_T (for next dataset)
+        x_T = X_smooth[0, :, -1].unsqueeze(-1).clone()  # [m,1]
+        P_T = P_smooth_t[0, :, :, -1].clone()  # [m,m]
+        last_x_list.append(x_T)
+        last_P_list.append(P_T)
+    # -------- After all sequences: report mean MSE per iteration --------
+    mean_mse_per_seq_lin = (sum_lin_per_iter/len(X)).clone()
+    mean_mse_db = 10.0 * torch.log10(mean_mse_per_seq_lin + 1e-12)
+
+    print("\n=== Mean MSE across sequences per iteration ===")
+    for q in range(max_it):
+        print(f"Iter {q:02d}: mean MSE = {mean_mse_db[q].item():.3f} dB")
+
+    return F_matrices, mean_mse_per_seq_lin[-1], last_x_list, last_P_list

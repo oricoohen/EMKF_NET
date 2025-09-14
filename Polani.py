@@ -719,7 +719,7 @@ def rotate_one(F, theta = 0.78, i=0, j=1):
 
 
 
-T = 100
+T = 30
 n = 2
 p = 2
 
@@ -733,7 +733,7 @@ F_sim2 = np.array([[0.83, 0.2],
 
 Q_sim2 = 0.01 * np.eye(n)               #   process-noise covariance
 H_sim2 = np.array([[1., 1.], [0.25, 1.]])                  #   full observation
-R_sim2 = 0.10 * np.eye(p)               #   measurement-noise covariance
+R_sim2 = 1000 * np.eye(p)               #   measurement-noise covariance
 
 xi_sim2 = np.array([0.5, 0.5])          #   x₀ mean
 L_sim2  = np.eye(n)
@@ -769,7 +769,7 @@ for i in range(n):
 
 print(plt.rcParams['axes.prop_cycle'].by_key()['color'])
 
-iter = 3
+iter = 1
 for i in range(iter):
 # Perturb the true parameters
     F_0_sim2 = F_sim2.copy()
@@ -779,7 +779,7 @@ for i in range(iter):
     print('ori_ffffffff',F_0_sim2)
     Q_0_sim2 = 0.01 * np.eye(n)               #   process-noise covariance
     H_0_sim2 = np.array([[1., 1.], [0.25, 1.]])                      #   full observation
-    R_0_sim2 = 0.10 * np.eye(p)               #   measurement-noise covariance
+    R_0_sim2 = 100 * np.eye(p)               #   measurement-noise covariance
 
     xi_0_sim2 = np.array([0.5, 0.5])          #   x₀ mean
     L_0_sim2  = np.eye(n)
