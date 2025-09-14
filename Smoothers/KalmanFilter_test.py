@@ -3,43 +3,42 @@ import torch.nn as nn
 import time
 from Smoothers.Linear_KF import KalmanFilter
 
-def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, randomInit = False, test_init=None):
+
+def KFTest(args, SysModel, test_input, test_target, F=None, allStates=True, randomInit=False, test_init=None):
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
-    dev = SysModel.F.device
-    dt  = SysModel.F.dtype
+
     # MSE [Linear]
-    MSE_KF_linear_arr = torch.empty(args.N_T, device=dev)
+    MSE_KF_linear_arr = torch.empty(args.N_T)
     start = time.time()
     KF = KalmanFilter(SysModel)
 
+    last_gains = torch.empty(args.N_T, SysModel.m, SysModel.n)
 
     if not allStates:
-        loc = torch.tensor([True,False,False]) # for position only
-        if SysModel.m == 2: 
-            loc = torch.tensor([True,False]) # for position only
+        loc = torch.tensor([True, False, False])  # for position only
+        if SysModel.m == 2:
+            loc = torch.tensor([True, False])  # for position only
 
-
-    for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
+    for j, (sequence_target, sequence_input) in enumerate(zip(test_target, test_input)):
         if F is not None:
-            F_index = j//10
-            SysModel.F = F[F_index].to(dev, dt)
+            F_index = j // 10
+            SysModel.F = F[F_index]
             KF.F = F[F_index]
             KF.F_T = F[F_index].T
 
-        if(randomInit):
-            KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)        
+        if (randomInit):
+            KF.InitSequence(torch.unsqueeze(test_init[j, :], 1), SysModel.m2x_0)
         else:
             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
-            
-        KF.GenerateSequence(sequence_input.to(dev, dt), sequence_input.to(dev, dt).size()[-1])
 
+        KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
 
-        if(allStates):
-            MSE_KF_linear_arr[j] = loss_fn(KF.x, sequence_target).item()
-        else:
-            MSE_KF_linear_arr[j] = loss_fn(KF.x[loc,:], sequence_target[loc,:]).item()
-        #MSE_KF_linear_arr[j] = loss_fn(test_input[j, :, :], test_target[j, :, :]).item()
+        MSE_KF_linear_arr[j] = loss_fn(KF.x, sequence_target).item()
+
+        #    KF.K should have shape (m, n)
+        last_gains[j] = KF.KG.clone()
+
     end = time.time()
     t = end - start
     MSE_KF_linear_avg = torch.mean(MSE_KF_linear_arr)
@@ -56,6 +55,3 @@ def KFTest(args, SysModel, test_input, test_target,F =None, allStates=True, rand
     # Print Run Time
     print("Inference Time:", t)
     return [MSE_KF_linear_arr, MSE_KF_linear_avg, MSE_KF_dB_avg]
-
-
-

@@ -1,78 +1,3 @@
-# import torch
-# import torch.nn as nn
-# import time
-# from Smoothers.Linear_KF import KalmanFilter
-# from Smoothers.RTS_Smoother import rts_smoother
-#
-# def S_Test(SysModel, test_input, test_target,F=None, allStates=True, randomInit = False,test_init=None):
-#
-#     # LOSS
-#     loss_rts = nn.MSELoss(reduction='mean')
-#
-#     # MSE [Linear]
-#     N_T = len(test_input)
-#     MSE_RTS_linear_arr = torch.empty(N_T)
-#     start = time.time()
-#     KF = KalmanFilter(SysModel)
-#     RTS = rts_smoother(SysModel)
-#     RTS_out = [] # allocate for saving output
-#
-#     if not allStates:
-#         loc = torch.tensor([True,False,False]) # for position only
-#         if SysModel.m == 2:
-#             loc = torch.tensor([True,False]) # for position only
-#
-#
-#     # mask = torch.tensor([True,True,True,False,False,False])# for kitti
-#
-#     for j,(sequence_target,sequence_input) in enumerate(zip(test_target,test_input)):
-#         if F is not None:
-#             F_index = j//10
-#             SysModel.F = F[F_index]
-#             SysModel.F_T = SysModel.F.T
-#             KF.F = F[F_index]
-#             KF.F_T = F[F_index].T
-#             RTS.F = F[F_index]
-#             RTS.F_T = F[F_index].T
-#
-#
-#
-#         if(randomInit):
-#             KF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)
-#         else:
-#             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
-#
-#         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
-#         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
-#
-#         if(allStates):
-#             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x, sequence_target).item()
-#         else:
-#             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x[loc,:], sequence_target[loc,:]).item()
-#         RTS_out.append(RTS.s_x)
-#
-#     end = time.time()
-#     t = end - start
-#
-#     # Average
-#     MSE_RTS_linear_avg = torch.mean(MSE_RTS_linear_arr)
-#     MSE_RTS_dB_avg = 10 * torch.log10(MSE_RTS_linear_avg)
-#
-#     # Standard deviation
-#     MSE_RTS_linear_std = torch.std(MSE_RTS_linear_arr, unbiased=True)
-#
-#     # Confidence interval
-#     RTS_std_dB = 10 * torch.log10(MSE_RTS_linear_std + MSE_RTS_linear_avg) - MSE_RTS_dB_avg
-#
-#
-#     print("RTS Smoother - MSE LOSS:", MSE_RTS_dB_avg, "[dB]")
-#     print("RTS Smoother - STD:", RTS_std_dB, "[dB]")
-#     # Print Run Time
-#     print("Inference Time:", t)
-#     return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg ,RTS_out]
-#
-#
-#
 import torch
 import torch.nn as nn
 import time
@@ -138,7 +63,9 @@ def compute_cross_covariances(F, H, Ks, Ps, SGains):
     return V
 
 
-def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit=False, test_init=None):
+def S_Test(SysModel, test_input, test_target, F, generate_f=True, allStates=True, randomInit=False, test_init=None,
+
+           init_x_list=None, init_P_list=None):
     # LOSS
     loss_rts = nn.MSELoss(reduction='mean')
 
@@ -154,6 +81,7 @@ def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit
     RTS_out = torch.zeros(N_T, m, T)
     P_smooth = torch.zeros(N_T, m, m, T)
     P_tilde = torch.zeros(N_T, m, m, T)
+    V_test = torch.zeros(N_T, m, m, T)
     last_gains = torch.empty(N_T, m, n)
 
     if not allStates:
@@ -165,7 +93,7 @@ def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit
 
     for j, (sequence_target, sequence_input) in enumerate(zip(test_target, test_input)):
 
-        if F is not None:
+        if generate_f == True:
             F_index = j // 10
             SysModel.F = F[F_index]
             SysModel.F_T = SysModel.F.T
@@ -173,9 +101,21 @@ def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit
             KF.F_T = F[F_index].T
             RTS.F = F[F_index]
             RTS.F_T = F[F_index].T
+        else:
+            SysModel.F = F[j]
+            SysModel.F_T = F[j].T
+            KF.F = F[j]
+            KF.F_T = F[j].T
+            RTS.F = F[j]
+            RTS.F_T = F[j].T
         if (randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j, :], 1), SysModel.m2x_0)
         else:
+            if init_x_list is not None:
+                x0 = init_x_list[j]  # [m,1]
+                P0 = init_P_list[j]
+                SysModel.m1x_0 = x0
+                SysModel.m2x_0 = P0
             KF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
 
         KF.GenerateSequence(sequence_input, sequence_input.size()[-1])
@@ -185,6 +125,11 @@ def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit
         RTS.GenerateSequence(KF.x, KF.sigma, sequence_input.size()[-1])
         RTS_out[j] = RTS.s_x.clone()
         P_smooth[j] = RTS.s_sigma.clone()
+        SGains = RTS.SGains
+        # V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_smooth[j], SGains)
+        V_now = compute_cross_covariances(SysModel.F, SysModel.H, last_gains[j], P_tilde[j], SGains)
+        # print('oriiiiiiiiiiiiiii check,', V_now.shape)
+        V_test[j] = V_now
 
         if (allStates):
             MSE_RTS_linear_arr[j] = loss_rts(RTS.s_x, sequence_target).item()
@@ -210,4 +155,4 @@ def S_Test(SysModel, test_input, test_target, F=None, allStates=True, randomInit
     print("RTS Smoother - STD:", RTS_std_dB, "[dB]")
     # Print Run Time
     print("Inference Time:", t)
-    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out, P_smooth]
+    return [MSE_RTS_linear_arr, MSE_RTS_linear_avg, MSE_RTS_dB_avg, RTS_out, P_smooth, V_test]

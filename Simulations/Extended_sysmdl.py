@@ -68,28 +68,28 @@ def rotate_F(F, i=0, j=1, theta=0.78, many=True, randomit=True):
 from functools import partial
 import torch
 
-# def h_rotate_apply(x, h_base, phi_deg: float):
-#     """
-#     y_rot(x) = R(phi_deg) @ h_base(x)
-#     - Pure torch ops → autograd works through x
-#     - Top-level function → picklable (OK with DataLoader / torch.save)
-#     """
-#     y = h_base(x)                      # shape [2,1] or [2]
-#     y2 = y.reshape(-1)                 # [2]; reshape works on non-contiguous too
-#     phi = torch.as_tensor(phi_deg, dtype=y2.dtype, device=y2.device) * (torch.pi / 180.0)
-#     c = torch.cos(phi)
-#     s = torch.sin(phi)
-#     # 4) Rotation matrix R(φ) and apply to y
-#     R_out = torch.stack((torch.stack((c, -s)), torch.stack((s, c))))  # [2,2] on correct device
-#     y_rot = R_out @ y2.unsqueeze(-1)                                   # [2,1]
-#     return y_rot
+def h_rotate_apply(x, h_base, phi_deg: float):
+    """
+    y_rot(x) = R(phi_deg) @ h_base(x)
+    - Pure torch ops → autograd works through x
+    - Top-level function → picklable (OK with DataLoader / torch.save)
+    """
+    y = h_base(x)                      # shape [2,1] or [2]
+    y2 = y.reshape(-1)                 # [2]; reshape works on non-contiguous too
+    phi = torch.as_tensor(phi_deg, dtype=y2.dtype, device=y2.device) * (torch.pi / 180.0)
+    c = torch.cos(phi)
+    s = torch.sin(phi)
+    # 4) Rotation matrix R(φ) and apply to y
+    R_out = torch.stack((torch.stack((c, -s)), torch.stack((s, c))))  # [2,2] on correct device
+    y_rot = R_out @ y2.unsqueeze(-1)                                   # [2,1]
+    return y_rot
 
-# def make_rotated_h_nonlinear(h_nonlinear, phi_deg: float = 30.0):
-#     """
-#     Returns a picklable callable h_rot(x) that internally calls:
-#         h_rotate_apply(x, h_base=h_nonlinear, phi_deg=phi_deg)
-#     """
-#     return partial(h_rotate_apply, h_base=h_nonlinear, phi_deg=phi_deg)
+def make_rotated_h_nonlinear(h_nonlinear, phi_deg: float = 30.0):
+    """
+    Returns a picklable callable h_rot(x) that internally calls:
+        h_rotate_apply(x, h_base=h_nonlinear, phi_deg=phi_deg)
+    """
+    return partial(h_rotate_apply, h_base=h_nonlinear, phi_deg=phi_deg)
 
 
 class SystemModel:
