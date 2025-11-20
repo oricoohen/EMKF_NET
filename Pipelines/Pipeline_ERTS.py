@@ -9,9 +9,11 @@ import time
 import random
 from Plot import Plot_extended as Plot
 from RTSNet.PsmoothNN import PsmoothNN  # Ensure the PsmoothNN class is correctly imported
+from RTSNet.PsmoothNN_combined import PsmoothFromPnot, PNotSmoothNN
 import torch.nn as nn
 from emkf.main_emkf_func_AI import EMKF_F_Mstep
 from Simulations.Lorenz_Atractor.parameters import getJacobian
+from emkf.AI_M_step import DeltaF_MStepNet,compute_mstep_stats,mstep_loss
 import math
 device =torch.device("cuda")
 
@@ -19,6 +21,17 @@ device =torch.device("cuda")
 _JAC_MAXABS_THRESH = 1e3      # entries bigger than this are "large"
 _JAC_COND_THRESH   = 1e6      # rough condition-number alarm
 _R_FLOOR_WARN      = 1e-3     # "small radius" alarm
+
+
+def enforce_covariance_properties(P, eps=1e-6):
+    # Ensure P is symmetric positive semidefinite
+    P = (P + P.T) / 2
+    eigenvalues, eigenvectors = torch.linalg.eigh(P)
+    if torch.any(eigenvalues.real < 0):
+        eigenvalues = torch.clamp(eigenvalues, min=eps)
+        P = eigenvectors @ torch.diag(eigenvalues) @ eigenvectors.T
+    return P
+
 
 def _jacobian_watchdog(H: torch.Tensor, x: torch.Tensor, h_fn, tag: str = ""):
     """
@@ -101,6 +114,13 @@ class Pipeline_ERTS:
         self.PsmoothNN = PsmoothNN(self.SysModel.m, self.args)
         self.model.to(self.device)
         self.PsmoothNN.to(self.device)
+
+        self.PNotSmoothNN = PNotSmoothNN(self.SysModel.m, self.SysModel.n, self.SysModel.m2x_0.clone().detach())
+        self.PsmoothFromPnot = PsmoothFromPnot(self.SysModel.m)
+
+        # M-step network that outputs ΔF from statistics z_in
+        self.M_model = DeltaF_MStepNet(self.SysModel.m, self.SysModel.n).to(self.device)
+
     def setTrainingParams(self, args, alpha=0.5, b=0.5):
         self.N_steps = args.n_steps  # Number of Training Steps
         self.N_B = args.n_batch  # Number of Samples in Batch
@@ -126,6 +146,8 @@ class Pipeline_ERTS:
                                                     weight_decay=self.weightDecay)
         # P-smooth loss weight
         self.p_smooth_weight = 0.1  # Default weight for p-smooth loss
+
+        self.M_optimizer = torch.optim.Adam(self.M_model.parameters(),lr=self.learningRate,weight_decay=self.weightDecay)
 
 
     def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results,path_rtsnet=None,load_psmooth_path = None, generate_f=True):
@@ -361,240 +383,295 @@ class Pipeline_ERTS:
 
         return  [self.MSE_train_dB_epoch[ti],self.MSE_cv_dB_epoch[ti]]
 
+    def P_joint_Train(self, SysModel, cv_input, cv_target, train_input, train_target, path_results_pnot, path_results_psfp, path_rtsnet=None, load_pnot_path=None, load_psfp_path=None, generate_f=True):
+        """
+        Joint training (equal weights) for PNotSmoothNN and PsmoothNN while RTSNet is frozen.
+        - Uses RTSNet only to produce: filtered states x_fwd, filtered covariances (h_Sigma),
+          Kalman gains (KGain), and smoother gains (SGain) via its backward pass.
+        - Trains both covariance nets together with a single Adam optimizer:
+            Loss_total = 0.5 * L_not + 0.5 * L_smooth
+          where L_not compares P_not_t to (x_true - x_fwd)(x_true - x_fwd)^T,
+                L_smooth compares P_smooth_t to (x_true - x_smooth)(x_true - x_smooth)^T.
+        - Style is kept identical to your P_smooth_Train: epoch/batch loops, prints, CV save.
+        """
+
+        # ---------- Setup ----------
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+
+        # Load RTSNet and freeze it: eval() for deterministic layers; requires_grad_(False) to avoid autograd graph
+        self.model = torch.load(path_rtsnet, map_location=self.device, weights_only=False).to(self.device)
+        self.model.eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # Optionally load existing checkpoints for the two covariance networks
+        if load_pnot_path is not None:
+            print("loading model_and keep training them")
+            self.PNotSmoothNN = torch.load(load_pnot_path, map_location=self.device, weights_only=False)
+        if load_psfp_path  is not None:
+            self.PsmoothFromPnot = torch.load(load_psfp_path, map_location=self.device, weights_only=False)
+
+        # Put both nets in train mode (we are learning their parameters)
+        self.PNotSmoothNN.to(self.device).train()
+        self.PsmoothFromPnot.to(self.device).train()
+
+        # Single optimizer over both nets (keeps latency/overhead low)
+        self.Joint_optimizer = torch.optim.Adam(list(self.PNotSmoothNN.parameters()) + list(self.PsmoothFromPnot.parameters()),
+            lr=self.learningRate, weight_decay=self.weightDecay)
+
+        # Allocate logging buffers (same style as your function)
+        self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_idx_opt = 0
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_pnot_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_psmooth_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_pnot_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_psmooth_dB_epoch = torch.empty([self.N_steps], device=self.device)
+
+        self.CV_pnot_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.CV_psmooth_linear_epoch = torch.empty([self.N_steps], device=self.device)
+        self.CV_pnot_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.CV_psmooth_dB_epoch = torch.empty([self.N_steps], device=self.device)
+
+        # ---------- Training Loop ----------
+        for ti in range(self.N_steps):
+
+            self.Joint_optimizer.zero_grad()
+            Batch_LOSS_sum = 0.0
+            # Put both nets in train mode (we are learning their parameters)
+            self.PNotSmoothNN.train()
+            self.PsmoothFromPnot.train()
+            sum_Lnot = 0.0
+            sum_Lsmooth = 0.0
+            for _ in range(self.N_B):
+
+                # Sample a training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_training = train_input[n_e]  # [n, T]
+                x_true = train_target[n_e]  # [m, T]
+                SysModel.T = y_training.size(-1)
+                m, n = SysModel.m, SysModel.n
+
+                # (Optional) vary F across sequences (as in your code)
+                if generate_f is not None:
+                    index = n_e // 10
+                    SysModel.F = SysModel.F_train[index]
+                    self.model.update_F(SysModel.F)
+                    self.PNotSmoothNN.F = SysModel.F
+
+                # --------- RTSNet Forward (collect x_fwd, sigma_list, K_gain) ---------
+
+                self.model.init_hidden()
+                self.model.InitSequence(SysModel.m1x_0, SysModel.T)
+                x_out_training_forward = torch.empty(m, SysModel.T, device=self.device,dtype=y_training.dtype )
+                x_out_training = torch.empty(m, SysModel.T,device=self.device, dtype=y_training.dtype)
+                kgain_list = []
+                self.model.smoother_gain_list = []
+
+                for t in range(SysModel.T):
+                    x_out_training_forward[:, t] = self.model(y_training[:, t], None, None, None)
+                    kgain_list.append(self.model.KGain.clone().detach())
+                # --------- RTSNet Backward (x_smooth, S_gain) ---------
+                # Your RTSNet stores SGain during the backward calls; it is appended in reverse time
+                # (T-2, T-3, ..., 0). We reverse that list to align sgain_list[t] with time t.
+                x_out_training[:, SysModel.T - 1] = x_out_training_forward[:, SysModel.T - 1]  # backward smoothing starts from x_T|T
+                self.model.InitBackward(x_out_training[:, SysModel.T - 1])
+                x_out_training[:, SysModel.T - 2] = self.model(None, x_out_training_forward[:, SysModel.T - 2],
+                                                               x_out_training_forward[:, SysModel.T - 1], None)
+                self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # ori save the T-1 sgain
+                for t in range(SysModel.T - 3, -1, -1):
+                    x_out_training[:, t] = self.model(None, x_out_training_forward[:, t],
+                                                      x_out_training_forward[:, t + 1], x_out_training[:, t + 2])
+                    self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
+
+                # --------- Compute P_not_smooth sequence ---------
+                # PNotSmoothNN input at each time is (F_t, K_t, P_prev).
+                # We roll it sequentially, seeding with p_0 and feeding its previous prediction.
+                self.PNotSmoothNN.reset_state()
+                P_prev = self.PNotSmoothNN.p_0
+                P_not_seq = torch.empty(m, m, SysModel.T, device=self.device)
+                for t in range(SysModel.T):
+                    K_t = kgain_list[t]
+                    P_t = self.PNotSmoothNN(K_t, P_prev)
+                    P_not_seq[:, :, t] = P_t
+                    P_prev = P_t.detach()  # stop grads across time for stability
+
+                # --------- Compute P_smooth sequence ---------
+                # PsmoothNN takes (P_not_t, SGain_t). At the last time step there is no SGain,
+                # so we use a zero matrix as a simple convention.
+                self.PsmoothFromPnot.reset_state()
+                P_smooth_seq = torch.empty_like(P_not_seq)
+                P_smooth_seq[:, :, SysModel.T - 1] = P_not_seq[:, :, SysModel.T - 1]
+                for t in range(SysModel.T - 2, -1, -1):  # Loop from T-2 down to 0
+                    index = (SysModel.T - 2) - t
+                    sgain_t = self.model.smoother_gain_list[index]  # Now sgain_t: [1, 1, m²]
+                    P_smooth_seq[:, :, t] = self.PsmoothFromPnot(P_not_seq[:, :, t], sgain_t)
+
+                # --------- Compute Losses ---------
+                # L_not: match P_not_t to empirical error covariance of (x_true - x_fwd)
+                # L_smooth: match P_smooth_t to empirical error covariance of (x_true - x_smooth)
+                L_not = 0.0
+                L_smooth = 0.0
+                for t in range(SysModel.T):
+                    err_not = (x_true[:, t] - x_out_training_forward[:, t]).unsqueeze(1)  # [m,1]
+                    P_true_not = err_not @ err_not.T  # [m,m]
+                    P_pred_not = P_not_seq[:, :, t]  # [m,m]
+                    L_not = L_not + torch.norm(P_pred_not - P_true_not, p='fro') ** 2
+
+                    err_sm = (x_true[:, t] - x_out_training[:, t]).unsqueeze(1)  # [m,1]
+                    P_true_sm = err_sm @ err_sm.T  # [m,m]
+                    P_pred_sm = P_smooth_seq[:, :, t]  # [m,m]
+                    L_smooth = L_smooth + torch.norm(P_pred_sm - P_true_sm, p='fro') ** 2
+
+                L_not = L_not / SysModel.T
+                L_smooth = L_smooth / SysModel.T
+                Loss_total = 0.5 * L_not + 0.5 * L_smooth  # equal weights, as requested
+                sum_Lnot += L_not.detach()
+                sum_Lsmooth += L_smooth.detach()
+                Batch_LOSS_sum += Loss_total
 
 
-    # def P_smooth_Train(self,SysModel, cv_input, cv_target, train_input, train_target, path_results,path_rtsnet=None,load_psmooth_path = None, generate_f=True): just p smooth!
-    #
-    #     '''train P-smooth network with RTSNet fixed. dont change the RTSNet'''
-    #
-    #     self.N_E = len(train_input)
-    #     self.N_CV = len(cv_input)
-    #
-    #     self.model = torch.load(path_rtsnet, map_location=self.device, weights_only=False)  # Load the best RTSNet model
-    #     self.model.to(self.device).eval() # Freeze RTSNet if needed, so it doesn't change
-    #     if load_psmooth_path != None:
-    #         self.PsmoothNN = torch.load(load_psmooth_path,  map_location=self.device,weights_only=False)
-    #         # Re-link the optimizer to the parameters of the newly loaded model
-    #         self.PsmoothNN_optimizer = torch.optim.Adam(self.PsmoothNN.parameters(), lr=self.learningRate,
-    #                                                     weight_decay=self.weightDecay)
-    #     self.PsmoothNN.to(self.device).train()  # Set P-smooth network to train mode
-    #     # Preallocate arrays for logging training performance
-    #
-    #     self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
-    #     self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
-    #     self.MSE_cv_idx_opt = 0
-    #     self.MSE_cv_dB_opt = 1000
-    #     self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
-    #     self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
-    #     ##############
-    #     ### Epochs ###
-    #     ##############
-    #
-    #
-    #     for ti in range(0, self.N_steps):
-    #
-    #         ###############################
-    #         ### Training Sequence Batch ###
-    #         ###############################
-    #         # Zero gradients for both optimizers
-    #         self.PsmoothNN_optimizer.zero_grad()
-    #         self.PsmoothNN.train()
-    #         Batch_Psmooth_LOSS_sum = 0
-    #
-    #         for j in range(0, self.N_B):
-    #
-    #             n_e = random.randint(0, self.N_E - 1)
-    #             if generate_f != None:  ####if we train with different f
-    #                 index = n_e // 10
-    #                 SysModel.F = SysModel.F_train[index]
-    #                 self.model.update_F(SysModel.F)
-    #                 # self.PsmoothNN.update_F(SysModel.F)
-    #             y_training = train_input[n_e]
-    #             SysModel.T = y_training.size()[-1]
-    #
-    #             self.model.init_hidden()
-    #             self.model.InitSequence(SysModel.m1x_0, SysModel.T)
-    #
-    #             x_out_training_forward = torch.empty(SysModel.m, SysModel.T,
-    #                                  device=y_training.device, dtype=y_training.dtype)
-    #             x_out_training = torch.empty(SysModel.m, SysModel.T,
-    #                                  device=y_training.device, dtype=y_training.dtype)
-    #             ########add changes to compute P and S
-    #             #####compute P ori
-    #             self.model.sigma_list = []  # is added in every step_KGain_est(self, y) [1, 1, m²]
-    #             self.model.smoother_gain_list = []  # is added in every step_RTSGain_est(self, filter_x_nexttime, smoother_x_tplus2)
-    #             for t in range(0, SysModel.T):
-    #                 x_out_training_forward[:, t] = self.model(y_training[:, t], None, None, None)
-    #                 P_forward = self.model.h_Sigma.clone().detach()  # [1, 1, m²]
-    #                 self.model.sigma_list.append(P_forward)  # [1, 1, m²]
-    #             # -------- RTSNet Backward Pass: Compute smoother gains and smoothed states --------
-    #             # Start backward smoothing: initialize using last forward estimate
-    #             x_out_training[:, SysModel.T - 1] = x_out_training_forward[:,SysModel.T - 1]  # backward smoothing starts from x_T|T
-    #             self.model.InitBackward(x_out_training[:, SysModel.T - 1])
-    #             x_out_training[:, SysModel.T - 2] = self.model(None, x_out_training_forward[:, SysModel.T - 2],
-    #                                                            x_out_training_forward[:, SysModel.T - 1], None)
-    #             self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # ori save the T-1 sgain
-    #             for t in range(SysModel.T - 3, -1, -1):
-    #                 x_out_training[:, t] = self.model(None, x_out_training_forward[:, t],
-    #                                                   x_out_training_forward[:, t + 1], x_out_training[:, t + 2])
-    #                 self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # Save detached copy ori shape[m, m]
-    #             # ---- Handle initial smoothed P at time T ----
-    #             P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T,
-    #                          device=self.device)
-    #             dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
-    #                          device=self.device)  # shape: [1, 1, m²] input to PsmoothNN
-    #             sigma_T = self.model.sigma_list[-1] # shape: [1, 1, m²] input to PsmoothNN
-    #             self.PsmoothNN.start = 0
-    #             ####compute the P(T)
-    #             P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)# shape: [1, 1, m²] to [m²]
-    #             P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m,SysModel.m))# shape: [m, m]
-    #             P_smoothed_seq[:, :, SysModel.T - 1] = P_matrix  # shape: [m, m]
-    #             # ---- Loop over t = 1 to T for learning P_smooth ----
-    #             for t in range(SysModel.T - 2, -1, -1):  # Loop from T-2 down to 0
-    #                 sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # sigma_t: shape [1, 1, m²]
-    #                 # Compute the proper index for smoother_gain_list
-    #                 index = (SysModel.T - 2) - t
-    #                 sgain_t = self.model.smoother_gain_list[index].reshape(1, 1, -1)  # Now sgain_t: [1, 1, m²]
-    #                 # Forward pass through PsmoothNN
-    #                 P_flat = self.PsmoothNN(sigma_t, sgain_t)  # [1, 1, m²]
-    #                 # Enforce PSD properties
-    #                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(-1).view(SysModel.m,SysModel.m))  # [m, m]
-    #                 # Save result in the sequence tensor
-    #                 P_smoothed_seq[:, :, t] = P_matrix  # [ m, m]
-    #
-    #
-    #             # Compute P-smooth loss using PsmoothNN's compute_loss method
-    #             # Detach x_out_training to prevent gradient flow to RTSNet
-    #             #oprion 1
-    #             psmooth_loss = self.PsmoothNN.compute_loss(P_smoothed_seq, train_target[n_e], x_out_training.detach())
-    #             #option 2
-    #             #psmooth_loss = self.compute_gaussian_loss1(P_smoothed_seq, train_target[n_e], x_out_training.detach())
-    #
-    #             # Accumulate losses
-    #             Batch_Psmooth_LOSS_sum += psmooth_loss
-    #
-    #         # Average losses for this batch
-    #         Batch_Psmooth_LOSS_mean = Batch_Psmooth_LOSS_sum / self.N_B
-    #         MSE_train_psmooth_batch = Batch_Psmooth_LOSS_mean
-    #
-    #
-    #         # Average
-    #         self.MSE_train_linear_epoch[ti] = torch.mean(MSE_train_psmooth_batch)
-    #         self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
-    #
-    #
-    #
-    #         # Then train PsmoothNN
-    #         Batch_Psmooth_LOSS_mean.backward()
-    #         # right after Batch_Psmooth_LOSS_mean.backward()
-    #         total_grad = 0.0
-    #         # for p in self.PsmoothNN.parameters():
-    #         #     if p.grad is not None:
-    #         #         total_grad += p.grad.norm().item()
-    #         # print(f"Epoch {ti:03d} – gradient L2-norm on PsmoothNN = {total_grad:.4e}")
-    #         self.PsmoothNN_optimizer.step()
-    #
-    #
-    #         ##################
-    #         ### Optimizing ###
-    #         ##################
-    #
-    #         #################################
-    #         ### Validation Sequence Batch ###
-    #         #################################
-    #
-    #         # Cross Validation Mode
-    #         self.PsmoothNN.eval()  # Set PsmoothNN to eval mode
-    #         with torch.no_grad():
-    #             MSE_cv_psmooth_batch = torch.empty([self.N_CV], device=self.device)
-    #
-    #             for j in range(0, self.N_CV):
-    #                 y_cv = cv_input[j]
-    #                 SysModel.T_test = y_cv.size()[-1]
-    #                 x_out_cv_forward = torch.empty(SysModel.m, SysModel.T_test,
-    #                            device=y_cv.device, dtype=y_cv.dtype)
-    #                 x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
-    #                            device=y_cv.device, dtype=y_cv.dtype)
-    #
-    #                 if generate_f != None:  ####if we valid with different f
-    #                     index = j // 10
-    #                     SysModel.F = SysModel.F_valid[index]
-    #                     self.model.update_F(SysModel.F)
-    #                     # self.PsmoothNN.update_F(SysModel.F)
-    #
-    #                 self.model.init_hidden()
-    #                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
-    #
-    #                 # Forward pass and compute P-smooth
-    #                 # Initialize lists to store intermediate values
-    #                 self.model.sigma_list = []  # List of [1, 1, m²] tensors for each time step
-    #                 self.model.smoother_gain_list = []  # List of [m, m] tensors for each time step
-    #
-    #                 # Forward pass through RTSNet
-    #                 for t in range(0, SysModel.T_test):
-    #                     x_out_cv_forward[:, t] = self.model(y_cv[:, t], None, None, None)
-    #                     P_cv_forward = self.model.h_Sigma.clone().detach()
-    #                     self.model.sigma_list.append(P_cv_forward)  # [1, 1, m²]
-    #                 # Initialize backward pass
-    #                 x_out_cv[:, SysModel.T_test-1] = x_out_cv_forward[:, SysModel.T_test-1]  # [m]
-    #                 self.model.InitBackward(x_out_cv[:, SysModel.T_test-1])
-    #                 # First backward step
-    #                 x_out_cv[:, SysModel.T_test-2] = self.model(None, x_out_cv_forward[:, SysModel.T_test-2], x_out_cv_forward[:, SysModel.T_test-1],None)  # [m]
-    #                 self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # [m, m]
-    #                 # Remaining backward steps
-    #                 for t in range(SysModel.T_test-3, -1, -1):
-    #                     x_out_cv[:, t] = self.model(None, x_out_cv_forward[:, t], x_out_cv_forward[:, t+1],x_out_cv[:, t+2])  # [m]
-    #                     self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  # [m, m]
-    #
-    #                 # Initialize P-smooth sequence tensor
-    #                 P_smoothed_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test,
-    #                          device=sigma_T.device, dtype=sigma_T.dtype)  # [m, m, T_test]
-    #                 dummy_sgain = torch.zeros(1, 1, SysModel.m * SysModel.m,
-    #                          device=sigma_T.device, dtype=sigma_T.dtype)  # shape: [1, 1, m²] input to PsmoothNN
-    #                 sigma_T = self.model.sigma_list[-1]  # shape: [1, 1, m²] input to PsmoothNN
-    #                 self.PsmoothNN.start = 0
-    #                 # Handle initial P-smooth at time T_test
-    #                 P_flat = self.PsmoothNN(sigma_T, dummy_sgain).view(-1)  # shape: [1, 1, m²] to [m²]
-    #                 P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(SysModel.m, SysModel.m))  # shape: [m, m]
-    #                 P_smoothed_seq[:, :, SysModel.T_test - 1] = P_matrix  # shape: [m, m]
-    #                 # Compute P-smooth for remaining time steps
-    #                 for t in range(SysModel.T_test - 2, -1, -1):
-    #                     sigma_t = self.model.sigma_list[t].view(1, 1, -1)  # [1, 1, m²]
-    #                     index = (SysModel.T_test - 2) - t
-    #                     sgain_t = self.model.smoother_gain_list[index].reshape(1, 1, -1)  # [1, 1, m²]
-    #                     P_flat = self.PsmoothNN(sigma_t, sgain_t)  # [1, 1, m²]
-    #                     P_matrix = self.PsmoothNN.enforce_covariance_properties(P_flat.view(-1).view(SysModel.m,SysModel.m))  # [m, m]
-    #                     P_smoothed_seq[:, :, t] = P_matrix  # [m, m]
-    #
-    #                 # Compute P-smooth validation loss
-    #                 #option 1
-    #                 MSE_cv_psmooth_batch[j] = self.PsmoothNN.compute_loss(P_smoothed_seq, cv_target[j], x_out_cv)  # Scalar
-    #                 #option 2
-    #                 #MSE_cv_psmooth_batch[j] = self.compute_gaussian_loss1(P_smoothed_seq, cv_target[j], x_out_cv)
-    #             # Average
-    #             self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_psmooth_batch)
-    #             self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
-    #
-    #             if (self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt):
-    #                 self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
-    #                 self.MSE_cv_idx_opt = ti
-    #                 torch.save(self.PsmoothNN, path_results)
-    #
-    #
-    #         ########################
-    #         ### Training Summary ###
-    #         ########################
-    #         print(ti, "MSE P_smoothe Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE P_smoothe Validation :", self.MSE_cv_dB_epoch[ti],
-    #               "[dB]")
-    #
-    #         if (ti > 1):
-    #             d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
-    #             d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
-    #             print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
-    #
-    #         print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
-    #
-    #     return  [self.MSE_train_dB_epoch[ti],self.MSE_cv_dB_epoch[ti]]
+
+            # --------- Backpropagation for this batch ---------
+            Batch_LOSS_mean = Batch_LOSS_sum / self.N_B
+            mean_Lnot = sum_Lnot / self.N_B
+            mean_Lsmooth = sum_Lsmooth / self.N_B
+            Batch_LOSS_mean.backward()
+            self.Joint_optimizer.step()
+
+            # Log training metrics in your style (linear and dB)
+            self.MSE_train_linear_epoch[ti] = Batch_LOSS_mean.detach()
+            self.MSE_pnot_linear_epoch[ti] = mean_Lnot
+            self.MSE_psmooth_linear_epoch[ti] = mean_Lsmooth
+            self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
+            self.MSE_pnot_dB_epoch[ti] = 10 * torch.log10(self.MSE_pnot_linear_epoch[ti])
+            self.MSE_psmooth_dB_epoch[ti] = 10 * torch.log10(self.MSE_psmooth_linear_epoch[ti])
+
+
+            # --------- Validation (no gradient) ---------
+            self.PNotSmoothNN.eval()
+            self.PsmoothFromPnot.eval()
+            with torch.no_grad():
+                MSE_cv_batch = torch.empty([self.N_CV], device=self.device)
+                cv_sum_Lnot = 0.0
+                cv_sum_Lsmooth = 0.0
+                for j in range(self.N_CV):
+                    y_cv = cv_input[j]
+                    x_true_cv = cv_target[j]
+                    SysModel.T_test = y_cv.size(-1)
+                    m, n = SysModel.m, SysModel.n
+
+                    # Optional F rotation for CV – keep RTSNet and PNot aligned
+                    if generate_f is not None and hasattr(SysModel, "F_valid"):
+                        index = j // 10
+                        SysModel.F = SysModel.F_valid[index]
+                        self.model.update_F(SysModel.F)
+                        self.PNotSmoothNN.F = SysModel.F
+
+                    # --- RTSNet forward (CV) ---
+                    self.model.init_hidden()
+                    self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
+
+                    x_out_cv_forward = torch.empty(m, SysModel.T_test, device=self.device, dtype=y_cv.dtype)
+                    x_out_cv = torch.empty(m, SysModel.T_test, device=self.device, dtype=y_cv.dtype)
+                    kgain_list = []
+                    self.model.smoother_gain_list = []
+
+                    for t in range(SysModel.T_test):
+                        x_out_cv_forward[:, t] = self.model(y_cv[:, t], None, None, None)
+                        kg = self.model.KGain
+                        kgain_list.append(kg.clone().detach())
+
+                    # --- RTSNet backward (CV) ---
+                    x_out_cv[:, SysModel.T_test - 1] = x_out_cv_forward[:, SysModel.T_test - 1]
+                    self.model.InitBackward(x_out_cv[:, SysModel.T_test - 1])
+
+                    x_out_cv[:, SysModel.T_test - 2] = self.model(None, x_out_cv_forward[:, SysModel.T_test - 2], x_out_cv_forward[:,SysModel.T_test - 1],None)
+                    self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
+                    for t in range(SysModel.T_test - 3, -1, -1):
+                        x_out_cv[:, t] = self.model(None,x_out_cv_forward[:, t],x_out_cv_forward[:, t + 1],x_out_cv[:, t + 2])
+                        self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
+
+
+                    # --- Roll P_not on CV ---
+                    self.PNotSmoothNN.reset_state()
+                    P_prev = self.PNotSmoothNN.p_0
+                    P_not_seq = torch.empty(m, m, SysModel.T_test, device=self.device, dtype=y_cv.dtype)
+                    for t in range(SysModel.T_test):
+                        K_t = kgain_list[t]
+                        P_t = self.PNotSmoothNN(K_t, P_prev)
+                        P_not_seq[:, :, t] = P_t
+                        P_prev = P_t  # no need to detach under no_grad
+
+                    # --- Roll P_smooth on CV ---
+                    self.PsmoothFromPnot.reset_state()
+                    P_smooth_seq = torch.empty_like(P_not_seq)
+                    P_smooth_seq[:, :, SysModel.T_test - 1] = P_not_seq[:, :, SysModel.T_test - 1]
+                    for t in range(SysModel.T_test - 2, -1, -1):
+                        index = (SysModel.T_test - 2) - t
+                        sgain_t = self.model.smoother_gain_list[index]
+                        P_smooth_seq[:, :, t] = self.PsmoothFromPnot(P_not_seq[:, :, t], sgain_t)
+
+                    # --- CV Loss (equal weights) ---
+                    L_not = 0.0
+                    L_smooth = 0.0
+                    for t in range(SysModel.T_test):
+                        err_f = (x_true_cv[:, t] - x_out_cv_forward[:, t]).unsqueeze(1)  # [m,1]
+                        P_true_not = err_f @ err_f.T  # [m,m]
+                        L_not = L_not + torch.norm(P_not_seq[:, :, t] - P_true_not, p='fro') ** 2
+
+                        err_s = (x_true_cv[:, t] - x_out_cv[:, t]).unsqueeze(1)
+                        P_true_sm = err_s @ err_s.T
+                        L_smooth = L_smooth + torch.norm(P_smooth_seq[:, :, t] - P_true_sm, p='fro') ** 2
+
+                    L_not = L_not / SysModel.T_test
+                    L_smooth = L_smooth / SysModel.T_test
+                    MSE_cv_batch[j] = 0.5 * L_not + 0.5 * L_smooth
+                    cv_sum_Lnot += (L_not).detach()
+                    cv_sum_Lsmooth += (L_smooth).detach()
+
+                # Aggregate CV results and log
+                self.CV_pnot_linear_epoch[ti] = cv_sum_Lnot / self.N_CV
+                self.CV_psmooth_linear_epoch[ti] = cv_sum_Lsmooth / self.N_CV
+                self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_batch)
+                self.CV_pnot_dB_epoch[ti] = 10 * torch.log10(self.CV_pnot_linear_epoch[ti])
+                self.CV_psmooth_dB_epoch[ti] = 10 * torch.log10(self.CV_psmooth_linear_epoch[ti])
+
+                self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
+                if self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt:
+                    self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
+                    self.MSE_cv_idx_opt = ti
+                    torch.save(self.PNotSmoothNN, path_results_pnot)
+                    torch.save(self.PsmoothFromPnot, path_results_psfp)
+                    print("New best CV at epoch", ti, "→",
+                          "Total:", self.MSE_cv_dB_epoch[ti].item(), "[dB],",
+                          "P_not:", self.CV_pnot_dB_epoch[ti].item(), "[dB],",
+                          "P_smooth:", self.CV_psmooth_dB_epoch[ti].item(), "[dB]")
+
+            #########################
+            ### Training Summary ###
+            ########################
+            print(ti,
+                  "MSE Train P_not :", self.MSE_pnot_dB_epoch[ti], "[dB]",
+                  "MSE Train P_smooth :", self.MSE_psmooth_dB_epoch[ti], "[dB]",
+                  "MSE Train Total :", self.MSE_train_dB_epoch[ti], "[dB]",
+                  "MSE Val P_not :", self.CV_pnot_dB_epoch[ti], "[dB]",
+                  "MSE Val P_smooth :", self.CV_psmooth_dB_epoch[ti], "[dB]",
+                  "MSE Val Total :", self.MSE_cv_dB_epoch[ti], "[dB]")
+
+            if (ti > 1):
+                d_train_total = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
+                d_val_total = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
+
+                print("diff Train Total :", d_train_total, "[dB]",
+                      "diff Val Total :", d_val_total, "[dB]")
+
+            print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
+
 
 
 
@@ -1207,71 +1284,75 @@ class Pipeline_ERTS:
         # 4. Return the single tensor
         return V_tensor
 
+    def NNTest_no_p(self, SysModel, test_input, test_target,load_model_path, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False):
 
-    def NNTest_no_p(self, SysModel, test_input, test_target, load_model_path, generate_f=True):
-
-
+        tp = torch.float32
         print("Testing RTSNet...")
         self.N_T = len(test_input)
 
 
-        self.MSE_test_linear_arr = torch.empty([self.N_T])
+        self.MSE_test_linear_arr = torch.empty([self.N_T],device=self.device, dtype=tp)
 
 
              # MSE LOSS Function
         loss_fn = nn.MSELoss(reduction='mean')
 
         # Load models
-        self.model = torch.load(load_model_path,weights_only=False)
-
-
-        self.model.eval()
+        self.model = torch.load(load_model_path,weights_only=False).to(self.device).eval()
 
         torch.no_grad()
 
         x_out_list = []
 
         start = time.time()
-        self.model.K_T_list = []
 
-        for j in range(0, self.N_T):
-            y_mdl_tst = test_input[j]
-            SysModel.T_test = y_mdl_tst.size()[-1]
-            x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test)
-            x_out_test = torch.empty(SysModel.m, SysModel.T_test)
+        with torch.no_grad():
+            for j in range(0, self.N_T):
+                y_mdl_tst = test_input[j]
+                SysModel.T_test = y_mdl_tst.size()[-1]
+                x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+                x_out_test = torch.empty(SysModel.m, SysModel.T_test,  device=self.device, dtype=tp)
 
-            self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
-            self.model.init_hidden()
+                # choose initials for this sequence j (same logic as NNTest)
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+                # initialize prior Sigma and hidden for this sequence
+                self.model.prior_Sigma = P0
+                self.model.InitSequence(x0, SysModel.T_test)
+                self.model.init_hidden()
 
-            if generate_f != None:  ####if we valid with different f
-                index = j // 10
-                SysModel.F = SysModel.F_test[index]
+                if generate_f != True:  ####if we valid with different f
+                    SysModel.F = SysModel.F_test[j]
+                else:
+                    index = j // 10
+                    SysModel.F = SysModel.F_test[index]
                 self.model.update_F(SysModel.F)
-            # Forward pass and compute P-smooth
-            self.model.sigma_list = []
-            self.model.smoother_gain_list = []
-            for t in range(0, SysModel.T_test):
-                x_out_test_forward_1[:, t] = self.model(y_mdl_tst[:, t], None, None, None)
-                P_test_forward = self.model.h_Sigma.clone().detach()
-                self.model.sigma_list.append(P_test_forward)  # [1, 1, m²]
-                if t == SysModel.T_test - 1:
-                    K = self.model.KGain.clone().detach()
-                    self.model.K_T_list.append(K)  # [m, n]
-            x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
-            self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
-            x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
-                                                            x_out_test_forward_1[:, SysModel.T_test - 1], None)
-            self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
+                # Forward pass and compute P-smooth
+                self.model.sigma_list = []
+                self.model.smoother_gain_list = []
+                for t in range(0, SysModel.T_test):
+                    x_out_test_forward_1[:, t] = self.model(y_mdl_tst[:, t], None, None, None)
+                    P_test_forward = self.model.h_Sigma.clone().detach()
+                    self.model.sigma_list.append(P_test_forward)  # [1, 1, m²]
+                x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
+                self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
+                x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
+                                                                x_out_test_forward_1[:, SysModel.T_test - 1], None)
+                self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
 
-            for t in range(SysModel.T_test - 3, -1, -1):#T-3 to 0
-                x_out_test[:, t] = self.model(None, x_out_test_forward_1[:, t], x_out_test_forward_1[:, t + 1],
-                                              x_out_test[:, t + 2])
-                self.model.smoother_gain_list.append(self.model.SGain.clone().detach())##there are T-1 s gain
+                for t in range(SysModel.T_test - 3, -1, -1):#T-3 to 0
+                    x_out_test[:, t] = self.model(None, x_out_test_forward_1[:, t], x_out_test_forward_1[:, t + 1],
+                                                  x_out_test[:, t + 2])
+                    self.model.smoother_gain_list.append(self.model.SGain.clone().detach())##there are T-1 s gain
 
 
-            self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
+                self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
 
-            x_out_list.append(x_out_test)
+                x_out_list.append(x_out_test)
 
         end = time.time()
         t = end - start
@@ -1296,7 +1377,8 @@ class Pipeline_ERTS:
         # Print Run Time
         print("Inference Time:", t)
 
-        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, self.model.K_T_list,]
+        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t]
+
     def NNTest(self, SysModel, test_input, test_target, load_model_path,load_p_smoothe_model_path=None, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h =False):
 
         tp = torch.float32
@@ -1457,6 +1539,175 @@ class Pipeline_ERTS:
 
         return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, torch.stack(P_smooth_list), V_list, self.model.K_T_list,
                 self.MSE_test_psmooth_dB_avg, self.MSE_test_psmooth_std]
+
+
+    def NNTest_p(self, SysModel, test_input, test_target, load_model_path,load_pnot_path=None, load_psfp_path=None, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h =False):
+
+        tp = torch.float32
+        print("Testing RTSNet...")
+        self.N_T = len(test_input)
+
+
+        self.MSE_test_linear_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
+        self.MSE_test_psmooth_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
+        self.MSE_test_pnot_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
+
+             # MSE LOSS Function
+        loss_fn = nn.MSELoss(reduction='mean')
+
+        # Load RTSNet (frozen for test)
+        self.model = torch.load(load_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
+
+        if load_pnot_path is not None:
+            self.PNotSmoothNN = torch.load(load_pnot_path, map_location=self.device, weights_only=False).to(self.device).eval()
+            self.PsmoothFromPnot = torch.load(load_psfp_path, map_location=self.device, weights_only=False).to(self.device).eval()
+
+        with torch.no_grad():
+
+            x_out_list = []
+            P_smooth_list = []
+            V_list = []
+            start = time.time()
+            self.model.K_T_list = []
+            print('ORICHECK DEHIL FFFFFFFFFFFFFFFF',SysModel.F_test[0] )
+            for j in range(0, self.N_T):
+                y_mdl_tst = test_input[j]
+                SysModel.T_test = y_mdl_tst.size()[-1]
+                x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+                x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+
+                # choose initials for this sequence j
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list[j]
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+
+                # --- initialize prior Sigma and hidden for this sequence ---
+                self.model.prior_Sigma = P0  # 1) set prior_Sigma to P0 for this seq
+                self.model.InitSequence(x0, SysModel.T_test)  # 3) set mean x0, T
+                self.model.init_hidden()  # 2) reset hidden -> seeds h_Sigma from prior_Sigma
+
+
+                if generate_f == False:  ####if we valid with different f
+                    SysModel.F = SysModel.F_test[j]
+                    self.model.update_F(SysModel.F)
+                else:
+                    index = j // 10
+                    SysModel.F = SysModel.F_test[index]
+                    self.model.update_F(SysModel.F)
+                self.PNotSmoothNN.F = SysModel.F  # keep in sync with RTSNet's F
+                # Forward pass and compute P-smooth
+                kgain_list = []
+                self.model.smoother_gain_list = []
+                for t in range(0, SysModel.T_test):
+                    x_out_test_forward_1[:, t] = self.model(y_mdl_tst[:, t], None, None, None)
+                    K = self.model.KGain.clone().detach()
+                    kgain_list.append(K)# for the p estimation
+                    if t == SysModel.T_test - 1:
+                        self.model.K_T_list.append(K)  # [m, n] for the v estimation
+                        if non_linear_h == True:
+                            # Compute H_last = ∂h/∂x at time T-1 (use filtered state at T-1 as approximation)
+                            x_last = x_out_test_forward_1[:, SysModel.T_test - 1].view(SysModel.m, 1)
+                            H_last = getJacobian(x_last, SysModel.h)
+                            _jacobian_watchdog(H_last, x_last, SysModel.h,)#ori del
+
+                x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
+                self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
+                x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
+                                                                x_out_test_forward_1[:, SysModel.T_test - 1], None)
+                self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
+
+                for t in range(SysModel.T_test - 3, -1, -1):#T-3 to 0
+                    x_out_test[:, t] = self.model(None, x_out_test_forward_1[:, t], x_out_test_forward_1[:, t + 1],
+                                                  x_out_test[:, t + 2])
+                    self.model.smoother_gain_list.append(self.model.SGain.clone().detach())##there are T-1 s gain
+
+                # ---------- NEW: roll P_not first, then P_smooth ----------
+                # 1) Roll P_not with (K_t, P_prev) and F (set per sequence)
+                self.PNotSmoothNN.reset_state()
+                P_not_seq = torch.empty(SysModel.m, SysModel.m, SysModel.T_test, device=self.device, dtype=test_input[j].dtype)
+                P_prev = SysModel.m2x_0
+
+                for t in range(SysModel.T_test):
+                    P_t = self.PNotSmoothNN(kgain_list[t], P_prev)
+                    P_not_seq[:, :, t] = P_t
+                    P_prev = P_t  # no detach needed in no_grad()
+                # 2) Roll P_smooth with (P_not_t, SGain_t)
+                self.PsmoothFromPnot.reset_state()
+                P_smoothed_seq = torch.empty_like(P_not_seq)
+                # At T-1 we don't have SGain; use the convention P_smooth(T-1) = P_not(T-1)
+                P_smoothed_seq[:, :, SysModel.T_test - 1] = P_not_seq[:, :, SysModel.T_test - 1]
+                for t in range(SysModel.T_test - 2, -1, -1):
+                    index = (SysModel.T_test - 2) - t  # aligns SGain_list[0] with time t = T-2
+                    sgain_t = self.model.smoother_gain_list[index]  # [m, m]
+                    P_smoothed_seq[:, :, t] = self.PsmoothFromPnot(P_not_seq[:, :, t], sgain_t)
+
+                #compute s(0) for later use, by the # S_t = P_t * F.T * (P_t+1)^-1
+                P_1_0_pred = SysModel.F @ P0 @ SysModel.F.T + SysModel.Q
+                s_0 = P0 @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(SysModel.m, SysModel.m))  ######COMPUTE S_0
+                self.model.smoother_gain_list.append(s_0.clone().detach())  # [m, m]
+
+                # --- State MSE ---
+                self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
+
+                # --- P_not MSE (use x_fwd) ---
+                self.MSE_test_pnot_arr[j] = self.PNotSmoothNN.compute_loss( P_not_seq, test_target[j], x_out_test_forward_1).item()
+
+                # --- P_smooth MSE (use x_smooth) ---
+                self.MSE_test_psmooth_arr[j] = self.PNotSmoothNN.compute_loss( P_smoothed_seq, test_target[j], x_out_test).item()
+
+
+                x_out_list.append(x_out_test)
+                P_smooth_list.append(P_smoothed_seq)
+
+                if non_linear_h == True:
+                    #######compute V############
+                    V =  self.compute_cross_covariances(SysModel.F, H_last, K, P_not_seq, self.model.smoother_gain_list)
+                else:
+                    #######compute V############
+                    V =  self.compute_cross_covariances(SysModel.F, SysModel.H, K, P_not_seq, self.model.smoother_gain_list)
+                V_list.append(V)#[seq](tensor(m,m,T))
+
+
+            end = time.time()
+            t = end - start
+
+            # --- Aggregates for state MSE ---
+            self.MSE_test_linear_avg = torch.mean(self.MSE_test_linear_arr)
+            self.MSE_test_dB_avg = 10 * torch.log10(self.MSE_test_linear_avg)
+            self.MSE_test_linear_std = torch.std(self.MSE_test_linear_arr, unbiased=True)
+            # Optional CI-like dB spread (same style you used elsewhere)
+            self.test_std_dB = 10 * torch.log10(self.MSE_test_linear_std + self.MSE_test_linear_avg) - self.MSE_test_dB_avg
+
+            # --- Aggregates for P_not ---
+            self.MSE_test_pnot_avg = torch.mean(self.MSE_test_pnot_arr)
+            self.MSE_test_pnot_dB_avg = 10 * torch.log10(self.MSE_test_pnot_avg)
+            self.MSE_test_pnot_std = torch.std(self.MSE_test_pnot_arr, unbiased=True)
+
+            # --- Aggregates for P_smooth (you already had psmooth arr) ---
+            self.MSE_test_psmooth_avg = torch.mean(self.MSE_test_psmooth_arr)
+            self.MSE_test_psmooth_dB_avg = 10 * torch.log10(self.MSE_test_psmooth_avg)
+            self.MSE_test_psmooth_std = torch.std(self.MSE_test_psmooth_arr, unbiased=True)
+
+            # Prints
+            print(self.modelName + "-" + "MSE Test:", self.MSE_test_dB_avg, "[dB]")
+            print(self.modelName + "-" + "STD Test:", self.test_std_dB, "[dB]")
+
+            print(self.modelName + "-" + "P-not MSE Test:", self.MSE_test_pnot_dB_avg, "[dB]")
+            print(self.modelName + "-" + "P-not STD Test:", self.MSE_test_pnot_std, "[linear]")
+
+            print(self.modelName + "-" + "P-smooth MSE Test:", self.MSE_test_psmooth_dB_avg, "[dB]")
+            print(self.modelName + "-" + "P-smooth STD Test:", self.MSE_test_psmooth_std, "[linear]")
+
+
+
+
+        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, torch.stack(P_smooth_list), V_list, self.model.K_T_list,
+                self.MSE_test_psmooth_dB_avg, self.MSE_test_psmooth_std,self.MSE_test_pnot_dB_avg, self.MSE_test_pnot_std]
+
+
 
     def NNTest_HybridP(self, SysModel, test_input, test_target, load_model_path):
         """
@@ -1935,6 +2186,8 @@ class Pipeline_ERTS:
             total += maha + logdet + 2 * const  # note we’ll divide by 2T below
 
         return total / (2 * T)
+
+
 
     def compute_gaussian_loss(self,P_seq,  # [m, m, T]  – predicted covariances
                               x_target_seq,  # [m, T]      – ground–truth states
@@ -2603,6 +2856,7 @@ class Pipeline_ERTS:
             # Track batch losses for printing
             batch_iter_losses = [[] for _ in range(emkf_iterations)]
             batch_iter_f_losses = [[] for _ in range(emkf_iterations)]
+            last_iter = emkf_iterations - 1
 
             # SEQUENCE LOOP (middle) - Process each sequence in the batch
             for seq_idx in batch_indices:
@@ -2633,17 +2887,43 @@ class Pipeline_ERTS:
                     # Use current F (updated from previous EM iteration)
                     SysModel.F = F_seq
                     self.rtsnet_models[em_iter].update_F(SysModel.F)
-
                     # E-STEP: Run networks
                     x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last = \
-                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter,non_linear_h = non_linear_h)
+                        self._run_rtsnet_sequence(SysModel, y_seq, em_iter, non_linear_h=non_linear_h)
+##########################################################################################################################################################
+                    #ori just return this
+                    #
+                    # # Compute losses
+                    # rts_loss = self.loss_fn(x_out_smoothed, target_seq)
+                    # psmooth_loss = self.psmooth_models[em_iter].compute_loss(P_smoothed_seq, target_seq,
+                    #                                                          x_out_smoothed)
+                    # total_seq_loss = 0.9 * rts_loss + 0.1 * psmooth_loss
+                    # seq_iter_losses.append(total_seq_loss)
 
+                    ###########################################################################################
                     # Compute losses
                     rts_loss = self.loss_fn(x_out_smoothed, target_seq)
-                    psmooth_loss = self.psmooth_models[em_iter].compute_loss(P_smoothed_seq, target_seq,
-                                                                             x_out_smoothed)
+
+                    # --- CHANGED: do NOT backprop psmooth_loss for the last iteration ---
+                    if em_iter == last_iter:
+                        # we only want psmooth_3 to be trained by F-loss, so its "state" loss is for logging only
+                        with torch.no_grad():
+                            psmooth_loss = self.psmooth_models[em_iter].compute_loss(
+                                P_smoothed_seq, target_seq, x_out_smoothed
+                            )
+                    else:
+                        psmooth_loss = self.psmooth_models[em_iter].compute_loss(
+                            P_smoothed_seq, target_seq, x_out_smoothed
+                        )
+
                     total_seq_loss = 0.9 * rts_loss + 0.1 * psmooth_loss
                     seq_iter_losses.append(total_seq_loss)
+
+
+
+##########################################################################################################################################################
+
+
 
                     ####################################################################################################################################################ori del
                     # # ---- after you compute total_seq_loss = 0.9*rts_loss + 0.1*psmooth_loss ----
@@ -2694,7 +2974,7 @@ class Pipeline_ERTS:
                     F_seq = F_est
                     # F loss
                     F_true_seq = F_true[f_index]
-                    f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+                    f_loss = torch.linalg.norm(F_seq - F_true_seq, ord='fro')
                     seq_iter_f_losses.append(f_loss)
 
                 # Add this sequence's losses to both global and batch accumulators
@@ -2708,9 +2988,23 @@ class Pipeline_ERTS:
             if is_training:
                 # Compute batch losses
                 batch_losses = []
+                F_LOSS_WEIGHT = 0.
                 for em_iter in range(emkf_iterations):
                     if batch_iter_losses[em_iter]:
-                        batch_avg_loss = torch.stack(batch_iter_losses[em_iter]).mean()
+                        batch_avg_state_loss = torch.stack(batch_iter_losses[em_iter]).mean()
+#################################################################################################################
+                        if em_iter == last_iter:
+                            # 3rd iteration: state loss only, NO F-loss in Part 1
+                            batch_avg_loss = batch_avg_state_loss
+                        else:
+                            # Iter 0 and 1: add small F-loss
+                            batch_avg_f_loss = torch.stack(batch_iter_f_losses[em_iter]).mean()
+                            batch_avg_loss = batch_avg_state_loss + F_LOSS_WEIGHT * batch_avg_f_loss
+
+#################################################################################################################
+                        # batch_avg_f_loss = torch.stack(batch_iter_f_losses[em_iter]).mean()
+                        # batch_avg_loss = batch_avg_state_loss + F_LOSS_WEIGHT * batch_avg_f_loss
+#################################################################################################################
                         batch_losses.append(batch_avg_loss)
                     else:
                         print('problemmmmmmmmmmmmmmmmmmmmmmmm')
@@ -2719,16 +3013,23 @@ class Pipeline_ERTS:
                 iteration_weights = [0.01, 0.1, 0.89]
                 total_batch_loss = sum(w * loss for w, loss in zip(iteration_weights, batch_losses))
 
+
                 if torch.isfinite(total_batch_loss) and total_batch_loss < 1000.0:
 
-                    #################################### ori delete
-                    # Right before total_batch_loss.backward()
-                    print("F_seq.requires_grad:",
-                          F_seq.requires_grad)  # should be True (for the last F_seq in the loop)
-                    print("F_seq.grad_fn:", F_seq.grad_fn is not None)
+                    # batch-mean F-loss for EM-iter = last_iter (3rd iteration)
+                    ps3_f_loss = torch.stack(batch_iter_f_losses[last_iter]).mean()
+                    # zero ONLY Psmooth_3 grads
+                    self.psmooth_optimizers[last_iter].zero_grad()
+                    # backprop this F-loss: only Psmooth_3 has useful grads here
+                    ps3_f_loss.backward(retain_graph=True)
+                    # Clip & STEP Psmooth[2] ONLY (Psmooth 3)
+                    torch.nn.utils.clip_grad_norm_(self.psmooth_models[last_iter].parameters(), max_norm=0.5)
+                    self.psmooth_optimizers[last_iter].step()
 
-                    total_batch_loss.backward(retain_graph=True)
-
+                    for i in range(emkf_iterations):
+                        self.rtsnet_optimizers[i].zero_grad()
+                        self.psmooth_optimizers[i].zero_grad()
+                    total_batch_loss.backward()
                     # Do we get gradient in iter-0 params when using only iter-2 loss?
                     nz0 = sum(
                         (p.grad is not None) and (p.grad.abs().sum() > 0) for p in self.rtsnet_models[0].parameters())
@@ -2736,13 +3037,13 @@ class Pipeline_ERTS:
 
                     ###################################
 
-                    # total_batch_loss.backward()
 
                     for i in range(emkf_iterations):
                         torch.nn.utils.clip_grad_norm_(self.rtsnet_models[i].parameters(), max_norm=0.5)
                         torch.nn.utils.clip_grad_norm_(self.psmooth_models[i].parameters(), max_norm=0.5)
                         self.rtsnet_optimizers[i].step()
-                        self.psmooth_optimizers[i].step()
+                        if i != last_iter:
+                            self.psmooth_optimizers[i].step()
                 else:
                     print(
                         f"WARNING: Skipping backward pass for batch {batch_idx} due to invalid loss: {total_batch_loss}")
@@ -2911,3 +3212,1132 @@ class Pipeline_ERTS:
         return [self.MSE_train_total_dB_epoch, self.MSE_cv_total_dB_epoch, self.F_loss_train_epoch,
                 self.F_loss_cv_epoch]
 
+######################################################################
+
+    def _run_rtsnet_sequence_P(self, SysModel, y_seq, model_index, x0=None, p0=None, non_linear_h=False):
+        """
+        Run RTSNet forward + backward on a single sequence,
+        then produce:
+          - P_not_smooth_t via PNotSmoothNN(F_t, K_t, P_prev)
+          - P_smooth_t via PsmoothFromPnot(P_not_t, S_t)
+
+        Returns:
+          x_out_forward        : [m, T]
+          x_out_smoothed       : [m, T]
+          P_smoothed_seq       : [m, m, T]
+          P_not_seq            : [m, m, T]     # (returned in place of filtered covs)
+          smoother_gain_list   : list of length (T-1)+1 with s_0 appended at the end
+          K_t_list             : list of T tensors [m, n]
+          H_last               : tensor or None
+        """
+        T = y_seq.size()[-1]
+        m = SysModel.m
+        dev = y_seq.device
+        dt = y_seq.dtype
+
+        # Initialize
+        x_out_forward = torch.empty(m, T, device=dev, dtype=dt)
+        x_out_smoothed = torch.empty(m, T, device=dev, dtype=dt)
+
+        if x0 is not None:
+            # 1) set prior Sigma (P0) for THIS sequence
+            x0 = x0.to(dev, dtype=dt)
+            p0 = enforce_covariance_properties(p0)
+            p0_use = p0.to(dev, dtype=dt)
+            self.rtsnet_models[model_index].prior_Sigma = p0_use
+            self.rtsnet_models[model_index].InitSequence(x0, T)
+            self.rtsnet_models[model_index].init_hidden()
+
+        else:
+            p0_use = SysModel.m2x_0
+            self.rtsnet_models[model_index].prior_Sigma = SysModel.m2x_0
+            self.rtsnet_models[model_index].InitSequence(SysModel.m1x_0, T)
+            self.rtsnet_models[model_index].init_hidden()
+
+        # --- INIT PNot for this sequence (even in else branch) ---
+        pnot = self.pnot_models[model_index]
+        pnot.reset_state()
+        pnot.p_0 = p0_use.clone()
+
+        K_t_list = []
+        smoother_gain_list = []
+
+        # Forward pass
+        for t in range(T):
+            x_out_forward[:, t] = self.rtsnet_models[model_index](y_seq[:, t], None, None, None)
+            K_t_list.append(self.rtsnet_models[model_index].KGain.clone())
+            if t == T - 1:
+                H_last = None
+                if non_linear_h == True:
+                    # ADD (immediately after the loop ends, before the backward pass):
+                    x_last = x_out_forward[:, T - 1].view(m, 1)
+                    # make sure getJacobian(SysModel.h) is in scope; import if needed
+                    with torch.enable_grad():
+                        H_last = getJacobian(x_last, SysModel.h)
+                        _jacobian_watchdog(H_last, x_last, SysModel.h)
+
+        # ----------------- Backward pass (collect S in time order) -----------------
+        x_out_smoothed[:, T - 1] = x_out_forward[:, T - 1]
+
+        self.rtsnet_models[model_index].InitBackward(x_out_smoothed[:, T - 1])
+        x_out_smoothed[:, T - 2] = self.rtsnet_models[model_index](None, x_out_forward[:, T - 2],
+                                                                   x_out_forward[:, T - 1], None)
+        smoother_gain_list.append(self.rtsnet_models[model_index].SGain.clone())
+
+        for t in range(T - 3, -1, -1):
+            x_out_smoothed[:, t] = self.rtsnet_models[model_index](None, x_out_forward[:, t],
+                                                                   x_out_forward[:, t + 1],
+                                                                   x_out_smoothed[:, t + 2])
+            smoother_gain_list.append(self.rtsnet_models[model_index].SGain.clone())
+
+        # --- P_not via PNotSmoothNN (no sigma_list) ---
+        P_not_seq = torch.empty(m, m, T, device=dev, dtype=dt)
+        P_prev = p0_use.clone()
+        for t in range(T):
+            K_t = K_t_list[t].detach()
+            P_not_t = pnot(K_t, P_prev)
+            P_not_seq[:, :, t] = enforce_covariance_properties(P_not_t)
+            P_prev = P_not_t.detach()
+
+        # --- P_smooth via PsmoothFromPnot (use your existing smoother_gain_list order) ---
+        psfp = self.psfp_models[model_index]
+        psfp.reset_state()
+        P_smoothed_seq = torch.empty(m, m, T, device=dev, dtype=dt)
+        # 1) Final step: P_smooth[T-1] = P_not[T-1]
+        P_smoothed_seq[:, :, T - 1] = P_not_seq[:, :, T - 1]
+        self.psfp_models[model_index].start = 0
+        # Backward in time
+        for t in range(T - 2, -1, -1):
+            sgain_index = (T - 2) - t
+            sgain_t = smoother_gain_list[sgain_index].reshape(1, 1, -1)
+            P_smoothed_seq[:, :, t] = psfp(P_not_seq[:, :, t].view(-1), sgain_t)
+        # Compute S_0
+        P_1_0_pred = SysModel.F @ p0_use @ SysModel.F.T + SysModel.Q
+        s_0 = p0_use @ SysModel.F.T @ torch.inverse(P_1_0_pred.view(m, m))  # ori return this and delet the tow row down
+        smoother_gain_list.append(s_0.clone())
+
+
+        return x_out_forward, x_out_smoothed, P_smoothed_seq, P_not_seq, smoother_gain_list, K_t_list[-1], H_last
+
+
+
+    def _run_sequential_emkf_epoch_rts_pnot_psfp(self, SysModel, input_data, target_data, emkf_iterations, is_training,
+                                   non_linear_h=False):
+        """
+        FIXED VERSION - Run one epoch with BATCH → SEQUENCE → EM order and F propagation.
+        """
+        N_data = len(input_data)
+
+
+        N_batches = self.N_B  # Validation: ceil(100/10) = 10 batches
+
+        # Initialize F matrices
+        if is_training:
+            F_current = [f.clone().detach() for f in SysModel.F_train]  # FIX: Detach initial F
+            F_true = SysModel.F_train_TRUE
+        else:
+            F_current = [f.clone().detach() for f in SysModel.F_valid]  # FIX: Detach initial F
+            F_true = SysModel.F_valid_TRUE
+
+        # Accumulate all iteration losses across all batches
+        all_iter_losses = [[] for _ in range(emkf_iterations)]
+        all_iter_f_losses = [[] for _ in range(emkf_iterations)]
+
+        # BATCH LOOP (outermost)
+        for batch_idx in range(N_batches):
+            # Get batch indices
+            if is_training:
+                batch_indices = [random.randint(0, N_data - 1) for _ in range(self.N_B)]
+                for i in range(emkf_iterations):
+                    self.rtsnet_optimizers[i].zero_grad()
+                    self.pnot_optimizers[i].zero_grad()
+                    self.psfp_optimizers[i].zero_grad()
+            else:
+                start_idx = batch_idx * self.N_B
+                end_idx = min(start_idx + self.N_B, N_data)
+                batch_indices = list(range(start_idx, end_idx))
+
+            # Make copy of F for this batch (so F updates happen within batch)
+            F_batch = [f.clone() for f in F_current]
+
+            # Track batch losses for printing
+            batch_iter_losses = [[] for _ in range(emkf_iterations)]
+            batch_iter_f_losses = [[] for _ in range(emkf_iterations)]
+
+            # SEQUENCE LOOP (middle) - Process each sequence in the batch
+            for seq_idx in batch_indices:
+                y_seq = input_data[seq_idx]
+                target_seq = target_data[seq_idx]
+                f_index = seq_idx // 10
+
+                # Store losses for each EM iteration for this sequence
+                seq_iter_losses = []
+                seq_iter_f_losses = []
+                seq_iter_losses_with_F = []
+
+                # FIX 2: Start with stable F initialization
+                F_seq = F_batch[f_index].clone().detach().requires_grad_(True)  # Ensure no gradients from previous sequences
+                # EM ITERATIONS LOOP (innermost) - Sequential F updates for this sequence
+                for em_iter in range(emkf_iterations):
+                    # Set model modes
+                    if is_training:
+                        self.rtsnet_models[em_iter].train()
+                        self.pnot_models[em_iter].train()
+                        self.psfp_models[em_iter].train()
+
+                    # Use current F (updated from previous EM iteration)
+                    SysModel.F = F_seq
+                    self.rtsnet_models[em_iter].update_F(SysModel.F)
+                    self.pnot_models[em_iter].F = SysModel.F
+                    # E-STEP: Run networks
+                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last = \
+                        self._run_rtsnet_sequence_P(SysModel, y_seq, em_iter, non_linear_h=non_linear_h)
+
+                    # 3) Losses (IMPORTANT: build P_true internally from x)
+                    rts_loss = self.loss_fn(x_out_smoothed, target_seq)
+                    pnot_loss = self.pnot_models[em_iter].compute_loss(P_filtered_seq, target_seq,x_out_forward)
+                    psfp_loss = self.psfp_models[em_iter].compute_loss(P_smoothed_seq, target_seq,x_out_smoothed)
+
+                    # combine (tune weights as you like)
+                    total_seq_loss = 0.8 * rts_loss + 0.1 * pnot_loss + 0.1 * psfp_loss
+                    seq_iter_losses.append(total_seq_loss)
+
+
+
+
+                    ####################################################################################################################################################ori del
+                    # # ---- after you compute total_seq_loss = 0.9*rts_loss + 0.1*psmooth_loss ----
+                    #
+                    # # print F if this sequence's loss in this EM iteration is worse than -7 dB
+                    # HIGH_LOSS_DB = -7.0
+                    # loss_db = 10.0 * torch.log10(
+                    #     total_seq_loss.detach().clamp_min(torch.tensor(1e-12, device=total_seq_loss.device)))
+                    #
+                    # if loss_db.item() > HIGH_LOSS_DB:
+                    #     # spectral radius (useful context)
+                    #     def _spectral_radius(F):
+                    #         vals = torch.linalg.eigvals(F)
+                    #         return vals.abs().max().real.item()
+                    #
+                    #     rho = _spectral_radius(F_seq)
+                    #
+                    #     # identify context, then print the F that produced this loss
+                    #     print(f"[HIGH-LOSS] batch= seq={seq_idx} em_iter={em_iter} "
+                    #           f"loss={loss_db.item():.2f} dB  rho(F)={rho:.4f}  ||F||F={torch.linalg.norm(F_seq).item():.4f}")
+                    #     print(F_seq.detach())  # F that was used for this E-step
+
+                    ####################################################################################################################################################
+
+                    # Debug print for first sequence in first batch
+                    if batch_idx == 0 and seq_idx == batch_indices[0]:
+                        print(f'EM iter: {em_iter}, loss: {total_seq_loss:.4f}')
+                        print(f'F_seq: {F_seq}')
+
+                    # FIX 4: Stable M-STEP with regularization
+                    # print(SysModel.F)
+
+                    if non_linear_h == True:
+                        V = self.compute_cross_covariances(SysModel.F, H_last, K_t, P_filtered_seq,smoother_gain_list)
+                    else:
+                        V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_filtered_seq,smoother_gain_list)
+                    X_s = x_out_smoothed.unsqueeze(0)
+                    P_smooth_s = P_smoothed_seq.unsqueeze(0)
+                    list_V_s = []
+                    list_V_s.append(V)
+
+                    F_est = EMKF_F_Mstep(SysModel, X_s, P_smooth_s, list_V_s, SysModel.m)[0]
+                    F_seq = F_est
+                    # F loss
+                    F_true_seq = F_true[f_index]
+                    f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+                    seq_iter_f_losses.append(f_loss)
+
+                    ####################################################################################
+                    vals = torch.linalg.eigvals(F_est)
+                    rho_tensor = vals.abs().max()
+                    rho_target = 1.07  # desired max eigenvalue magnitude
+                    alpha_rho = 1  # small weight, can tune
+                    rho_value = rho_tensor.item()
+
+                    if rho_value > rho_target:
+                        rho_penalty = alpha_rho * (rho_tensor - rho_target)
+                        print(f"[rho penalty] rho={rho_value:.3f} > {rho_target}, penalty={rho_penalty.item():.3e}")
+                    else:
+                        rho_penalty = 0.0 * rho_tensor  # tensor zero (keeps gradient path valid)
+
+                    # NOW form the final loss for this EM iter & sequence:
+                    total_seq_loss_with_F = total_seq_loss + rho_penalty
+                    seq_iter_losses_with_F.append(total_seq_loss_with_F)
+
+                    ####################################################################################
+
+                # Add this sequence's losses to both global and batch accumulators
+                for em_iter in range(emkf_iterations):
+                    all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
+                    all_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
+                    # batch_iter_losses[em_iter].append(seq_iter_losses[em_iter]) return if you dont want the f panelty
+                    batch_iter_losses[em_iter].append(seq_iter_losses_with_F[em_iter])
+                    batch_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
+
+                # ADDED: Batch-level optimization
+            if is_training:
+                # Compute batch losses
+                batch_losses = []
+                for em_iter in range(emkf_iterations):
+                    if batch_iter_losses[em_iter]:
+                        batch_avg_loss = torch.stack(batch_iter_losses[em_iter]).mean()
+                        batch_losses.append(batch_avg_loss)
+                    else:
+                        print('problemmmmmmmmmmmmmmmmmmmmmmmm')
+
+                    # Compute weighted total batch loss
+                iteration_weights = [0.01, 0.1, 0.89]
+                total_batch_loss = sum(w * loss for w, loss in zip(iteration_weights, batch_losses))   # ADD F_rho penalty to total loss
+
+                if torch.isfinite(total_batch_loss) and total_batch_loss < 1000.0:
+
+                    #################################### ori delete
+                    # Right before total_batch_loss.backward()
+                    print("F_seq.requires_grad:",
+                          F_seq.requires_grad)  # should be True (for the last F_seq in the loop)
+                    print("F_seq.grad_fn:", F_seq.grad_fn is not None)
+
+                    total_batch_loss.backward(retain_graph=True)
+
+                    # Do we get gradient in iter-0 params when using only iter-2 loss?
+                    nz0 = sum(
+                        (p.grad is not None) and (p.grad.abs().sum() > 0) for p in self.rtsnet_models[0].parameters())
+                    print("nonzero grads in iter-0 params:", bool(nz0))
+
+                    ###################################
+
+                    # total_batch_loss.backward()
+
+                    for i in range(emkf_iterations):
+                        torch.nn.utils.clip_grad_norm_(self.rtsnet_models[i].parameters(), max_norm=0.5)
+                        torch.nn.utils.clip_grad_norm_(self.pnot_models[i].parameters(), max_norm=0.5)
+                        torch.nn.utils.clip_grad_norm_(self.psfp_models[i].parameters(), max_norm=0.5)
+                        self.rtsnet_optimizers[i].step()
+                        self.pnot_optimizers[i].step()
+                        self.psfp_optimizers[i].step()
+                else:
+                    print(
+                        f"WARNING: Skipping backward pass for batch {batch_idx} due to invalid loss: {total_batch_loss}")
+
+            # BATCH LOSS PRINTING (only every 5 batches to reduce spam)
+            if batch_idx % 2 == 0 or batch_idx == N_batches - 1:
+                mode_str = "TRAIN" if is_training else "VALID"
+                print(f"  {mode_str} Batch {batch_idx + 1}/{N_batches}:")
+                for em_iter in range(emkf_iterations):
+                    if batch_iter_losses[em_iter]:  # Check if batch has losses
+                        batch_avg_loss = torch.stack(batch_iter_losses[em_iter]).mean()
+                        batch_avg_f_loss = torch.stack(batch_iter_f_losses[em_iter]).mean()
+                        batch_loss_db = 10 * torch.log10(batch_avg_loss.detach())
+                        print(f"    EM-Iter {em_iter}: Loss={batch_loss_db:.2f}dB, F-loss={batch_avg_f_loss:.4f}")
+                    else:
+                        print(f"    EM-Iter {em_iter}: No data processed")
+
+            # Update global F with final F from this batch
+            for f_idx, f_val in enumerate(F_batch):
+                F_current[f_idx] = f_val.detach().clone()
+
+        # Compute final averages across all sequences for each iteration
+        final_iter_losses = []
+        final_iter_f_losses = []
+
+        for em_iter in range(emkf_iterations):
+            if all_iter_losses[em_iter]:  # This check prevents torch.stack([]) error
+                iter_avg_loss = torch.stack(all_iter_losses[em_iter]).mean()
+                iter_avg_f_loss = torch.stack(all_iter_f_losses[em_iter]).mean()
+            else:
+                # Fallback values when no losses were collected
+                iter_avg_loss = torch.tensor(1000.0, device=self.device)  # High loss indicates problem
+                iter_avg_f_loss = torch.tensor(0.0, device=self.device)  # Zero F-loss as neutral value
+
+            final_iter_losses.append(iter_avg_loss)
+            final_iter_f_losses.append(iter_avg_f_loss)
+
+        return final_iter_losses, final_iter_f_losses
+
+    def Train_EndToEnd_P_EMKF(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        rtsnet_model_paths, pnot_model_paths, psfp_model_paths, emkf_iterations=3,
+                        load_base_rtsnet=None, load_base_pnot=None, load_base_psfp=None, non_linear_h=False):
+        """
+        FIXED VERSION - Main training function for end-to-end EMKF training.
+        """
+
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+
+        # Initialize multiple models
+        self.rtsnet_models = []
+        self.pnot_models = []
+        self.psfp_models = []
+
+        for i in range(emkf_iterations):
+            rtsnet_model = torch.load(load_base_rtsnet, map_location=self.device, weights_only=False).to(self.device)
+            self.rtsnet_models.append(rtsnet_model)
+
+            pnot_model = torch.load(load_base_pnot, map_location=self.device, weights_only=False).to(self.device)
+            self.pnot_models.append(pnot_model)
+
+            psfp_model = torch.load(load_base_psfp, map_location=self.device, weights_only=False).to(self.device)
+            self.psfp_models.append(psfp_model)
+
+        # Create separate optimizers with LOWER learning rate for stability
+        self.rtsnet_optimizers = []
+        self.pnot_optimizers = []
+        self.psfp_optimizers = []
+
+        # FIX 7: Reduce learning rate for stability
+        stable_lr = self.learningRate*0.1   # 10x smaller learning rate
+
+        for i in range(emkf_iterations):
+            self.rtsnet_optimizers.append(torch.optim.Adam(self.rtsnet_models[i].parameters(), lr=stable_lr,
+                                                           weight_decay=self.weightDecay))
+            self.pnot_optimizers.append(torch.optim.Adam(self.pnot_models[i].parameters(), lr=stable_lr,
+                                                         weight_decay=self.weightDecay))
+            self.psfp_optimizers.append(torch.optim.Adam(self.psfp_models[i].parameters(), lr=stable_lr,
+                                                         weight_decay=self.weightDecay))
+
+        # Logging arrays
+        self.MSE_train_total_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.MSE_cv_total_dB_epoch = torch.empty([self.N_steps], device=self.device)
+        self.F_loss_train_epoch = torch.empty([self.N_steps], device=self.device)
+        self.F_loss_cv_epoch = torch.empty([self.N_steps], device=self.device)
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        print(f"Starting FIXED End-to-End EMKF Training with {emkf_iterations} EM iterations")
+        print(f"Using reduced learning rate: {stable_lr}")
+
+        # MAIN EPOCH LOOP
+        for epoch in range(self.N_steps):
+
+         # TRAINING
+         train_losses, train_f_losses = self._run_sequential_emkf_epoch_rts_pnot_psfp(SysModel, train_input, train_target, emkf_iterations, is_training=True, non_linear_h=non_linear_h)
+
+
+        # FIX 8: Check for NaN/Inf losses
+        valid_train_losses = []
+        for loss in train_losses:
+            if torch.isfinite(loss):
+                valid_train_losses.append(loss)
+            else:
+                print(f"WARNING: Invalid loss detected: {loss}, skipping")
+                valid_train_losses.append(torch.tensor(1000.0))  # High penalty
+        train_losses = valid_train_losses
+
+        # Compute weighted total training loss
+        iteration_weights = [0.01, 0.1, 0.89]
+        total_train_loss = sum(w * loss for w, loss in zip(iteration_weights, train_losses))
+
+        # FIX 9: Gradient clipping BEFORE backprop
+        if torch.isfinite(total_train_loss) and total_train_loss < 1000.0:
+            # BACKPROPAGATION
+            total_train_loss.backward()
+
+            # OPTIMIZER STEP with more aggressive clipping
+            for i in range(emkf_iterations):
+                torch.nn.utils.clip_grad_norm_(self.rtsnet_models[i].parameters(), max_norm=0.5)  # Reduced from 1.0
+                torch.nn.utils.clip_grad_norm_(self.psmooth_models[i].parameters(),
+                                               max_norm=0.5)  # Reduced from 1.0
+                self.rtsnet_optimizers[i].step()
+                self.psmooth_optimizers[i].step()
+        else:
+            print(f"WARNING: Skipping backward pass due to invalid loss: {total_train_loss}")
+
+        # VALIDATION
+        with torch.no_grad():
+            for i in range(emkf_iterations):
+                self.rtsnet_models[i].eval()
+                self.pnot_models[i].eval()
+                self.psfp_models[i].eval()
+
+            cv_losses, cv_f_losses = self._run_sequential_emkf_epoch_rts_pnot_psfp(SysModel, cv_input, cv_target, emkf_iterations, is_training=False, non_linear_h=non_linear_h)
+
+    # Compute weighted averages
+        total_cv_loss = sum(w * loss for w, loss in zip(iteration_weights, cv_losses))
+        total_train_f_loss = sum(w * loss for w, loss in zip(iteration_weights, train_f_losses))
+        total_cv_f_loss = sum(w * loss for w, loss in zip(iteration_weights, cv_f_losses))
+
+        # LOGGING
+        self.MSE_train_total_dB_epoch[epoch] = 10 * torch.log10(total_train_loss.detach())
+        self.MSE_cv_total_dB_epoch[epoch] = 10 * torch.log10(total_cv_loss.detach())
+        self.F_loss_train_epoch[epoch] = total_train_f_loss.detach()
+        self.F_loss_cv_epoch[epoch] = total_cv_f_loss.detach()
+
+        # SAVE BEST MODELS
+        if self.MSE_cv_total_dB_epoch[epoch] < self.MSE_cv_dB_opt:
+            self.MSE_cv_dB_opt = self.MSE_cv_total_dB_epoch[epoch]
+            self.MSE_cv_idx_opt = epoch
+
+            for i in range(emkf_iterations):
+                torch.save(self.rtsnet_models[i], rtsnet_model_paths[i])
+                torch.save(self.pnot_models[i], pnot_model_paths[i])
+                torch.save(self.psfp_models[i], psfp_model_paths[i])
+
+            print(f"**** Best Models Saved at Epoch {epoch} with CV Loss {self.MSE_cv_dB_opt:.4f} dB ****")
+
+        # PROGRESS PRINTING (every epoch)
+        print(f"Epoch {epoch:03d}/{self.N_steps - 1} | ")
+        print(
+            f"  TRAIN: [Total: {self.MSE_train_total_dB_epoch[epoch]:.3f}, F-loss: {self.F_loss_train_epoch[epoch]:.6f}]")
+        print(
+            f"  CV:    [Total: {self.MSE_cv_total_dB_epoch[epoch]:.3f}, F-loss: {self.F_loss_cv_epoch[epoch]:.6f}]")
+        print(f"  BEST:  {self.MSE_cv_dB_opt:.3f} dB (epoch {self.MSE_cv_idx_opt})")
+
+        # Log individual iteration losses
+        for i, (train_loss, cv_loss) in enumerate(zip(train_losses, cv_losses)):
+            print(
+                f"    Iter {i}: Train={10 * torch.log10(train_loss.detach()):.2f}dB, CV={10 * torch.log10(cv_loss.detach()):.2f}dB")
+
+        return [self.MSE_train_total_dB_epoch, self.MSE_cv_total_dB_epoch, self.F_loss_train_epoch,
+            self.F_loss_cv_epoch]
+
+
+    def Test_Only_EMKF_p(self, SysModel, test_input, test_target,load_base_rtsnet=None, load_base_pnot=None, load_base_psfp=None,
+                   emkf_iterations=3, generate_f=True,init_x_list=None, init_P_list=None, non_linear_h=False):
+        """
+        Test-only version - No training, no optimization, just run EMKF on test data
+        """
+
+        # Initialize multiple models
+        self.rtsnet_models = []
+        self.pnot_models = []
+        self.psfp_models = []
+
+        for i in range(emkf_iterations):
+            rtsnet_model = torch.load(load_base_rtsnet[i], map_location=self.device, weights_only=False).to(self.device)
+            self.rtsnet_models.append(rtsnet_model)
+
+            # PNotSmoothNN
+            pnot_model = torch.load(load_base_pnot[i], map_location=self.device, weights_only=False).to(self.device)
+            self.pnot_models.append(pnot_model)
+
+            # PsmoothFromPnot
+            psfp_model = torch.load(load_base_psfp[i], map_location=self.device, weights_only=False).to(self.device)
+            self.psfp_models.append(psfp_model)
+
+        print(f"Starting Test-Only EMKF with {emkf_iterations} EM iterations")
+
+        # Run test only
+        test_losses, test_f_losses, final_F_list, x_last, p_last,final_F_list2 = self._run_test_simple_p(SysModel, test_input,
+                                  test_target, emkf_iterations, generate_f=generate_f, init_x_list=init_x_list, init_P_list=init_P_list,non_linear_h=non_linear_h)
+
+        # # Compute weighted total test loss
+        # iteration_weights = [0.1, 0.2, 0.7]
+        # total_test_loss = sum(w * loss for w, loss in zip(iteration_weights, test_losses))
+        # total_test_f_loss = sum(w * loss for w, loss in zip(iteration_weights, test_f_losses))
+
+        # # LOGGING
+        # test_loss_db = 10 * torch.log10(total_test_loss.detach())
+        #
+        # print(f"TEST RESULTS:")
+        # print(f"  Total Loss: {test_loss_db:.3f} dB")
+        # print(f"  F-loss: {total_test_f_loss:.6f}")
+
+        # Log individual iteration losses
+        for i, test_loss in enumerate(test_losses):
+            print(f"    Iter {i}: {10 * torch.log10(test_loss.detach()):.2f}dB")
+
+        return test_losses, test_f_losses, final_F_list, x_last, p_last, final_F_list2
+
+    def _run_test_simple_p(self, SysModel, input_data, target_data, emkf_iterations, generate_f=True, init_x_list=None,
+                         init_P_list=None, non_linear_h = None):
+        """
+        Simple test - just loop through each sequence one by one
+        """
+        N_data = len(input_data)
+
+        final_F_list = [None] * N_data
+        final_F_list2 = [None] * N_data
+        # Initialize F matrices
+        F_current = [f.clone().detach() for f in SysModel.F_test]
+        F_true = SysModel.F_test_TRUE
+
+        # Accumulate losses
+        all_iter_losses = [[] for _ in range(emkf_iterations)]
+        all_iter_f_losses = [[] for _ in range(emkf_iterations)]
+
+        x_last_all = []
+        p_last_all = []
+        # SIMPLE LOOP - one sequence at a time
+        for seq_idx in range(N_data):
+            y_seq = input_data[seq_idx]
+            target_seq = target_data[seq_idx]
+            f_index = seq_idx
+
+            if (init_x_list is not None) and (init_P_list is not None):
+                P0 = init_P_list[seq_idx]
+                x0 = init_x_list[seq_idx]
+            else:
+                P0 = SysModel.m2x_0
+                x0 = SysModel.m1x_0
+
+            if generate_f == True:
+                f_index = seq_idx // 10
+            # Store losses for each EM iteration for this sequence
+            seq_iter_losses = []
+            seq_iter_f_losses = []
+
+            # Start with F
+            F_seq = F_current[f_index].clone().detach()
+
+            # EM ITERATIONS for this sequence
+            for em_iter in range(emkf_iterations):
+                # Set model modes - EVAL ONLY
+                self.rtsnet_models[em_iter].eval()
+                self.pnot_models[em_iter].eval()
+                self.psfp_models[em_iter].eval()
+
+                # Use current F
+                SysModel.F = F_seq
+                self.rtsnet_models[em_iter].update_F(SysModel.F)
+                self.pnot_models[em_iter].F = SysModel.F
+
+                # E-STEP: Run networks
+                with torch.no_grad():
+
+                    x_out_forward, x_out_smoothed, P_smoothed_seq, P_filtered_seq, smoother_gain_list, K_t, H_last = \
+                        self._run_rtsnet_sequence_P(SysModel, y_seq, em_iter, x0=x0, p0=P0,non_linear_h=non_linear_h)
+
+                    # Compute losses
+                    rts_loss = self.loss_fn(x_out_smoothed, target_seq)
+                    total_seq_loss = 1 * rts_loss
+                    seq_iter_losses.append(total_seq_loss)
+
+                    # Debug print for first sequence
+                    if seq_idx == 0:
+                        print(f'EM iter: {em_iter}, loss: {total_seq_loss:.4f}')
+                        print(f'F_seq: {F_seq}')
+
+
+                    # M-STEP
+                    if non_linear_h == True:
+                        V = self.compute_cross_covariances(SysModel.F,H_last, K_t, P_filtered_seq,
+                                                           smoother_gain_list)
+                    else:
+                        V = self.compute_cross_covariances(SysModel.F, SysModel.H, K_t, P_filtered_seq, smoother_gain_list)
+                    X_s = x_out_smoothed.unsqueeze(0)
+                    P_smooth_s = P_smoothed_seq.unsqueeze(0)
+                    list_V_s = []
+                    list_V_s.append(V)
+                    F_est = EMKF_F_Mstep(SysModel, X_s, P_smooth_s, list_V_s, SysModel.m)[0]
+
+                    deltaF = (F_est - F_seq).norm()
+                    if seq_idx == 0:
+                        print(f"[EM {em_iter}] ||ΔF|| = {deltaF.item():.3e}")
+                    F_seq = F_est
+
+                    # F loss
+                    F_true_seq = F_true[f_index]
+                    f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+                    seq_iter_f_losses.append(f_loss)
+
+                    if em_iter == (emkf_iterations-2):
+                        final_F_list2[seq_idx] = F_seq.detach().clone()
+
+
+
+            ##########################add a last computation for after the F computation
+            # --- after the for em_iter in range(emkf_iterations) loop ---
+
+            # # Use the final F_seq (after the last M-step)
+            # SysModel.F = F_seq
+            #
+            # # Pick a model index to run the forward; reusing the last one is fine
+            # last_idx = emkf_iterations - 1
+            # self.rtsnet_models[last_idx].eval()
+            # self.psmooth_models[last_idx].eval()
+            #
+            # with torch.no_grad():
+            #     x_out_forward2, x_out_smoothed2, P_smoothed_seq2, P_filtered_seq2, smoother_gain_list2, K_t2 = \
+            #         self._run_rtsnet_sequence(SysModel, y_seq, last_idx)
+            #     final_seq_loss = self.loss_fn(x_out_smoothed2, target_seq)
+            #
+            # # Append the “after K updates” loss as the (K)-th index (i.e., emkf_iterations)
+            # seq_iter_losses.append(final_seq_loss)
+            #
+            # # Optional: F-distance for the final F
+            # F_true_seq = F_true[f_index]
+            # final_f_loss = torch.linalg.norm(F_seq.detach() - F_true_seq, ord='fro')
+            # seq_iter_f_losses.append(final_f_loss)
+
+            ################################################################
+
+            # terminals from the last EM iteration run above
+            x_last_all.append(x_out_smoothed[:, -1].unsqueeze(-1).detach().clone())  # [m,1]
+            p_last_all.append(P_smoothed_seq[:, :, -1].detach().clone())  # [m,m]
+
+            final_F_list[seq_idx] = F_seq.detach().clone()
+
+            # Add this sequence's losses to accumulators
+            for em_iter in range(emkf_iterations):
+                all_iter_losses[em_iter].append(seq_iter_losses[em_iter])
+                all_iter_f_losses[em_iter].append(seq_iter_f_losses[em_iter])
+
+        # Compute final averages
+        final_iter_losses = []
+        final_iter_f_losses = []
+
+        for em_iter in range(emkf_iterations):
+            if all_iter_losses[em_iter]:
+                iter_avg_loss = torch.stack(all_iter_losses[em_iter]).mean()
+                iter_avg_f_loss = torch.stack(all_iter_f_losses[em_iter]).mean()
+            else:
+                print('wrongggggggggggggggggggggggggggggggggggggggg')
+
+            final_iter_losses.append(iter_avg_loss)
+            final_iter_f_losses.append(iter_avg_f_loss)
+
+        return final_iter_losses, final_iter_f_losses, final_F_list, x_last_all, p_last_all, final_F_list2
+
+
+#################################################################################################################################################
+
+
+# python
+    def train_mstep_net(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS, num_em_iters=3,
+                        alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+        """
+        Single-function M-step training (no helpers, no .to(...)).
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+        - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+        """
+            # Basic sizes
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+        m = SysModel.m
+
+        # Load and freeze RTSNet (smoother only)
+        self.model = torch.load(destination_path_RTS, weights_only=False).to(self.device).train()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # M-step model and optimizer
+        model_mstep = self.M_model.train()
+
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            model_mstep.train()
+            train_loss_sum = 0.0
+
+
+            for _ in range(self.N_B):
+                self.M_optimizer.zero_grad()
+
+                # Pick one training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_seq = train_input[n_e]   # [n, T]
+                x_true_seq = train_target[n_e]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_i and F_true by group
+                if generate_f != None:
+                    f_index = n_e // 10
+                    F_base = SysModel.F_train[f_index]
+                    F_true = SysModel.F_train_TRUE[f_index]
+                else:
+                    F_base = SysModel.F_train[n_e]
+                    F_true = SysModel.F_train_TRUE[n_e]
+                # --------- EM unrolling over F ---------
+                F_current = F_base  # this will be updated each EM iteration
+                total_loss = 0.0
+
+                for em_iter in range(num_em_iters):
+
+                    self.model.update_F(F_current)
+
+                    # E-step via frozen RTSNet → x_smooth
+                    self.model.InitSequence(SysModel.m1x_0, T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ---------------- Stats for M-network ----------------
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                    # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                    A1 = (x_curr @ x_prev.T)/T
+                    # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                    A2 = (x_prev @ x_prev.T)/T
+                    # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                    x_minus = F_current @ x_prev  # [m, T_eff]
+                    # Δx_t = x_t - F*x_{t-1|T}
+                    delta_x = x_curr - x_minus  # [m, T]
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                    delta_centered = delta_x - delta_mean
+                    # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+                    H = SysModel.H
+                    Hx_curr = H @ x_curr
+                    nu = y_seq - Hx_curr
+                    # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                    nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+                    # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    z_in = torch.cat([A1.reshape(-1),A2.reshape(-1),S_delta_x.reshape(-1),S_nu.reshape(-1),C_delta_x_xminus.reshape(-1),
+                        F_current.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                    # Predict ΔF and update F
+                    deltaF = model_mstep(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+
+                    # Loss: Frobenius(F_next - F_true)^2 + regularization
+                    f_loss = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    loss_em = 3*f_loss + reg+ x_loss
+
+                    # Apply your specific weighting: 0.05, 0.1, 0.85
+                    if em_iter == 0:
+                        weight = alpha[0]  # First EM iteration
+                    elif em_iter == 1:
+                        weight = alpha[1]  # Second EM iteration
+                    else:
+                        weight = 10*alpha[2]  # Third EM iteration (rest)
+                    total_loss += weight*loss_em
+                    F_current = F_next  # use updated F in next EM iteration
+
+
+                # after `for em_iter in range(num_em_iters):`
+                loss = total_loss / float(num_em_iters)   # average over EM iterations
+                loss_mult = loss
+                loss_mult.backward()
+                torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+                self.M_optimizer.step()
+
+                train_loss_sum += loss.detach().item()
+
+                # ---------------- Validation ----------------
+            model_mstep.eval()
+            cv_loss_sum = 0.0
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    y_cv = cv_input[j]  # [n, T_cv]
+                    x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                    T_cv = y_cv.size(-1)
+
+                    # choose base F and F_true for this CV sequence
+                    if generate_f is not None:
+                        f_index_cv = j // 10
+                        F_base_cv = SysModel.F_valid[f_index_cv]
+                        F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                    else:
+                        F_base_cv = SysModel.F_valid[j]
+                        F_true_cv = SysModel.F_valid_TRUE[j]
+
+                    F_current_cv = F_base_cv.clone()
+                    total_loss_cv = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        # --- RTS smoother with current F_current_cv ---
+                        self.model.update_F(F_current_cv)
+                        self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                        x_f_cv = torch.empty(m, T_cv, device=device)
+                        x_s_cv = torch.empty(m, T_cv, device=device)
+
+                        for t in range(T_cv):
+                            x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                        x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                        self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                        x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                        for t in range(T_cv - 3, -1, -1):
+                            x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                        # -------- stats, same as training --------
+                        x_curr = x_s_cv  # [m, T_cv]
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+
+                        A1_cv = (x_curr @ x_prev.T) / T_cv
+                        A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                        x_minus_cv = F_current_cv @ x_prev
+                        delta_x_cv = x_curr - x_minus_cv
+
+                        delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                        delta_centered_cv = delta_x_cv - delta_mean_cv
+                        S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                        H = SysModel.H.to(device)
+                        Hx_curr_cv = H @ x_curr
+                        nu_cv = y_cv - Hx_curr_cv
+
+                        nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                        nu_centered_cv = nu_cv - nu_mean_cv
+                        S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                        z_cv = torch.cat([
+                            A1_cv.reshape(-1),
+                            A2_cv.reshape(-1),
+                            S_delta_x_cv.reshape(-1),
+                            S_nu_cv.reshape(-1),
+                            C_delta_x_xminus_cv.reshape(-1),
+                            F_current_cv.reshape(-1)
+                        ], dim=0).reshape(1, -1)
+
+                        # --- M-step forward only (no grad) ---
+                        dF_cv = model_mstep(z_cv)
+                        dF_cv_mat = dF_cv.view(m, m)
+                        F_next_cv = F_current_cv + dF_cv_mat
+
+                        # same loss as train (but no backward)
+                        f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                        reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                        x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                        loss_em_cv = 3*f_loss_cv + reg_cv + x_loss_cv
+
+                        if em_iter == 0:
+                            weight = alpha[0]
+                        elif em_iter == 1:
+                            weight = alpha[1]
+                        else:
+                            weight = 10 * alpha[2]  # if you really want the same scaling as in train
+
+                        total_loss_cv += weight * loss_em_cv
+                        F_current_cv = F_next_cv
+                    cv_loss_seq = total_loss_cv / float(num_em_iters)
+                    cv_loss_sum += cv_loss_seq.item()
+
+            train_epoch = train_loss_sum / max(1, self.N_B)
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                torch.save(model_mstep, destination_path_M)
+
+            print(f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+
+
+
+    def test_mstep_net(self, SysModel, test_input, test_target,
+                       destination_path_RTS,destination_path_M, num_em_iters=3,
+                       alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False):
+        """
+        Testing-only version for the M-step network.
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Use CURRENT M-step network (self.M_model) to predict ΔF.
+        - Run num_em_iters EM iterations per test sequence.
+        - No training, no optimizer step.
+        - Returns per-sequence loss and mean loss.
+        """
+
+
+        N_T = len(test_input)
+        m = SysModel.m
+
+        all_test_losses = []
+        all_f_losses = []
+
+
+        # Load and freeze RTSNet (smoother only)
+        self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # Load M-step network from checkpoint (NO training)
+        model_mstep = torch.load(destination_path_M, weights_only=False).to(device).eval()
+
+        loss_list = torch.zeros(N_T, device=device)
+        x_loss_sum_per_iter = torch.zeros(num_em_iters, device=device)
+        final_F_list = []
+        final_x_list = []
+        with torch.no_grad():
+            for j in range(N_T):
+                # ----- one test sequence -----
+                y_seq = test_input[j]    # [n, T]
+                x_true_seq = test_target[j]  # [m, T]
+
+                T = y_seq.size(-1)
+
+                # Select F_base and F_true for this test sequence
+                if generate_f is True:
+                    f_index = j // 10
+                    F_base = SysModel.F_test[f_index].to(device)
+                    F_true = SysModel.F_test_TRUE[f_index].to(device)
+                else:
+                    # fallback: sequence-wise
+                    F_base = SysModel.F_test[j].to(device)
+                    F_true = SysModel.F_test_TRUE[j].to(device)
+
+                F_current = F_base.clone()
+                total_loss = 0.0
+                F_estimates =[]
+                F_losses_mse = []
+                F_losses_total = []
+                x_losses_mse = []
+
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+
+                for em_iter in range(num_em_iters):
+
+                    # ----- RTS smoother with current F_current -----
+                    self.model.update_F(F_current)
+                    self.model.InitSequence(x0.clone().detach(), T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = P0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ----- stats for M-network -----
+                    x_curr = x_smooth                    # [m, T]
+                    x_prev = torch.empty_like(x_curr)    # [m, T]
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)   # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]                      # x_{t-1|T}
+
+                    A1 = (x_curr @ x_prev.T) / T
+                    A2 = (x_prev @ x_prev.T) / T
+
+                    x_minus = F_current @ x_prev        # [m, T]
+                    delta_x = x_curr - x_minus          # [m, T]
+
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)
+                    delta_centered = delta_x - delta_mean
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+
+                    H = SysModel.H.to(device)
+                    Hx_curr = H @ x_curr
+                    nu = y_seq - Hx_curr
+
+                    nu_mean = nu.mean(dim=1, keepdim=True)
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    z_in = torch.cat([
+                        A1.reshape(-1),
+                        A2.reshape(-1),
+                        S_delta_x.reshape(-1),
+                        S_nu.reshape(-1),
+                        C_delta_x_xminus.reshape(-1),
+                        F_current.reshape(-1)
+                    ], dim=0).reshape(1, -1)
+
+                    # ----- M-step forward only -----
+                    deltaF = model_mstep(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+
+                    mse_F = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    # x-loss: same as in training
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    loss_em = 3*mse_F + reg + x_loss
+                    x_loss_sum_per_iter[em_iter] += x_loss.item()
+
+                    # same alpha weighting as in training
+                    if em_iter == 0:
+                        weight = alpha[0]
+                    elif em_iter == 1:
+                        weight = alpha[1]
+                    else:
+                        weight = alpha[2]
+
+                    total_loss += weight * loss_em
+                    F_current = F_next
+
+                    all_test_losses.append(loss_em.item())
+                    all_f_losses.append(mse_F.item())
+
+                    # store F estimates for the chosen sequence
+                    if j %5 ==0:
+                        F_estimates.append(F_next.detach())
+                        F_losses_mse.append(mse_F.item())
+                        F_losses_total.append(loss_em.item())
+                        x_losses_mse.append(x_loss.item())
+
+                # store final F and final x_smooth for this sequence (after last EM iter)
+                final_F_list.append(F_current.detach().clone())   # [m, m]
+                final_x_list.append(x_curr[:, -1].unsqueeze(-1).detach().clone())      # [m, T]
+                        # final loss for this sequence (already weighted)
+                loss_list[j] = total_loss / float(num_em_iters)
+                # Mean x-loss for this sequence
+                # if this is the chosen sequence, print F_true and all F_est
+                if j %5 ==0:
+                    print(f"\n[M-step TEST] sequence {j} summary")
+                    print("F_true:\n", F_true.detach())
+                    print("F_init (F_base):\n", F_base.detach())
+
+                    mse_F_init = torch.mean((F_base - F_true) ** 2).item()
+                    print(f"Initial F MSE loss = {mse_F_init:.6e}")
+                    for k, (F_est, f_mse, x_mse, total_val) in enumerate(zip(F_estimates, F_losses_mse, x_losses_mse, F_losses_total)):
+                        f_db = 10.0 * math.log10(f_mse)
+                        x_db = 10.0 * math.log10(x_mse)
+                        tot_db = 10.0 * math.log10(total_val)
+                        print(f"\n  EM iter {k + 1}:")
+                        print("  F_est:\n", F_est)
+                        print(f"  F-loss (MSE_F)                 = {f_db:.2f} dB")
+                        print(f"  x-loss (MSE_x)                 = {x_db:.2f} dB")
+                        print(f"  total loss (F + reg + x)       = {tot_db:.2f} dB")
+
+
+        mean_loss = loss_list.mean().item()
+        print(f"[M-step TEST] mean_loss={mean_loss:.6f}")
+        # average x-MSE for each EM iteration over all sequences
+        mean_x_mse_per_iter = x_loss_sum_per_iter / float(N_T)
+
+        print("[M-step TEST] Mean x-MSE per EM iteration:")
+        for k in range(num_em_iters):
+            mse_k = mean_x_mse_per_iter[k].item()
+            db_k = 10.0 * math.log10(mse_k )
+            print(f"  EM iter {k + 1}: mean x-MSE = {mse_k:.6e}  ({db_k: .2f} dB)")
+
+        # convert per-iteration mean x-MSE to numpy (linear and dB)
+        mean_x_mse_per_iter_np = mean_x_mse_per_iter.detach()
+        mean_x_mse_per_iter_db_np = (10.0 * torch.log10(mean_x_mse_per_iter)).detach()
+
+
+        return mean_x_mse_per_iter_np,mean_x_mse_per_iter_db_np, final_F_list,final_x_list

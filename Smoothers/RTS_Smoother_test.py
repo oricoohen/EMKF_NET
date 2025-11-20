@@ -4,7 +4,7 @@ import time
 from Smoothers.Linear_KF import KalmanFilter
 from Smoothers.RTS_Smoother import rts_smoother
 
-
+dev = torch.device("cuda")
 def enforce_covariance_properties(P, eps=1e-6):
     """
     Ensure that the covariance matrix P is positive    definite (PSD).
@@ -78,11 +78,11 @@ def S_Test(SysModel, test_input, test_target, F, generate_f=True, allStates=True
     start = time.time()
     KF = KalmanFilter(SysModel)
     RTS = rts_smoother(SysModel)
-    RTS_out = torch.zeros(N_T, m, T)
-    P_smooth = torch.zeros(N_T, m, m, T)
-    P_tilde = torch.zeros(N_T, m, m, T)
-    V_test = torch.zeros(N_T, m, m, T)
-    last_gains = torch.empty(N_T, m, n)
+    RTS_out = torch.zeros(N_T, m, T, device=dev)
+    P_smooth = torch.zeros(N_T, m, m, T, device=dev)
+    P_tilde = torch.zeros(N_T, m, m, T, device=dev)
+    V_test = torch.zeros(N_T, m, m, T, device=dev)
+    last_gains = torch.empty(N_T, m, n, device=dev)
 
     if not allStates:
         loc = torch.tensor([True, False, False])  # for position only

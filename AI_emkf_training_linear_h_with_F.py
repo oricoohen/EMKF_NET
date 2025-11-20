@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/paper/exp_2/r_01/True_F/'######################################################################################################################################################################
+path_results_True = 'RTSNet/with_F/exp_2/r_01/True_F/'######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/paper/exp_2/r_01/False_F/'######################################################################################################################################################################
+path_results_False = 'RTSNet/with_F/exp_2/r_01/False_F/'######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -201,6 +201,13 @@ for i in range(len(F_val_mat)):
 for i in range(len(F_test_mat)):
     # sys_model_2.F_test[i] = torch.tensor([[1.2237, -0.0927],[1.8518, 0.0819]], device=device, dtype=ddtype)
     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+
+# random WRONG F per sequence using your helper
+# sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=0.25, mult=1, many=True, randomit=True)
+# sys_model_2.F_valid = rotate_F(F_val_mat,  i=0, j=1, theta=0.25, mult=1, many=True, randomit=True)
+# sys_model_2.F_test  = rotate_F(F_test_mat, i=0, j=1, theta=0.25, mult=1, many=True, randomit=True)
+
+
 sys_model_2.args = args
 print("F WRONGGGGGG:",sys_model_2.F_test)
 
@@ -263,7 +270,7 @@ print('rtssnet and psmooth with WRONGGGGGGG F')
 RTSNet_Pipeline.NNTest(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,load_p_smoothe_model_path= path_results_wrong_psmooth)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_2/r_01/EMKF/False/'######################################################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_2/r_01/EMKF/False/try/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 model_pathes = []

@@ -151,7 +151,7 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
         for F_i in F:
             if randomit:
                 angle = uniform_two_ranges(0.0,1)*theta
-                angle = torch.tensor(angle, device=F.device)
+                angle = torch.tensor(angle, device=F[0].device)
             else:
                 angle = torch.tensor(theta, device=F[0].device)
             rotated_list.append(apply_rotation(F_i, angle, i, j))
@@ -260,7 +260,7 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(0.001, device=self.device, dtype=self.F.dtype)  # Var(r)
+        r2 = torch.tensor(1., device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
         lam_r = 1.0 / torch.sqrt(r2)

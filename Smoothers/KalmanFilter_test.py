@@ -3,22 +3,24 @@ import torch.nn as nn
 import time
 from Smoothers.Linear_KF import KalmanFilter
 
+dev = torch.device("cuda")
+
 
 def KFTest(args, SysModel, test_input, test_target, F=None, allStates=True, randomInit=False, test_init=None):
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
 
     # MSE [Linear]
-    MSE_KF_linear_arr = torch.empty(args.N_T)
+    MSE_KF_linear_arr = torch.empty(args.N_T, device=dev)
     start = time.time()
     KF = KalmanFilter(SysModel)
 
-    last_gains = torch.empty(args.N_T, SysModel.m, SysModel.n)
+    last_gains = torch.empty(args.N_T, SysModel.m, SysModel.n, device=dev)
 
     if not allStates:
-        loc = torch.tensor([True, False, False])  # for position only
+        loc = torch.tensor([True, False, False], device=dev)  # for position only
         if SysModel.m == 2:
-            loc = torch.tensor([True, False])  # for position only
+            loc = torch.tensor([True, False], device=dev)  # for position only
 
     for j, (sequence_target, sequence_input) in enumerate(zip(test_target, test_input)):
         if F is not None:
