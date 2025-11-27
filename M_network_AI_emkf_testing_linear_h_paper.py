@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_2/r_1/True_F/'  ###############################################################################################################################################
+path_results_True = 'RTSNet/AI_M_step/exp_1/r_10/True_F/'  ###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_2/r_1/False_F/'  ###############################################################################################################################################
+path_results_False = 'RTSNet/AI_M_step/exp_1/r_10/False_F/'  ###############################################################################################################################################
 
 
 ####################
@@ -64,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 1.
+r2 = 10.
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -102,7 +102,7 @@ for i in range(cycles+1):
     # a=a*0.95
     F_test_list = rotate_F(F_matrices_for_datasets_d[i], i=0, j=1, theta=0.2, many=True, randomit=False)
     # if i ==0:
-    #     F_test_list = rotate_F(F_matrices_for_datasets_d[i], i=0, j=1, theta=0.2, many=True, randomit=False)
+    #     F_test_list = rotate_F(F_matrices_for_datasets_d[i], i=0, j=1, theta=0.6, many=True, randomit=False)
     # F_7 = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)#DELET
     # F_test_list= [F_7.clone().to(DEVICE) for _ in range(args.N_T)]#DELET
 F_matrices_for_datasets = F_matrices_for_datasets_d[1:]
@@ -231,8 +231,10 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet//AI_M_step/exp_2/r_1/EMKF/False/'###############################################################################################################################################
-destination_path_M = destination_folder + 'M_rand_false_trained.pt'
+destination_folder = 'RTSNet//AI_M_step/exp_1/r_10/EMKF/False/'###############################################################################################################################################
+destination_path_M = destination_folder + 'M_rand_false_trained_one_net_big_f.pt'
+
+destination_path_3_M = [destination_folder + "M_iter0.pt",destination_folder + "M_iter1.pt",destination_folder + "M_iter2.pt"]
 #############################################################################
 # AI EMKF Sequential Testing
 print('\n=== AI EMKF Sequential Learning and Testing ===')
@@ -280,6 +282,13 @@ for dataset_id in range(cycles):
     else:
         test_losses, test_f_losses, final_F_list,  last_x_list,   = RTSNet_Pipeline.test_mstep_net(sys_model_ai, test_input, test_target,
             destination_path_RTS=path_results_wrong_rts, destination_path_M=destination_path_M ,num_em_iters=3, generate_f= False, init_x_list=x0_em_last, init_P_list=p0_em_last)
+
+    # if dataset_id == 0:
+    #     test_losses, test_f_losses, final_F_list, last_x_list, = RTSNet_Pipeline.end_to_end_test_mstep_net(sys_model_ai,test_input, test_target,
+    #       destination_path_RTS=path_results_wrong_rts,destination_path_M=destination_path_3_M,num_em_iters=3,generate_f=False)
+    # else:
+    #     test_losses, test_f_losses, final_F_list, last_x_list, = RTSNet_Pipeline.end_to_end_test_mstep_net(sys_model_ai,test_input, test_target,
+    #      destination_path_RTS=path_results_wrong_rts,destination_path_M=destination_path_3_M,num_em_iters=3,generate_f=False,init_x_list=x0_em_last,init_P_list=p0_em_last)
 
     emkf_mse_lin_sum += float(test_losses[-1])
     current_F_estimate_prev = final_F_list

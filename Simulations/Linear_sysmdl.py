@@ -260,7 +260,7 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(1., device=self.device, dtype=self.F.dtype)  # Var(r)
+        r2 = torch.tensor(10, device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
         lam_r = 1.0 / torch.sqrt(r2)
@@ -279,14 +279,14 @@ class SystemModel:
                 xt = torch.add(xt,eq)
             else:
                 xt = self.F.matmul(self.x_prev)
-                # mean = torch.zeros([self.m], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                # eq = distrib.rsample()
+                mean = torch.zeros([self.m], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
 
                 lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
                 # eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
@@ -306,12 +306,12 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                # mean = torch.zeros([self.n], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                # er = distrib.rsample()
+                mean = torch.zeros([self.n], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                er = distrib.rsample()
                 ####################################ori added
                 lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                er = Exponential(lam_vec_r).sample()  # shape (n,)
+                # er = Exponential(lam_vec_r).sample()  # shape (n,)
                 # er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())

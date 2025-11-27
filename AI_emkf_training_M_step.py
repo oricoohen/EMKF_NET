@@ -38,9 +38,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_2/r_1/True_F/'######################################################################################################################################################################
+path_results_True = 'RTSNet/AI_M_step/exp_1/r_10/True_F/'######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_2/r_1/False_F/'######################################################################################################################################################################
+path_results_False = 'RTSNet/AI_M_step/exp_1/r_10/False_F/'######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -69,7 +69,7 @@ max_iter = 3
 
 # True model
 q2 = 0.01
-r2 =1.
+r2 =10.
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
@@ -241,7 +241,7 @@ path_results_True_rts = path_results_True+'best-rts_true.pt'
 path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 #####TRAIN GOOD F#####
 print('rtssnet and psmooth with trueeeeeeee F')
-RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 
 ### Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_True_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
@@ -250,36 +250,51 @@ RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=p
 #RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')
 #######TRAIN BAD F########
-RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
 
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/AI_M_step/exp_2/r_1/EMKF/False/'######################################################################################################################################################################
+destination_folder = 'RTSNet/AI_M_step/exp_1/r_10/EMKF/False/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
-# file_rtsnet = f"model_rand_false_trained.pt"
-file_M = f"M_e_q_rand_false_trained_rand_2_state_loss.pt"
 # Build the full destination path
 # destination_path_RTS = destination_folder + file_rtsnet
-destination_path_M= destination_folder + f"M_rand_false_trained.pt"
+
+destination_path_M= destination_folder + f"M_rand_false_trained_one_net_reg_f_all_f.pt"
+
+# destination_path_M = [destination_folder + "M_iter0.pt",destination_folder + "M_iter1.pt",destination_folder + "M_iter2.pt"]
+# load_m= destination_folder + f"M_rand_false_trained.pt"
 ######START THE EMKF TRAINING##########
-
-
 
 
 sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
 
 
-RTSNet_Pipeline.train_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
-                        destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True)
+# RTSNet_Pipeline.end_To_end_m_net(sys_model_2,cv_input,cv_target,train_input,train_target,destination_path_M,destination_path_RTS=path_results_wrong_rts,
+#                     load_base_m_mmodel=load_m,num_em_iters=3,alpha=(0.05, 0.1, 0.85),lambda_F=0.01,generate_f=True,non_linear_h=False)
+
+# RTSNet_Pipeline.end_to_end_test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, non_linear_h=False)
+
+# RTSNet_Pipeline.train_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=1,alpha=(0.05, 0.1, 0.85), lambda_F=0.001, generate_f=True)
+
+
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
-RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
-                   alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, non_linear_h=False)
+# RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
+
+
+RTSNet_Pipeline.one_train_m_step_net( sys_model_2, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS = path_results_wrong_rts,  lambda_F=1e-3, generate_f=True, non_linear_h=False)
+
+RTSNet_Pipeline.one_test_mstep_net(sys_model_2, test_input, test_target,
+                       destination_path_RTS =path_results_wrong_rts ,destination_path_M=destination_path_M, lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False)
 
 # sys_model_2.F_test = rotate_F(F_test_mat)
 # print('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')

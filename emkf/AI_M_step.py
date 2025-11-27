@@ -24,6 +24,14 @@ class DeltaF_MStepNet(nn.Module):
         self.m = m
         self.n = n
         self.d_z = 5 * (m * m) + (n * n)
+        self.block_dims = [
+            m * m,  # A1
+            m * m,  # A2
+            m * m,  # S_delta_x
+            n * n,  # S_nu
+            m * m,  # C_delta_x_xminus
+            m * m   # F_current
+        ]
 
         self.ln = nn.LayerNorm(self.d_z)
         self.mlp = nn.Sequential(
@@ -33,12 +41,29 @@ class DeltaF_MStepNet(nn.Module):
             nn.GELU(),
             nn.Linear(d_hidden, m * m))
 
+    def _norm_block(self, block, eps=1e-6):
+        # block: [B, D_block]
+        mean = block.mean(dim=1, keepdim=True)
+        std = block.std(dim=1, keepdim=True)
+        return (block - mean) / (std + eps)
+
     def forward(self, z_in):
         """
         z_in: [B, d_z] on CUDA
         returns ΔF: [B, m, m] on CUDA
         """
         B, dz = z_in.shape
+        # blocks = []
+        # start = 0
+        # for dim in self.block_dims:
+        #     end = start + dim
+        #     b = z_in[:, start:end]  # [B, dim]
+        #     b = self._norm_block(b)  # normalize this block
+        #     blocks.append(b)
+        #     start = end
+        #
+        # z_in = torch.cat(blocks, dim=1)
+
         z = self.ln(z_in)
 
         deltaF_vec = self.mlp(z)           # [B, m^2]
@@ -110,6 +135,7 @@ def compute_mstep_stats(x_smooth, x_prev_smooth, delta_x, nu, x_prev_hat, x_0):
         nu_t = nu_center[:, :, t]                   # [B, n]
         Sv += nu_t.unsqueeze(2) * nu_t.unsqueeze(1)
     Sv = Sv / T
+    Sv = torch.zeros_like(Sv)
 
     # ---------- C_{Δx, x-} = (1/T) Σ_t Δx_t x_{t-1}^T ----------
     # delta_x: [B, m, T], x_prev_hat: [B, m, T]

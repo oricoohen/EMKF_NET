@@ -190,7 +190,7 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01,device=self.F.device,dtype=self.F.dtype)
-        r2 = torch.tensor(10, device=self.F.device, dtype=self.F.dtype)
+        r2 = torch.tensor(1., device=self.F.device, dtype=self.F.dtype)
 
         lam_q = torch.rsqrt(q2)
         lam_r = torch.rsqrt(r2)
