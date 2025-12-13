@@ -14,7 +14,7 @@ from RTSNet.PsmoothNN_combined import PsmoothFromPnot, PNotSmoothNN
 import torch.nn as nn
 from emkf.main_emkf_func_AI import EMKF_F_Mstep
 from Simulations.Lorenz_Atractor.parameters import getJacobian
-from emkf.AI_M_step import DeltaF_MStepNet,compute_mstep_stats,mstep_loss
+from emkf.AI_M_step import DeltaF_MStepNet,mstep_loss
 import math
 device =torch.device("cuda")
 
@@ -192,7 +192,7 @@ class Pipeline_ERTS:
             for j in range(0, self.N_B):
 
                 n_e = random.randint(0, self.N_E - 1)
-                if generate_f != None:  ####if we train with different f
+                if generate_f is True:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
                     self.model.update_F(SysModel.F)
@@ -304,7 +304,7 @@ class Pipeline_ERTS:
                     x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
                                device=y_cv.device, dtype=y_cv.dtype)
 
-                    if generate_f != None:  ####if we valid with different f
+                    if generate_f is True:  ####if we valid with different f
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
                         self.model.update_F(SysModel.F)
@@ -458,7 +458,7 @@ class Pipeline_ERTS:
                 m, n = SysModel.m, SysModel.n
 
                 # (Optional) vary F across sequences (as in your code)
-                if generate_f is not None:
+                if generate_f is True:
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
                     self.model.update_F(SysModel.F)
@@ -567,7 +567,7 @@ class Pipeline_ERTS:
                     m, n = SysModel.m, SysModel.n
 
                     # Optional F rotation for CV – keep RTSNet and PNot aligned
-                    if generate_f is not None and hasattr(SysModel, "F_valid"):
+                    if generate_f is True and hasattr(SysModel, "F_valid"):
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
                         self.model.update_F(SysModel.F)
@@ -725,7 +725,7 @@ class Pipeline_ERTS:
 
                 self.model.init_hidden()
                 n_e = random.randint(0, self.N_E - 1)
-                if generate_f != None:  ####if we train with different f
+                if generate_f is True:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
                     self.model.update_F(SysModel.F)
@@ -836,7 +836,7 @@ class Pipeline_ERTS:
                     x_out_cv = torch.empty(SysModel.m, SysModel.T_test,
                                device=y_cv.device, dtype=y_cv.dtype)
 
-                    if generate_f != None:  ####if we valid with different f
+                    if generate_f is True:  ####if we valid with different f
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
                         self.model.update_F(SysModel.F)
@@ -942,7 +942,7 @@ class Pipeline_ERTS:
 
 
                 n_e = random.randint(0, self.N_E - 1)
-                if generate_f != None:  ####if we train with different f
+                if generate_f is True:  ####if we train with different f
                     index = n_e // 10
                     SysModel.F = SysModel.F_train[index]
                     self.model.update_F(SysModel.F)
@@ -1111,7 +1111,7 @@ class Pipeline_ERTS:
                     P_predicted_seq = torch.empty(m, m, SysModel.T_test)
 
 
-                    if generate_f != None:  ####if we valid with different f
+                    if generate_f is True:  ####if we valid with different f
                         index = j // 10
                         SysModel.F = SysModel.F_valid[index]
                         self.model.update_F(SysModel.F)
@@ -1354,6 +1354,7 @@ class Pipeline_ERTS:
                 self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
 
                 x_out_list.append(x_out_test)
+                # print('x_latst',x_out_test[:, -1])
 
         end = time.time()
         t = end - start
@@ -3947,7 +3948,7 @@ class Pipeline_ERTS:
                 T = y_seq.size(-1)
 
                 # Select F_i and F_true by group
-                if generate_f != None:
+                if generate_f is True:
                     f_index = n_e // 10
                     F_base = SysModel.F_train[f_index]
                     F_true = SysModel.F_train_TRUE[f_index]
@@ -4036,9 +4037,9 @@ class Pipeline_ERTS:
                     # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
                     ##########################################################
                     if em_iter == num_em_iters - 1:
-                        loss_em = 50*f_loss + reg + x_loss
+                        loss_em = 15*f_loss + reg + x_loss
                     else:
-                        loss_em = 3*f_loss + reg+ x_loss
+                        loss_em = f_loss + reg+ x_loss
 #############################################################################################################
                     # loss_em = 3 * f_loss + reg + x_loss
                     # Apply your specific weighting: 0.05, 0.1, 0.85
@@ -4047,7 +4048,7 @@ class Pipeline_ERTS:
                     elif em_iter == 1:
                         weight = alpha[1]  # Second EM iteration
                     else:
-                        weight = 10*alpha[2]  # Third EM iteration (rest)
+                        weight = alpha[2]  # Third EM iteration (rest)
                     total_loss += weight*loss_em
                     F_current = F_next  # use updated F in next EM iteration
 
@@ -4072,7 +4073,7 @@ class Pipeline_ERTS:
                     T_cv = y_cv.size(-1)
 
                     # choose base F and F_true for this CV sequence
-                    if generate_f is not None:
+                    if generate_f is True:
                         f_index_cv = j // 10
                         F_base_cv = SysModel.F_valid[f_index_cv]
                         F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
@@ -4164,9 +4165,9 @@ class Pipeline_ERTS:
                         # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
                         ##########################################################
                         if em_iter == num_em_iters - 1:
-                            loss_em_cv = 50 * f_loss_cv + reg_cv + x_loss_cv
+                            loss_em_cv = 15*f_loss_cv + reg_cv + x_loss_cv
                         else:
-                            loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                            loss_em_cv =  f_loss_cv + reg_cv + x_loss_cv
                         #########################################################################
                         # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
                         if em_iter == 0:
@@ -4174,7 +4175,7 @@ class Pipeline_ERTS:
                         elif em_iter == 1:
                             weight = alpha[1]
                         else:
-                            weight = 10 * alpha[2]  # if you really want the same scaling as in train
+                            weight =  alpha[2]  # if you really want the same scaling as in train
 
                         total_loss_cv += weight * loss_em_cv
                         F_current_cv = F_next_cv
@@ -4190,8 +4191,8 @@ class Pipeline_ERTS:
 
             print(f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
 
-    def end_To_end_m_net(self, SysModel, cv_input, cv_target, train_input, train_target,
-                        destination_path_M, destination_path_RTS,load_base_m_mmodel = None, num_em_iters=3,
+    def train_mstep_net_batch(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS, num_em_iters=3,
                         alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
         """
         Single-function M-step training (no helpers, no .to(...)).
@@ -4209,6 +4210,304 @@ class Pipeline_ERTS:
         for p in self.model.parameters():
             p.requires_grad_(False)
 
+        # M-step model and optimizer
+        model_mstep = self.M_model.train()
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            model_mstep.train()
+            self.M_optimizer.zero_grad()
+            epoch_loss_sum = 0.0
+
+            for _ in range(self.N_B):
+
+                # Pick one training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_seq = train_input[n_e]  # [n, T]
+                x_true_seq = train_target[n_e]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_i and F_true by group
+                if generate_f is True:
+                    f_index = n_e // 10
+                    F_base = SysModel.F_train[f_index]
+                    F_true = SysModel.F_train_TRUE[f_index]
+                else:
+                    F_base = SysModel.F_train[n_e]
+                    F_true = SysModel.F_train_TRUE[n_e]
+                # --------- EM unrolling over F ---------
+                F_current = F_base  # this will be updated each EM iteration
+                total_loss = 0.0
+
+                for em_iter in range(num_em_iters):
+
+                    self.model.update_F(F_current)
+
+                    # E-step via frozen RTSNet → x_smooth
+                    self.model.InitSequence(SysModel.m1x_0, T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1],
+                                                    x_smooth[:, t + 2])
+
+                    # ---------------- Stats for M-network ----------------
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                    # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                    A1 = (x_curr @ x_prev.T) / T
+                    # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                    A2 = (x_prev @ x_prev.T) / T
+                    # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                    x_minus = F_current @ x_prev  # [m, T_eff]
+                    # Δx_t = x_t - F*x_{t-1|T}
+                    delta_x = x_curr - x_minus  # [m, T]
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                    delta_centered = delta_x - delta_mean
+                    # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+                    if non_linear_h:
+                        # y_hat_t = h(x_t) for each t
+                        y_hat_list = []
+                        for t in range(T):
+                            # shape [m] -> whatever h expects; .view(m,1) is safe with your linear h
+                            x_t = x_curr[:, t].view(SysModel.m, 1)
+                            y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                            y_hat_list.append(y_t_hat.view(-1))
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H
+                        Hx_curr = H @ x_curr  # [n, T]
+                    nu = y_seq - Hx_curr
+                    # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                    nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+                    # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
+                                      C_delta_x_xminus.reshape(-1),
+                                      F_current.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                    # Predict ΔF and update F
+                    deltaF = model_mstep(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+
+                    # Loss: Frobenius(F_next - F_true)^2 + regularization
+                    f_loss = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    ##########################################################
+                    # # y-loss (measurement-space loss)
+                    # H = SysModel.H.to(device)  # [n, m]
+                    # y_hat = H @ x_curr  # [n, T]
+                    # y_loss = torch.mean((y_hat - y_seq) ** 2)
+                    # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
+                    ##########################################################
+                    if em_iter == num_em_iters - 1:
+                        loss_em = 3*f_loss + reg + x_loss
+                    elif em_iter == num_em_iters-2:
+                        loss_em =  f_loss + reg + x_loss
+                    else:
+                        loss_em = f_loss + reg + x_loss
+                    #############################################################################################################
+                    # loss_em = 3 * f_loss + reg + x_loss
+                    # Apply your specific weighting: 0.05, 0.1, 0.85
+                    if em_iter == 0:
+                        weight = alpha[0]  # First EM iteration
+                    elif em_iter == 1:
+                        weight = alpha[1]  # Second EM iteration
+                    else:
+                        weight = alpha[2]  # Third EM iteration (rest)
+                    total_loss += weight * loss_em
+                    F_current = F_next  # use updated F in next EM iteration
+
+                # after `for em_iter in range(num_em_iters):`
+                loss = total_loss / float(num_em_iters)  # average over EM iterations
+                # accumulate loss over sequences in the epoch
+                epoch_loss_sum += loss
+
+            # average over the N_B sequences in this epoch
+            epoch_loss_mean = epoch_loss_sum / float(self.N_B)
+
+            # backprop once for the whole epoch ("batch")
+            epoch_loss_mean.backward()
+            torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+            self.M_optimizer.step()
+
+            # for logging
+            train_epoch = epoch_loss_mean.item()
+
+                # ---------------- Validation ----------------
+            model_mstep.eval()
+            cv_loss_sum = 0.0
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    y_cv = cv_input[j]  # [n, T_cv]
+                    x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                    T_cv = y_cv.size(-1)
+
+                    # choose base F and F_true for this CV sequence
+                    if generate_f is True:
+                        f_index_cv = j // 10
+                        F_base_cv = SysModel.F_valid[f_index_cv]
+                        F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                    else:
+                        F_base_cv = SysModel.F_valid[j]
+                        F_true_cv = SysModel.F_valid_TRUE[j]
+
+                    F_current_cv = F_base_cv.clone()
+                    total_loss_cv = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        # --- RTS smoother with current F_current_cv ---
+                        self.model.update_F(F_current_cv)
+                        self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                        x_f_cv = torch.empty(m, T_cv, device=device)
+                        x_s_cv = torch.empty(m, T_cv, device=device)
+
+                        for t in range(T_cv):
+                            x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                        x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                        self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                        x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                        for t in range(T_cv - 3, -1, -1):
+                            x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                        # -------- stats, same as training --------
+                        x_curr = x_s_cv  # [m, T_cv]
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+
+                        A1_cv = (x_curr @ x_prev.T) / T_cv
+                        A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                        x_minus_cv = F_current_cv @ x_prev
+                        delta_x_cv = x_curr - x_minus_cv
+
+                        delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                        delta_centered_cv = delta_x_cv - delta_mean_cv
+                        S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                        if non_linear_h:
+                            y_hat_cv_list = []
+                            for t in range(T_cv):
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_t_hat = SysModel.h(x_t)  # non-linear h
+                                y_hat_cv_list.append(y_t_hat.view(-1))
+                            Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                        else:
+                            H = SysModel.H.to(device)
+                            Hx_curr_cv = H @ x_curr
+                        nu_cv = y_cv - Hx_curr_cv
+
+                        nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                        nu_centered_cv = nu_cv - nu_mean_cv
+                        S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                        z_cv = torch.cat([
+                            A1_cv.reshape(-1),
+                            A2_cv.reshape(-1),
+                            S_delta_x_cv.reshape(-1),
+                            S_nu_cv.reshape(-1),
+                            C_delta_x_xminus_cv.reshape(-1),
+                            F_current_cv.reshape(-1)
+                        ], dim=0).reshape(1, -1)
+
+                        # --- M-step forward only (no grad) ---
+                        dF_cv = model_mstep(z_cv)
+                        dF_cv_mat = dF_cv.view(m, m)
+                        F_next_cv = F_current_cv + dF_cv_mat
+
+                        # same loss as train (but no backward)
+                        f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                        reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                        x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                        ##########################################################
+                        # # y-loss (measurement-space loss)
+                        # H = SysModel.H.to(device)  # [n, m]
+                        # y_hat_cv  = H @ x_curr  # [n, T]
+                        # y_loss_cv = torch.mean((y_hat_cv  - y_cv) ** 2)
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
+                        ##########################################################
+                        if em_iter == num_em_iters - 1:
+                            loss_em_cv = 3*f_loss_cv + reg_cv + x_loss_cv
+                        elif em_iter == num_em_iters - 2:
+                            loss_em_cv = f_loss_cv + reg_cv + x_loss_cv
+                        else:
+                            loss_em_cv = f_loss_cv + reg_cv + x_loss_cv
+                        #########################################################################
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                        if em_iter == 0:
+                            weight = alpha[0]
+                        elif em_iter == 1:
+                            weight = alpha[1]
+                        else:
+                            weight = alpha[2]  # if you really want the same scaling as in train
+
+                        total_loss_cv += weight * loss_em_cv
+                        F_current_cv = F_next_cv
+                    cv_loss_seq = total_loss_cv / float(num_em_iters)
+                    cv_loss_sum += cv_loss_seq.item()
+
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                torch.save(model_mstep, destination_path_M)
+
+            print(
+                f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+    def end_To_end_m_net(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS,load_base_m_mmodel = None,load_rts=None, num_em_iters=3,
+                        alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+        """
+        Single-function M-step training (no helpers, no .to(...)).
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+        - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+        """
+        # Basic sizes
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+        m = SysModel.m
+
+        # Load base RTSNet and create one RTSNet per EM iteration (all trainable)
+        base_rts = torch.load(load_rts, weights_only=False).to(self.device).train()
+
+        self.RTS_models = []
+        for i in range(num_em_iters):
+            RTS_i = copy.deepcopy(base_rts).to(self.device).train()
+            self.RTS_models.append(RTS_i)
+
+
         self.M_models = []
         if load_base_m_mmodel !=None:
             for i in range(num_em_iters):
@@ -4225,6 +4524,15 @@ class Pipeline_ERTS:
         for i in range(num_em_iters):
             self.M_optimizers.append(torch.optim.Adam(self.M_models[i].parameters(),lr=stable_lr,weight_decay=self.weightDecay))
 
+        self.RTS_optimizers = []
+        for i in range(num_em_iters):
+            self.RTS_optimizers.append(
+                torch.optim.Adam(self.RTS_models[i].parameters(), lr=stable_lr, weight_decay=self.weightDecay))
+
+
+
+
+
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0
 
@@ -4232,13 +4540,22 @@ class Pipeline_ERTS:
             # ---------------- Training ----------------
             for M_model in self.M_models:
                 M_model.train()
+            for RTS_model in self.RTS_models:
+                RTS_model.train()
             train_loss_sum = 0.0
+
+            # zero grad for all M nets
+            for opt in self.M_optimizers:
+                opt.zero_grad()
+
+            # zero grad for all RTS nets
+            for opt in self.RTS_optimizers:
+                opt.zero_grad()
+            epoch_loss_sum = 0.0  # NEW: accumulate loss over N_B sequences
 
             for _ in range(self.N_B):
 
-                # zero grad for all M nets
-                for opt in self.M_optimizers:
-                    opt.zero_grad()
+
 
                 # Pick one training sequence
                 n_e = random.randint(0, self.N_E - 1)
@@ -4247,7 +4564,7 @@ class Pipeline_ERTS:
                 T = y_seq.size(-1)
 
                 # Select F_i and F_true by group
-                if generate_f != None:
+                if generate_f is True:
                     f_index = n_e // 10
                     F_base = SysModel.F_train[f_index]
                     F_true = SysModel.F_train_TRUE[f_index]
@@ -4261,6 +4578,7 @@ class Pipeline_ERTS:
                 for em_iter in range(num_em_iters):
 
                     M_k = self.M_models[em_iter]
+                    self.model = self.RTS_models[em_iter]
 
                     self.model.update_F(F_current)
 
@@ -4338,35 +4656,51 @@ class Pipeline_ERTS:
                     # y_loss = torch.mean((y_hat - y_seq) ** 2)
                     # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
                     ##########################################################
-                    # if em_iter == num_em_iters - 1:
-                    #     loss_em = 20*f_loss + reg + x_loss
-                    # else:
-                    #     loss_em = 3*f_loss + reg+ x_loss
+                    if em_iter == num_em_iters - 1:
+                        loss_em = 15*f_loss + reg + x_loss
+                    else:
+                        loss_em = f_loss + reg+ x_loss
                     #############################################################################################################
-                    loss_em = 3 * f_loss + reg + x_loss
+                    # loss_em = 3 * f_loss + reg + x_loss
                     # Apply your specific weighting: 0.05, 0.1, 0.85
                     if em_iter == 0:
                         weight = alpha[0]  # First EM iteration
                     elif em_iter == 1:
                         weight = alpha[1]  # Second EM iteration
                     else:
-                        weight = 10 * alpha[2]  # Third EM iteration (rest)
+                        weight = alpha[2]  # Third EM iteration (rest)
                     total_loss += weight * loss_em
                     F_current = F_next  # use updated F in next EM iteration
 
                 # after `for em_iter in range(num_em_iters):`
                 loss = total_loss / float(num_em_iters)  # average over EM iterations
-                loss_mult = loss
-                loss_mult.backward()
-                for M_model, opt in zip(self.M_models, self.M_optimizers):
-                    torch.nn.utils.clip_grad_norm_(M_model.parameters(), max_norm=1.0)
-                    opt.step()
 
+                # NEW: accumulate this sequence loss into the epoch batch loss
+                epoch_loss_sum += total_loss
+
+                # still keep scalar for logging if you want
                 train_loss_sum += loss.detach().item()
+
+            epoch_loss_mean = epoch_loss_sum / float(self.N_B)
+
+            # one backward pass for the whole batch
+            epoch_loss_mean.backward()
+
+            for M_model, opt in zip(self.M_models, self.M_optimizers):
+                torch.nn.utils.clip_grad_norm_(M_model.parameters(), max_norm=1.0)
+                opt.step()
+
+            for RTS_model, opt_rts in zip(self.RTS_models, self.RTS_optimizers):
+                torch.nn.utils.clip_grad_norm_(RTS_model.parameters(), max_norm=1.0)
+                opt_rts.step()
+
+            train_epoch = (epoch_loss_mean/3).item()
 
                 # ---------------- Validation ----------------
             for M_model in self.M_models:
                 M_model.eval()
+            for RTS_model in self.RTS_models:
+                RTS_model.eval()
             cv_loss_sum = 0.0
 
             with torch.no_grad():
@@ -4376,7 +4710,7 @@ class Pipeline_ERTS:
                     T_cv = y_cv.size(-1)
 
                     # choose base F and F_true for this CV sequence
-                    if generate_f is not None:
+                    if generate_f is True:
                         f_index_cv = j // 10
                         F_base_cv = SysModel.F_valid[f_index_cv]
                         F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
@@ -4390,6 +4724,7 @@ class Pipeline_ERTS:
                     for em_iter in range(num_em_iters):
 
                         M_k = self.M_models[em_iter]
+                        self.model = self.RTS_models[em_iter]
 
                         # --- RTS smoother with current F_current_cv ---
                         self.model.update_F(F_current_cv)
@@ -4411,6 +4746,14 @@ class Pipeline_ERTS:
 
                         # -------- stats, same as training --------
                         x_curr = x_s_cv  # [m, T_cv]
+                        ################################################
+                        if epoch % 10 == 0 and j == 2:
+                                # מרחק של F_current לפני העדכון מה-F_true
+                            f_err_before = torch.mean((F_current_cv - F_true_cv) ** 2).item()
+                            x_err_before = torch.mean((x_curr - x_true_cv_seq) ** 2).item()
+                            print(
+                                f"[DEBUG][epoch={epoch} em={em_iter}] F_err_before={f_err_before:.3e}, x_err_before={x_err_before:.3e}")
+                                #######################################
                         x_prev = torch.empty_like(x_curr)
                         x_prev[:, 0] = SysModel.m1x_0.view(-1)
                         x_prev[:, 1:] = x_curr[:, :-1]
@@ -4456,6 +4799,34 @@ class Pipeline_ERTS:
                         dF_cv = M_k(z_cv)
                         dF_cv_mat = dF_cv.view(m, m)
                         F_next_cv = F_current_cv + dF_cv_mat
+################################################################################################################
+                        # if epoch % 10 == 0 and j == 2:
+                        #
+                        #     # RTS עם F_next (רק לצורך בדיקה, בלי גרדיאנט)
+                        #     self.model.update_F(F_next_cv)
+                        #     self.model.InitSequence(SysModel.m1x_0, T)
+                        #     self.model.init_hidden()
+                        #     self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+                        #
+                        #     x_f2 = torch.empty(m, T, device=device)
+                        #     x_s2 = torch.empty(m, T, device=device)
+                        #     for t in range(T):
+                        #         x_f2[:, t] = self.model(y_cv[:, t], None, None, None)
+                        #     x_s2[:, T - 1] = x_f2[:, T - 1]
+                        #     self.model.InitBackward(x_s2[:, T - 1])
+                        #     x_s2[:, T - 2] = self.model(None, x_f2[:, T - 2], x_f2[:, T - 1], None)
+                        #     for t in range(T - 3, -1, -1):
+                        #         x_s2[:, t] = self.model(None, x_f2[:, t], x_f2[:, t + 1], x_s2[:, t + 2])
+                        #
+                        #     x_err_after = torch.mean((x_s2 - x_true_cv_seq) ** 2).item()
+                        #     f_err_after = torch.mean((F_next_cv - F_true_cv) ** 2).item()
+                        #
+                        #     print(
+                        #         f"[DEBUG][epoch={epoch} em={em_iter}] F_err_after={f_err_after:.3e}, x_err_after={x_err_after:.3e}")
+                                #############################################################################################################
+
+
+
 
                         # same loss as train (but no backward)
                         f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
@@ -4468,32 +4839,32 @@ class Pipeline_ERTS:
                         # y_loss_cv = torch.mean((y_hat_cv  - y_cv) ** 2)
                         # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
                         ##########################################################
-                        # if em_iter == num_em_iters - 1:
-                        #     loss_em_cv = 20 * f_loss_cv + reg_cv + x_loss_cv
-                        # else:
-                        #     loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                        if em_iter == num_em_iters - 1:
+                            loss_em_cv = 15*f_loss_cv + reg_cv + x_loss_cv
+                        else:
+                            loss_em_cv =  f_loss_cv + reg_cv + x_loss_cv
                         #########################################################################
-                        loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
                         if em_iter == 0:
                             weight = alpha[0]
                         elif em_iter == 1:
                             weight = alpha[1]
                         else:
-                            weight = 10 * alpha[2]  # if you really want the same scaling as in train
+                            weight = alpha[2]  # if you really want the same scaling as in train
 
                         total_loss_cv += weight * loss_em_cv
                         F_current_cv = F_next_cv
                     cv_loss_seq = total_loss_cv / float(num_em_iters)
                     cv_loss_sum += cv_loss_seq.item()
 
-            train_epoch = train_loss_sum / max(1, self.N_B)
+
             cv_epoch = cv_loss_sum / max(1, self.N_CV)
 
             if cv_epoch < self.MSE_cv_dB_opt:
                 self.MSE_cv_dB_opt = cv_epoch
                 for k in range(num_em_iters):
                     torch.save(self.M_models[k], destination_path_M[k])
-
+                    torch.save(self.RTS_models[k], destination_path_RTS[k])
             print(
                 f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
 
@@ -4632,17 +5003,28 @@ class Pipeline_ERTS:
                     deltaF = model_mstep(z_in)
                     deltaF_mat = deltaF.view(m, m)
                     F_next = F_current + deltaF_mat
+                    #############################################
+
+                    # rho = eigvals.abs().max()
+                    #
+                    # # rho is a scalar complex tensor -> take real part for safety
+                    # rho_real = rho.real
+                    # max_rho = 1.07
+                    # if rho_real > max_rho:
+                    #     scale = (max_rho / rho_real)
+                    #     F_next = F_next * scale
+                    #############################################
 
                     mse_F = torch.mean((F_next - F_true) ** 2)
                     reg = lambda_F * torch.mean(deltaF_mat ** 2)
                     # x-loss: same as in training
                     x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                     ##########################################################
-                    # y-loss (measurement-space loss)
-                    H = SysModel.H.to(device)  # [n, m]
-                    y_hat  = H @ x_curr  # [n, T]
-                    y_loss = torch.mean((y_hat  - y_seq) ** 2)
-                    y_loss_tot.append(y_loss.item())
+                    # # y-loss (measurement-space loss)
+                    # H = SysModel.H.to(device)  # [n, m]
+                    # y_hat  = H @ x_curr  # [n, T]
+                    # y_loss = torch.mean((y_hat  - y_seq) ** 2)
+                    # y_loss_tot.append(y_loss.item())
                     ##########################################################
                     loss_em = 3*mse_F + reg + x_loss
                     x_loss_sum_per_iter[em_iter] += x_loss.item()
@@ -4691,7 +5073,7 @@ class Pipeline_ERTS:
                         print(f"  F-loss (MSE_F)                 = {f_db:.2f} dB")
                         print(f"  x-loss (MSE_x)                 = {x_db:.2f} dB")
                         print(f"  total loss (F + reg + x)       = {tot_db:.2f} dB")
-                        print(f"y_loss = {y_loss_tot[k]:2f}")
+                        # print(f"y_loss = {y_loss_tot[k]:2f}")
 
 
         mean_loss = loss_list.mean().item()
@@ -4730,11 +5112,13 @@ class Pipeline_ERTS:
         all_test_losses = []
         all_f_losses = []
 
+        RTS_models = []
+        for k in range(num_em_iters):
+            rts_k = torch.load(destination_path_RTS[k],weights_only=False,map_location=device).to(device).eval()
+            for p in rts_k.parameters():
+                p.requires_grad_(False)
+            RTS_models.append(rts_k)
 
-        # Load and freeze RTSNet (smoother only)
-        self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
-        for p in self.model.parameters():
-            p.requires_grad_(False)
 
         M_models = []
         for k in range(num_em_iters):
@@ -4779,6 +5163,9 @@ class Pipeline_ERTS:
                     x0 = SysModel.m1x_0
 
                 for em_iter in range(num_em_iters):
+
+                    self.model = RTS_models[em_iter]
+                    M_k = M_models[em_iter]
 
                     # ----- RTS smoother with current F_current -----
                     self.model.update_F(F_current)
@@ -4845,7 +5232,6 @@ class Pipeline_ERTS:
                     ], dim=0).reshape(1, -1)
 
                     # ----- M-step forward only -----
-                    M_k = M_models[em_iter]
                     deltaF = M_k(z_in)
                     deltaF_mat = deltaF.view(m, m)
                     F_next = F_current + deltaF_mat
@@ -4945,22 +5331,20 @@ class Pipeline_ERTS:
 
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0
+
         ######################################################
-        for name, param in model_mstep.named_parameters():
-            if "weight" in name or "bias" in name:
-                param.data.zero_()
+        # for name, param in model_mstep.named_parameters():
+        #     if "weight" in name or "bias" in name:
+        #         param.data.zero_()
         ##################################################
         for epoch in range(self.N_steps):
             # ---------------- Training ----------------
             model_mstep.train()
             train_loss_sum = 0.0
-
-            self.M_optimizer.zero_grad()
             batch_loss_sum = 0.0
             batch_x_before_sum = 0.0
             batch_x_after_sum = 0.0
             batch_f_loss_sum = 0.0
-            model_mstep = self.M_model.train()
             for _ in range(self.N_B):
 
                 # Pick one training sequence
@@ -4970,7 +5354,7 @@ class Pipeline_ERTS:
                 T = y_seq.size(-1)
 
                 # Select F_i and F_true by group
-                if generate_f != None:
+                if generate_f is True:
                     f_index = n_e // 10
                     F_base = SysModel.F_train[f_index]
                     F_true = SysModel.F_train_TRUE[f_index]
@@ -5051,6 +5435,7 @@ class Pipeline_ERTS:
                 F_next = F_current + deltaF_mat
 
                 F_current =F_next
+
                 self.model.update_F(F_current)
 
                 # E-step via frozen RTSNet → x_smooth
@@ -5078,18 +5463,23 @@ class Pipeline_ERTS:
                 # x-loss AFTER M-step (with updated F)
                 x_loss_after = torch.mean((x_smooth - x_true_seq) ** 2)
 
-                loss = 0 * f_loss + reg + x_loss_after
-                batch_loss_sum += loss
-                batch_x_before_sum += x_loss_before
-                batch_x_after_sum += x_loss_after
-                batch_f_loss_sum += f_loss
+                # ---- compute loss ----
+                loss =  5*f_loss + reg + x_loss_after
+
+                # ---- backward + step (one SGD step per sequence) ----
+                self.M_optimizer.zero_grad()
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+                self.M_optimizer.step()
+
+                # ---- only for logging / printing ----
+                batch_loss_sum     += loss.detach()
+                batch_x_before_sum += x_loss_before.detach()
+                batch_x_after_sum  += x_loss_after.detach()
+                batch_f_loss_sum   += f_loss.detach()
 
             batch_loss = batch_loss_sum / self.N_B
-            batch_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
-            self.M_optimizer.step()
-
-            train_loss_sum += batch_loss.detach().item()
+            train_loss_sum += batch_loss.item()
             # averages over sequences in this batch
             mean_x_before = batch_x_before_sum / self.N_B
             mean_x_after  = batch_x_after_sum / self.N_B
@@ -5119,7 +5509,7 @@ class Pipeline_ERTS:
                     T_cv = y_cv.size(-1)
 
                     # choose base F and F_true for this CV sequence
-                    if generate_f is not None:
+                    if generate_f is True:
                         f_index_cv = j // 10
                         F_base_cv = SysModel.F_valid[f_index_cv]
                         F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
@@ -5220,7 +5610,7 @@ class Pipeline_ERTS:
                     reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
                     x_loss_cv = torch.mean((x_s_cv - x_true_cv_seq) ** 2)
 
-                    cv_loss_seq = 0* f_loss_cv + reg_cv + x_loss_cv
+                    cv_loss_seq =5*f_loss_cv + reg_cv + x_loss_cv
 
                     cv_loss_sum += cv_loss_seq.item()
 
@@ -5276,6 +5666,8 @@ class Pipeline_ERTS:
         loss_list = torch.zeros(N_T, device=device)
         x_loss_sum = 0.0
         x_loss_sum_before = 0.0
+        f_loss_sum_before = 0.0
+        f_loss_sum_after = 0.0
         final_F_list = []
         final_x_list = []
         with torch.no_grad():
@@ -5424,6 +5816,9 @@ class Pipeline_ERTS:
                     x_losses_mse.append(x_loss.item())
 
                 # store final F and final x_smooth for this sequence (after last EM iter)
+                mse_F_init = torch.mean((F_base - F_true) ** 2).item()
+                f_loss_sum_before += mse_F_init
+                f_loss_sum_after += mse_F.item()
                 final_F_list.append(F_current.detach().clone())   # [m, m]
                 final_x_list.append(x_smooth[:, -1].unsqueeze(-1).detach().clone())      # [m, T]
                         # final loss for this sequence (already weighted)
@@ -5435,7 +5830,8 @@ class Pipeline_ERTS:
                     print("F_init (F_base):\n", F_base.detach())
 
                     mse_F_init = torch.mean((F_base - F_true) ** 2).item()
-                    print(f"Initial F MSE loss = {mse_F_init:.6e}")
+                    mse_F_init_db = 10.0 * math.log10(mse_F_init)
+                    print(f"Initial F MSE loss = {mse_F_init_db:.2f}db")
 
                     print(f"x-loss BEFORE M-step = {x_before_db:.2f} dB")
                     print(f"x-loss AFTER  M-step = {x_after_db:.2f} dB")
@@ -5469,4 +5865,2491 @@ class Pipeline_ERTS:
         mean_x_mse_per_iter_np = mean_x_mse_after_tensor.detach()
         mean_x_mse_per_iter_db_np = mean_x_mse_after_db
 
+        mean_f_mse_before = f_loss_sum_before / float(N_T)
+        mean_f_mse_before_tensor = torch.tensor([mean_f_mse_before], device=device)
+        mean_f_mse_before_db = (10.0 * torch.log10(mean_f_mse_before_tensor)).detach()
+
+        mean_f_mse_after = f_loss_sum_after / float(N_T)
+        mean_f_mse_after_tensor = torch.tensor([mean_f_mse_after], device=device)
+        mean_f_mse_after_db = (10.0 * torch.log10(mean_f_mse_after_tensor)).detach()
+
+        print(f"[M-step TEST] mean F-MSE BEFORE M-step = {mean_f_mse_before:.6e} "
+              f"({mean_f_mse_before_db[0].item():.2f} dB)")
+        print(f"[M-step TEST] mean F-MSE AFTER  M-step = {mean_f_mse_after:.6e} "
+              f"({mean_f_mse_after_db[0].item():.2f} dB)")
         return mean_x_mse_per_iter_np,mean_x_mse_per_iter_db_np, final_F_list,final_x_list
+
+
+
+
+
+    def train_mstep_net_with_p(self, SysModel, cv_input, cv_target, train_input, train_target,
+                            destination_path_M, destination_path_RTS,destination_path_PSMOOTH, num_em_iters=3,
+                            alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+            """
+            Single-function M-step training (no helpers, no .to(...)).
+            - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+            - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+            - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+            """
+                # Basic sizes
+            self.N_E = len(train_input)
+            self.N_CV = len(cv_input)
+            m = SysModel.m
+            dev = self.device
+
+            # Load and freeze RTSNet (smoother only)
+            self.model = torch.load(destination_path_RTS, weights_only=False).to(self.device).train()
+            for p in self.model.parameters():
+                p.requires_grad_(False)
+
+            # 2) Load and FREEZE PsmoothNet (for P_smooth)
+            self.psmooth_model = torch.load(destination_path_PSMOOTH,
+                                            weights_only=False,
+                                            map_location=self.device).to(self.device).train()
+            for p in self.psmooth_model.parameters():
+                p.requires_grad_(False)
+
+
+            # M-step model and optimizer
+            model_mstep = self.M_model.train()
+
+
+            self.MSE_cv_dB_opt = 1000
+            self.MSE_cv_idx_opt = 0
+
+
+            for epoch in range(self.N_steps):
+                # ---------------- Training ----------------
+                model_mstep.train()
+                train_loss_sum = 0.0
+
+
+                for _ in range(self.N_B):
+                    self.M_optimizer.zero_grad()
+
+                    # Pick one training sequence
+                    n_e = random.randint(0, self.N_E - 1)
+                    y_seq = train_input[n_e]   # [n, T]
+                    x_true_seq = train_target[n_e]  # [m, T]
+                    T = y_seq.size(-1)
+
+                    # Select F_i and F_true by group
+                    if generate_f is True:
+                        f_index = n_e // 10
+                        F_base = SysModel.F_train[f_index]
+                        F_true = SysModel.F_train_TRUE[f_index]
+                    else:
+                        F_base = SysModel.F_train[n_e]
+                        F_true = SysModel.F_train_TRUE[n_e]
+                    # --------- EM unrolling over F ---------
+                    F_current = F_base  # this will be updated each EM iteration
+                    total_loss = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        self.model.update_F(F_current)
+
+                        # ---------- E-STEP: RTSNET FOR x_smooth + sigma_list + smoother_gain_list ----------
+                        self.model.InitSequence(SysModel.m1x_0, T)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                        x_forward = torch.empty(m, T, device=dev)
+                        x_smooth = torch.empty(m, T, device=dev)
+
+                        sigma_list = []
+                        smoother_gain_list = []
+
+                        # Forward pass
+                        for t in range(T):
+                            x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                            # store encoded covariance representation
+                            sigma_list.append(self.model.h_Sigma.clone())
+
+                        # Backward pass for x_smooth
+                        x_smooth[:, T - 1] = x_forward[:, T - 1]
+                        self.model.InitBackward(x_smooth[:, T - 1])
+
+                        x_smooth[:, T - 2] = self.model(None,
+                                                        x_forward[:, T - 2],
+                                                        x_forward[:, T - 1],
+                                                        None)
+                        smoother_gain_list.append(self.model.SGain.clone())
+
+                        for t in range(T - 3, -1, -1):
+                            x_smooth[:, t] = self.model(None,
+                                                        x_forward[:, t],
+                                                        x_forward[:, t + 1],
+                                                        x_smooth[:, t + 2])
+                            smoother_gain_list.append(self.model.SGain.clone())
+
+                        # ---------- PsmoothNet: P_smoothed_seq and its average ----------
+                        dt = y_seq.dtype
+                        P_smoothed_seq = torch.empty(m, m, T, device=dev, dtype=dt)
+                        dummy_sgain = torch.zeros(1, 1, m * m, device=dev, dtype=dt)
+
+                        # Final time step
+                        sigma_T = sigma_list[-1]
+                        self.psmooth_model.start = 0
+                        P_flat = self.psmooth_model(sigma_T, dummy_sgain).view(-1)
+                        P_smoothed_seq[:, :, T - 1] = self.psmooth_model.enforce_covariance_properties(
+                            P_flat.view(m, m))
+
+                        # Backward in time for P_t
+                        for t in range(T - 2, -1, -1):
+                            sigma_t = sigma_list[t]
+                            sgain_index = (T - 2) - t
+                            sgain_t = smoother_gain_list[sgain_index].reshape(1, 1, -1)
+                            P_flat = self.psmooth_model(sigma_t, sgain_t)
+                            P_smoothed_seq[:, :, t] = self.psmooth_model.enforce_covariance_properties(
+                                P_flat.view(-1).view(m, m))
+
+                        # Average P_smooth over time: P̄ = (1/T) Σ P_t
+                        P_avg = P_smoothed_seq.mean(dim=2)  # [m, m]
+
+                        # ---------- Stats for M-network using x_smooth & P_avg ----------
+
+                        x_curr = x_smooth  # [m, T]
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                        x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}
+
+                        # A1, A2
+                        A1 = (x_curr @ x_prev.T) / T
+                        A2 = (x_prev @ x_prev.T) / T
+                        # Predicted previous state and delta_x
+                        x_minus = F_current @ x_prev  # [m, T]
+                        delta_x = x_curr - x_minus  # [m, T]
+
+                        # Cross term C_{Δx, x⁻} = 1/T Σ Δx_t x⁻_t^T
+                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                        # y_hat and innovation covariance S_nu
+                        if non_linear_h:
+                            y_hat_list = []
+                            for t in range(T):
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_t_hat = SysModel.h(x_t)
+                                y_hat_list.append(y_t_hat.view(-1))
+                            Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                        else:
+                            H = SysModel.H
+                            Hx_curr = H @ x_curr  # [n, T]
+
+                        nu = y_seq - Hx_curr
+                        nu_mean = nu.mean(dim=1, keepdim=True)
+                        nu_centered = nu - nu_mean
+                        S_nu = (nu_centered @ nu_centered.T) / T
+
+                        delta_mean = delta_x.mean(dim=1, keepdim=True)
+                        delta_centered = delta_x - delta_mean
+                        S_delta_x = (delta_centered @ delta_centered.T) / T
+
+                        # ---------- BUILD INPUT z_in = [A1, A2, S_delta_x, S_nu, C_delta_x_xminus, P_avg] ----------
+                        z_in = torch.cat([
+                            A1.reshape(-1),
+                            A2.reshape(-1),
+                            S_delta_x.reshape(-1),
+                            S_nu.reshape(-1),
+                            C_delta_x_xminus.reshape(-1),
+                            P_avg.reshape(-1)  # <-- new
+                        ], dim=0).reshape(1, -1)
+
+                        # ---------- M-step network: predict ΔF and update ----------
+                        deltaF = model_mstep(z_in)
+                        deltaF_mat = deltaF.view(m, m)
+                        F_next = F_current + deltaF_mat
+
+                        # Loss components
+                        f_loss = torch.mean((F_next - F_true) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+
+                        # EM-iteration weighting
+                        if em_iter == num_em_iters - 1:
+                            loss_em = 15 * f_loss + reg + x_loss
+                        else:
+                            loss_em = f_loss + reg + x_loss
+
+                        if em_iter == 0:
+                            weight = alpha[0]
+                        elif em_iter == 1:
+                            weight = alpha[1]
+                        else:
+                            weight = alpha[2]
+
+                        total_loss += weight * loss_em
+                        F_current = F_next
+
+
+                    # after `for em_iter in range(num_em_iters):`
+                    loss = total_loss / float(num_em_iters)   # average over EM iterations
+                    loss_mult = loss
+                    loss_mult.backward()
+                    torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+                    self.M_optimizer.step()
+
+                    train_loss_sum += loss.detach().item()
+
+                # ---------------- Validation ----------------
+                model_mstep.eval()
+                cv_loss_sum = 0.0
+
+                with torch.no_grad():
+                    for j in range(self.N_CV):
+                        y_cv = cv_input[j]  # [n, T_cv]
+                        x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                        T_cv = y_cv.size(-1)
+                        m = SysModel.m
+
+                        # choose base F and F_true for this CV sequence
+                        if generate_f is True:
+                            f_index_cv = j // 10
+                            F_base_cv = SysModel.F_valid[f_index_cv]
+                            F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                        else:
+                            F_base_cv = SysModel.F_valid[j]
+                            F_true_cv = SysModel.F_valid_TRUE[j]
+
+                        F_current_cv = F_base_cv.clone()
+                        total_loss_cv = 0.0
+
+                        for em_iter in range(num_em_iters):
+
+                            # --- RTS smoother with current F_current_cv ---
+                            self.model.update_F(F_current_cv)
+                            self.model.InitSequence(SysModel.m1x_0.to(dev), T_cv)
+                            self.model.init_hidden()
+                            self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(dev)
+
+                            dev = y_cv.device
+                            dt = y_cv.dtype
+
+                            x_f_cv = torch.empty(m, T_cv, device=dev, dtype=dt)
+                            x_s_cv = torch.empty(m, T_cv, device=dev, dtype=dt)
+
+                            sigma_list_cv = []
+                            smoother_gain_list_cv = []
+
+                            # forward pass
+                            for t in range(T_cv):
+                                x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+                                sigma_list_cv.append(self.model.h_Sigma.clone())
+
+                            # backward pass for x_s_cv
+                            x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                            self.model.InitBackward(x_s_cv[:, T_cv - 1])
+
+                            x_s_cv[:, T_cv - 2] = self.model(None,
+                                                             x_f_cv[:, T_cv - 2],
+                                                             x_f_cv[:, T_cv - 1],
+                                                             None)
+                            smoother_gain_list_cv.append(self.model.SGain.clone())
+
+                            for t in range(T_cv - 3, -1, -1):
+                                x_s_cv[:, t] = self.model(None,
+                                                          x_f_cv[:, t],
+                                                          x_f_cv[:, t + 1],
+                                                          x_s_cv[:, t + 2])
+                                smoother_gain_list_cv.append(self.model.SGain.clone())
+
+                            # --- PsmoothNet: compute P_smoothed_seq and P_avg (no grad) ---
+                            P_smoothed_seq_cv = torch.empty(m, m, T_cv, device=dev, dtype=dt)
+                            dummy_sgain = torch.zeros(1, 1, m * m, device=dev, dtype=dt)
+
+                            # final time step
+                            sigma_T = sigma_list_cv[-1]
+                            self.psmooth_model.start = 0
+                            P_flat = self.psmooth_model(sigma_T, dummy_sgain).view(-1)
+                            P_smoothed_seq_cv[:, :, T_cv - 1] = self.psmooth_model.enforce_covariance_properties(
+                                P_flat.view(m, m)
+                            )
+
+                            # backward in time for P_t
+                            for t in range(T_cv - 2, -1, -1):
+                                sigma_t = sigma_list_cv[t]
+                                sgain_index = (T_cv - 2) - t
+                                sgain_t = smoother_gain_list_cv[sgain_index].reshape(1, 1, -1)
+                                P_flat = self.psmooth_model(sigma_t, sgain_t)
+                                P_smoothed_seq_cv[:, :, t] = self.psmooth_model.enforce_covariance_properties(
+                                    P_flat.view(-1).view(m, m)
+                                )
+
+                            # average P_smooth over time
+                            P_avg_cv = P_smoothed_seq_cv.mean(dim=2)  # [m, m]
+
+                            # -------- stats, same as training but with P_avg_cv and NO S_delta_x / C_delta_x --------
+                            x_curr = x_s_cv  # [m, T_cv]
+                            x_prev = torch.empty_like(x_curr)
+                            x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                            x_prev[:, 1:] = x_curr[:, :-1]
+
+                            A1_cv = (x_curr @ x_prev.T) / T_cv
+                            A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                            # Predicted previous state and delta_x for CV
+                            x_minus_cv = F_current_cv @ x_prev  # [m, T_cv]
+                            delta_x_cv = x_curr - x_minus_cv  # [m, T_cv]
+
+                            # Cross term C_{Δx, x⁻} for CV
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                            if non_linear_h:
+                                y_hat_cv_list = []
+                                for t in range(T_cv):
+                                    x_t = x_curr[:, t].view(SysModel.m, 1)
+                                    y_t_hat = SysModel.h(x_t)  # non-linear h
+                                    y_hat_cv_list.append(y_t_hat.view(-1))
+                                Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                            else:
+                                H = SysModel.H.to(device)
+                                Hx_curr_cv = H @ x_curr
+
+                            nu_cv = y_cv - Hx_curr_cv
+                            nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                            nu_centered_cv = nu_cv - nu_mean_cv
+                            S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                            delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                            delta_centered_cv = delta_x_cv - delta_mean_cv
+                            S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                            z_cv = torch.cat([
+                                A1_cv.reshape(-1),
+                                A2_cv.reshape(-1),
+                                S_delta_x_cv.reshape(-1),
+                                S_nu_cv.reshape(-1),
+                                C_delta_x_xminus_cv.reshape(-1),
+                                P_avg_cv.reshape(-1)  # <-- new
+                            ], dim=0).reshape(1, -1)
+
+                            # --- M-step forward only (no grad) ---
+                            dF_cv = model_mstep(z_cv)
+                            dF_cv_mat = dF_cv.view(m, m)
+                            F_next_cv = F_current_cv + dF_cv_mat
+
+                            # same loss as train (but no backward)
+                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)
+                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+
+                            if em_iter == num_em_iters - 1:
+                                loss_em_cv = 15 * f_loss_cv + reg_cv + x_loss_cv
+                            else:
+                                loss_em_cv =  f_loss_cv + reg_cv + x_loss_cv
+
+                            if em_iter == 0:
+                                weight = alpha[0]
+                            elif em_iter == 1:
+                                weight = alpha[1]
+                            else:
+                                weight = alpha[2]  # keep same scaling as train
+
+                            total_loss_cv += weight * loss_em_cv
+                            F_current_cv = F_next_cv
+
+                        cv_loss_seq = total_loss_cv / float(num_em_iters)
+                        cv_loss_sum += cv_loss_seq.item()
+
+                    train_epoch = train_loss_sum / max(1, self.N_B)
+                    cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+                    if cv_epoch < self.MSE_cv_dB_opt:
+                        self.MSE_cv_dB_opt = cv_epoch
+                        torch.save(model_mstep, destination_path_M)
+
+                    print(
+                        f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+    def test_mstep_net_with_p(self, SysModel, test_input, test_target,
+                              destination_path_RTS, destination_path_M, destination_path_PSMOOTH,
+                              num_em_iters=3,
+                              alpha=(0.0, 0.0, 1.0), lambda_F=1e-3,
+                              generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False):
+        """
+        Testing-only version for the M-step network WITH Psmooth.
+        - Freeze RTSNet (destination_path_RTS) to compute x_smooth and sigma_list.
+        - Freeze PsmoothNet (destination_path_PSMOOTH) to compute P_smooth and P_avg.
+        - Use M-step network (destination_path_M) to predict ΔF.
+        - z_in = [A1, A2, S_nu, C_delta_x_xminus, F_current, P_avg]  (NO S_delta_x).
+        """
+
+        N_T = len(test_input)
+        m = SysModel.m
+
+        all_test_losses = []
+        all_f_losses = []
+
+        # Load and freeze RTSNet (smoother only)
+        self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # Load and freeze PsmoothNet
+        self.psmooth_model = torch.load(destination_path_PSMOOTH,
+                                        weights_only=False,
+                                        map_location=device).to(device).eval()
+        for p in self.psmooth_model.parameters():
+            p.requires_grad_(False)
+
+        # Load M-step network from checkpoint (NO training)
+        model_mstep = torch.load(destination_path_M, weights_only=False).to(device).eval()
+
+        loss_list = torch.zeros(N_T, device=device)
+        x_loss_sum_per_iter = torch.zeros(num_em_iters, device=device)
+        final_F_list = []
+        final_x_list = []
+
+        with torch.no_grad():
+            for j in range(N_T):
+                # ----- one test sequence -----
+                y_seq = test_input[j]  # [n, T]
+                x_true_seq = test_target[j]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_base and F_true for this test sequence
+                if generate_f is True:
+                    f_index = j // 10
+                    F_base = SysModel.F_test[f_index].to(device)
+                    F_true = SysModel.F_test_TRUE[f_index].to(device)
+                else:
+                    F_base = SysModel.F_test[j].to(device)
+                    F_true = SysModel.F_test_TRUE[j].to(device)
+
+                F_current = F_base.clone()
+                total_loss = 0.0
+                F_estimates = []
+                F_losses_mse = []
+                F_losses_total = []
+                x_losses_mse = []
+                y_loss_tot = []
+
+                # initial x0, P0 (for EM initialization)
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+
+                for em_iter in range(num_em_iters):
+
+                    # ----- RTS smoother with current F_current -----
+                    self.model.update_F(F_current)
+                    self.model.InitSequence(x0.clone().detach(), T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = P0.clone().detach()
+
+                    dev = y_seq.device
+                    dt = y_seq.dtype
+
+                    x_forward = torch.empty(m, T, device=dev, dtype=dt)
+                    x_smooth = torch.empty(m, T, device=dev, dtype=dt)
+
+                    sigma_list = []
+                    smoother_gain_list = []
+
+                    # forward pass
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                        sigma_list.append(self.model.h_Sigma.clone())
+
+                    # backward pass for x_smooth
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+                    self.model.InitBackward(x_smooth[:, T - 1])
+
+                    x_smooth[:, T - 2] = self.model(
+                        None,
+                        x_forward[:, T - 2],
+                        x_forward[:, T - 1],
+                        None
+                    )
+                    smoother_gain_list.append(self.model.SGain.clone())
+
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(
+                            None,
+                            x_forward[:, t],
+                            x_forward[:, t + 1],
+                            x_smooth[:, t + 2]
+                        )
+                        smoother_gain_list.append(self.model.SGain.clone())
+
+                    # ----- PsmoothNet: compute P_smoothed_seq and P_avg (no grad) -----
+                    P_smoothed_seq = torch.empty(m, m, T, device=dev, dtype=dt)
+                    dummy_sgain = torch.zeros(1, 1, m * m, device=dev, dtype=dt)
+
+                    # final time step
+                    sigma_T = sigma_list[-1]
+                    self.psmooth_model.start = 0
+                    P_flat = self.psmooth_model(sigma_T, dummy_sgain).view(-1)
+                    P_smoothed_seq[:, :, T - 1] = self.psmooth_model.enforce_covariance_properties(
+                        P_flat.view(m, m)
+                    )
+
+                    # backward in time for P_t
+                    for t in range(T - 2, -1, -1):
+                        sigma_t = sigma_list[t]
+                        sgain_index = (T - 2) - t
+                        sgain_t = smoother_gain_list[sgain_index].reshape(1, 1, -1)
+                        P_flat = self.psmooth_model(sigma_t, sgain_t)
+                        P_smoothed_seq[:, :, t] = self.psmooth_model.enforce_covariance_properties(
+                            P_flat.view(-1).view(m, m)
+                        )
+
+                    # average P_smooth over time
+                    P_avg = P_smoothed_seq.mean(dim=2)  # [m, m]
+
+                    # ----- stats for M-network (same as training) -----
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = x0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}
+
+                    A1 = (x_curr @ x_prev.T) / T
+                    A2 = (x_prev @ x_prev.T) / T
+
+                    x_minus = F_current @ x_prev  # [m, T]
+                    delta_x = x_curr - x_minus  # [m, T]
+
+                    # C_{Δx, x⁻} = 1/T Σ Δx_t x⁻_t^T
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)
+                    delta_centered = delta_x - delta_mean
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+
+                    # ---------- linear vs non-linear h ----------
+                    if non_linear_h:
+                        y_hat_list = []
+                        for t in range(T):
+                            x_t = x_curr[:, t].view(SysModel.m, 1)
+                            y_t_hat = SysModel.h(x_t)
+                            y_hat_list.append(y_t_hat.view(-1))
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H.to(device)
+                        Hx_curr = H @ x_curr  # [n, T]
+
+                    nu = y_seq - Hx_curr
+                    nu_mean = nu.mean(dim=1, keepdim=True)
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+
+                    # ---------- BUILD INPUT z_in (NO S_delta_x) ----------
+                    z_in = torch.cat([
+                        A1.reshape(-1),
+                        A2.reshape(-1),
+                        S_delta_x.reshape(-1),
+                        S_nu.reshape(-1),
+                        C_delta_x_xminus.reshape(-1),
+                        P_avg.reshape(-1)  # same as training
+                    ], dim=0).reshape(1, -1)
+
+                    # ----- M-step forward only -----
+                    deltaF = model_mstep(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+
+                    mse_F = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+
+                    loss_em = 3 * mse_F + reg + x_loss
+                    x_loss_sum_per_iter[em_iter] += x_loss.item()
+
+                    # same alpha weighting as in training
+                    if em_iter == 0:
+                        weight = alpha[0]
+                    elif em_iter == 1:
+                        weight = alpha[1]
+                    else:
+                        weight = alpha[2]
+
+                    total_loss += weight * loss_em
+                    F_current = F_next
+
+                    all_test_losses.append(loss_em.item())
+                    all_f_losses.append(mse_F.item())
+
+                    if j % 5 == 0:
+                        F_estimates.append(F_next.detach())
+                        F_losses_mse.append(mse_F.item())
+                        F_losses_total.append(loss_em.item())
+                        x_losses_mse.append(x_loss.item())
+
+                # store final F and final x_smooth for this sequence (after last EM iter)
+                final_F_list.append(F_current.detach().clone())  # [m, m]
+                final_x_list.append(x_curr[:, -1].unsqueeze(-1).detach().clone())
+
+                # final loss for this sequence (already weighted)
+                loss_list[j] = total_loss / float(num_em_iters)
+
+                if j % 5 == 0:
+                    print(f"\n[M-step TEST with P] sequence {j} summary")
+                    print("F_true:\n", F_true.detach())
+                    print("F_init (F_base):\n", F_base.detach())
+                    mse_F_init = torch.mean((F_base - F_true) ** 2).item()
+                    print(f"Initial F MSE loss = {mse_F_init:.6e}")
+                    for k, (F_est, f_mse, x_mse, total_val) in enumerate(
+                            zip(F_estimates, F_losses_mse, x_losses_mse, F_losses_total)):
+                        f_db = 10.0 * math.log10(f_mse)
+                        x_db = 10.0 * math.log10(x_mse)
+                        tot_db = 10.0 * math.log10(total_val)
+                        print(f"\n  EM iter {k + 1}:")
+                        print("  F_est:\n", F_est)
+                        print(f"  F-loss (MSE_F)           = {f_db:.2f} dB")
+                        print(f"  x-loss (MSE_x)           = {x_db:.2f} dB")
+                        print(f"  total loss (F+reg+x)     = {tot_db:.2f} dB")
+
+        mean_loss = loss_list.mean().item()
+        print(f"[M-step TEST with P] mean_loss={mean_loss:.6f}")
+
+        # average x-MSE for each EM iteration over all sequences
+        mean_x_mse_per_iter = x_loss_sum_per_iter / float(N_T)
+        print("[M-step TEST with P] Mean x-MSE per EM iteration:")
+        for k in range(num_em_iters):
+            mse_k = mean_x_mse_per_iter[k].item()
+            db_k = 10.0 * math.log10(mse_k)
+            print(f"  EM iter {k + 1}: mean x-MSE = {mse_k:.6e}  ({db_k: .2f} dB)")
+
+        mean_x_mse_per_iter_np = mean_x_mse_per_iter.detach()
+        mean_x_mse_per_iter_db_np = (10.0 * torch.log10(mean_x_mse_per_iter)).detach()
+
+        return mean_x_mse_per_iter_np, mean_x_mse_per_iter_db_np, final_F_list, final_x_list
+
+    def no_rts_end_To_end_m_net(self, SysModel, cv_input, cv_target, train_input, train_target,
+                         destination_path_M, load_base_m_mmodel=None, load_rts=None,
+                         num_em_iters=3,
+                         alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+        """
+        Single-function M-step training (no helpers, no .to(...)).
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+        - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+        """
+        # Basic sizes
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+        m = SysModel.m
+
+        # Load a single RTSNet and freeze it (same for all EM iterations)
+        self.RTS_model = torch.load(load_rts, weights_only=False).to(self.device)
+        self.RTS_model.train()
+        for p in self.RTS_model.parameters():
+            p.requires_grad = False
+
+
+        self.M_models = []
+        if load_base_m_mmodel != None:
+            for i in range(num_em_iters):
+                M_model = torch.load(load_base_m_mmodel, map_location=self.device, weights_only=False).to(
+                    self.device)
+                self.M_models.append(M_model.train())
+        else:
+            for i in range(num_em_iters):
+                M_model = copy.deepcopy(self.M_model)
+                self.M_models.append(M_model.train())
+
+        self.M_optimizers = []
+
+        stable_lr = self.learningRate * 0.1
+        for i in range(num_em_iters):
+            self.M_optimizers.append(
+                torch.optim.Adam(self.M_models[i].parameters(), lr=stable_lr, weight_decay=self.weightDecay))
+
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            for M_model in self.M_models:
+                M_model.train()
+            self.RTS_model.train()
+            train_loss_sum = 0.0
+
+            # zero grad for all M nets
+            for opt in self.M_optimizers:
+                opt.zero_grad()
+            epoch_loss_sum = 0.0
+
+            for _ in range(self.N_B):
+
+                # Pick one training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_seq = train_input[n_e]  # [n, T]
+                x_true_seq = train_target[n_e]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_i and F_true by group
+                if generate_f is True:
+                    f_index = n_e // 10
+                    F_base = SysModel.F_train[f_index]
+                    F_true = SysModel.F_train_TRUE[f_index]
+                else:
+                    F_base = SysModel.F_train[n_e]
+                    F_true = SysModel.F_train_TRUE[n_e]
+                # --------- EM unrolling over F ---------
+                F_current = F_base  # this will be updated each EM iteration
+                total_loss_12 = 0.0
+                total_loss_3 = 0.0
+
+                for em_iter in range(num_em_iters):
+
+
+                    M_k = self.M_models[em_iter]
+                    self.model = self.RTS_model
+
+                    self.model.update_F(F_current)
+
+                    # E-step via frozen RTSNet → x_smooth
+                    self.model.InitSequence(SysModel.m1x_0, T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ---------------- Stats for M-network ----------------
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                    # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                    A1 = (x_curr @ x_prev.T) / T
+                    # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                    A2 = (x_prev @ x_prev.T) / T
+                    # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                    x_minus = F_current @ x_prev  # [m, T_eff]
+                    # Δx_t = x_t - F*x_{t-1|T}
+                    delta_x = x_curr - x_minus  # [m, T]
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                    delta_centered = delta_x - delta_mean
+                    # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+                    if non_linear_h:
+                        # y_hat_t = h(x_t) for each t
+                        y_hat_list = []
+                        for t in range(T):
+                            # shape [m] -> whatever h expects; .view(m,1) is safe with your linear h
+                            x_t = x_curr[:, t].view(SysModel.m, 1)
+                            y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                            y_hat_list.append(y_t_hat.view(-1))
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H
+                        Hx_curr = H @ x_curr  # [n, T]
+                    nu = y_seq - Hx_curr
+                    # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                    nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+                    # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+
+                    if em_iter == num_em_iters - 1:
+                        # last iter: detach so f3 won't affect M1/M2
+                        F_for_update = F_current.detach()
+                        z_in = torch.cat([A1.reshape(-1).detach(), A2.reshape(-1).detach(), S_delta_x.reshape(-1).detach(), S_nu.reshape(-1).detach(),
+                                          C_delta_x_xminus.detach().reshape(-1),
+                                          F_for_update.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
+                    else:
+                        F_for_update = F_current
+                        z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
+                                          C_delta_x_xminus.reshape(-1),
+                                          F_for_update.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                    # Predict ΔF and update F
+                    deltaF = M_k(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_for_update  + deltaF_mat
+
+                    # Loss: Frobenius(F_next - F_true)^2 + regularization
+                    f_loss = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    ##########################################################
+                    # # y-loss (measurement-space loss)
+                    # H = SysModel.H.to(device)  # [n, m]
+                    # y_hat = H @ x_curr  # [n, T]
+                    # y_loss = torch.mean((y_hat - y_seq) ** 2)
+                    # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
+                    ##########################################################
+
+                    # loss_em = 3 * f_loss + reg + x_loss
+                    # Apply your specific weighting: 0.05, 0.1, 0.85
+                    if em_iter == 0:
+                        weight = alpha[0]  # First EM iteration
+                    elif em_iter == 1:
+                        weight = alpha[1]  # Second EM iteration
+                    else:
+                        weight = alpha[2]  # Third EM iteration (rest)
+
+                    if em_iter < num_em_iters - 1:
+                        # Iter 1 & 2:
+                        #  - f1,x1,f2,x2 go into total_loss_12 (train M1,M2)
+                        loss_iter_12 = 0.5*f_loss + reg + x_loss
+                        total_loss_12 += weight * loss_iter_12
+                    else:
+                        # Iter 3:
+                        #  - x3 goes to total_loss_12 (so M1,M2 see it)
+                        #  - f3 goes to total_loss_3 (trains M3 only)
+                        total_loss_12 += weight * x_loss
+                        total_loss_3 += weight * (f_loss + reg)
+
+                    F_current = F_next  # use updated F in next EM iteration
+
+                # after `for em_iter in range(num_em_iters):`
+                total_loss = total_loss_12 + total_loss_3  # full loss used for backward
+
+                loss = total_loss / float(num_em_iters)  # for logging
+
+                epoch_loss_sum += total_loss
+                train_loss_sum += loss.detach().item()
+
+            epoch_loss_mean = epoch_loss_sum / float(self.N_B)
+            # one backward pass for the whole batch
+            epoch_loss_mean.backward()
+
+            for idx, M_model in enumerate(self.M_models):
+                grad_norm = 0.0
+                for p in M_model.parameters():
+                    if p.grad is not None:
+                        grad_norm += p.grad.norm().item()
+                print(f"[DEBUG] epoch={epoch} M{idx + 1} grad_norm={grad_norm:.3e}")
+
+            for M_model, opt in zip(self.M_models, self.M_optimizers):
+                torch.nn.utils.clip_grad_norm_(M_model.parameters(), max_norm=1.0)
+                opt.step()
+
+            train_epoch = epoch_loss_mean.item()
+
+            # ---------------- Validation ----------------
+            for M_model in self.M_models:
+                M_model.eval()
+            self.RTS_model.eval()
+            cv_loss_sum = 0.0
+
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    total_loss_12_cv = 0.0
+                    total_loss_3_cv = 0.0
+                    y_cv = cv_input[j]  # [n, T_cv]
+                    x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                    T_cv = y_cv.size(-1)
+
+                    # choose base F and F_true for this CV sequence
+                    if generate_f is True:
+                        f_index_cv = j // 10
+                        F_base_cv = SysModel.F_valid[f_index_cv]
+                        F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                    else:
+                        F_base_cv = SysModel.F_valid[j]
+                        F_true_cv = SysModel.F_valid_TRUE[j]
+
+                    F_current_cv = F_base_cv.clone()
+                    total_loss_cv = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        M_k = self.M_models[em_iter]
+                        self.model = self.RTS_model
+
+                        # --- RTS smoother with current F_current_cv ---
+                        self.model.update_F(F_current_cv)
+                        self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                        x_f_cv = torch.empty(m, T_cv, device=device)
+                        x_s_cv = torch.empty(m, T_cv, device=device)
+
+                        for t in range(T_cv):
+                            x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                        x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                        self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                        x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                        for t in range(T_cv - 3, -1, -1):
+                            x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                        # -------- stats, same as training --------
+                        x_curr = x_s_cv  # [m, T_cv]
+                        ################################################
+                        if epoch % 10 == 0 and j == 2:
+                            # מרחק של F_current לפני העדכון מה-F_true
+                            f_err_before = torch.mean((F_current_cv - F_true_cv) ** 2).item()
+                            x_err_before = torch.mean((x_curr - x_true_cv_seq) ** 2).item()
+                            print(
+                                f"[DEBUG][epoch={epoch} em={em_iter}] F_err_before={f_err_before:.3e}, x_err_before={x_err_before:.3e}")
+                            #######################################
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+
+                        A1_cv = (x_curr @ x_prev.T) / T_cv
+                        A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                        x_minus_cv = F_current_cv @ x_prev
+                        delta_x_cv = x_curr - x_minus_cv
+
+                        delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                        delta_centered_cv = delta_x_cv - delta_mean_cv
+                        S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                        if non_linear_h:
+                            y_hat_cv_list = []
+                            for t in range(T_cv):
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_t_hat = SysModel.h(x_t)  # non-linear h
+                                y_hat_cv_list.append(y_t_hat.view(-1))
+                            Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                        else:
+                            H = SysModel.H.to(device)
+                            Hx_curr_cv = H @ x_curr
+                        nu_cv = y_cv - Hx_curr_cv
+
+                        nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                        nu_centered_cv = nu_cv - nu_mean_cv
+                        S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                        z_cv = torch.cat([
+                            A1_cv.reshape(-1),
+                            A2_cv.reshape(-1),
+                            S_delta_x_cv.reshape(-1),
+                            S_nu_cv.reshape(-1),
+                            C_delta_x_xminus_cv.reshape(-1),
+                            F_current_cv.reshape(-1)
+                        ], dim=0).reshape(1, -1)
+
+                        # --- M-step forward only (no grad) ---
+                        dF_cv = M_k(z_cv)
+                        dF_cv_mat = dF_cv.view(m, m)
+                        F_next_cv = F_current_cv + dF_cv_mat
+
+                        # same loss as train (but no backward)
+                        f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                        reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                        x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                        ##########################################################
+                        # # y-loss (measurement-space loss)
+                        # H = SysModel.H.to(device)  # [n, m]
+                        # y_hat_cv  = H @ x_curr  # [n, T]
+                        # y_loss_cv = torch.mean((y_hat_cv  - y_cv) ** 2)
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
+                        ##########################################################
+
+                        if em_iter == 0:
+                            weight = alpha[0]
+                        elif em_iter == 1:
+                            weight = alpha[1]
+                        else:
+                            weight = alpha[2]  # if you really want the same scaling as in train
+
+                        if em_iter < num_em_iters - 1:
+                            # Iter 1 & 2:
+                            #  - f1,x1,f2,x2 go into total_loss_12 (train M1,M2)
+                            loss_iter_12_cv = 0.5 * f_loss_cv + reg_cv + x_loss_cv
+                            total_loss_12_cv += weight * loss_iter_12_cv
+                        else:
+                            # Iter 3:
+                            #  - x3 goes to total_loss_12 (so M1,M2 see it)
+                            #  - f3 goes to total_loss_3 (trains M3 only)
+                            total_loss_12_cv += weight * x_loss_cv
+                            total_loss_3_cv += weight * (f_loss_cv + reg_cv)
+                        #########################################################################
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                        F_current_cv = F_next_cv
+
+                    total_loss_cv = total_loss_12_cv + total_loss_3_cv
+                    cv_loss_seq = total_loss_cv / float(num_em_iters)
+                    cv_loss_sum += cv_loss_seq.item()
+
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                for k in range(num_em_iters):
+                    torch.save(self.M_models[k], destination_path_M[k])
+            print(
+                f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+
+    def no_rts_end_To_end_m_net_2(self, SysModel, cv_input, cv_target, train_input, train_target,
+                         destination_path_M, load_base_m_mmodel=None, load_rts=None,
+                         num_em_iters=3,
+                         lambda_F=1e-3, generate_f=True, non_linear_h=False):
+        """
+        Single-function M-step training (no helpers, no .to(...)).
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+        - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+        """
+        # Basic sizes
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+        m = SysModel.m
+
+        # Load a single RTSNet and freeze it (same for all EM iterations)
+        self.RTS_model = torch.load(load_rts, weights_only=False).to(self.device)
+        self.RTS_model.train()
+        for p in self.RTS_model.parameters():
+            p.requires_grad = False
+
+
+        self.M_models = []
+        if load_base_m_mmodel != None:
+            for i in range(num_em_iters):
+                M_model = torch.load(load_base_m_mmodel, map_location=self.device, weights_only=False).to(
+                    self.device)
+                self.M_models.append(M_model.train())
+        else:
+            for i in range(num_em_iters):
+                M_model = copy.deepcopy(self.M_model)
+                self.M_models.append(M_model.train())
+
+        self.M_optimizers = []
+
+        stable_lr = self.learningRate * 0.1
+        for i in range(num_em_iters):
+            self.M_optimizers.append(
+                torch.optim.Adam(self.M_models[i].parameters(), lr=stable_lr, weight_decay=self.weightDecay))
+
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            for M_model in self.M_models:
+                M_model.train()
+            self.RTS_model.train()
+            train_loss_sum = 0.0
+
+            # zero grad for all M nets
+            for opt in self.M_optimizers:
+                opt.zero_grad()
+            epoch_loss_sum = 0.0
+
+            for _ in range(self.N_B):
+
+                # Pick one training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_seq = train_input[n_e]  # [n, T]
+                x_true_seq = train_target[n_e]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_i and F_true by group
+                if generate_f is True:
+                    f_index = n_e // 10
+                    F_base = SysModel.F_train[f_index]
+                    F_true = SysModel.F_train_TRUE[f_index]
+                else:
+                    F_base = SysModel.F_train[n_e]
+                    F_true = SysModel.F_train_TRUE[n_e]
+                # --------- EM unrolling over F ---------
+                F_current = F_base  # this will be updated each EM iteration
+                total_loss_1 = 0.0
+                total_loss_2 = 0.0
+                total_loss_3 = 0.0
+
+                for em_iter in range(num_em_iters):
+
+
+                    M_k = self.M_models[em_iter]
+                    self.model = self.RTS_model
+
+                    self.model.update_F(F_current)
+
+                    # E-step via frozen RTSNet → x_smooth
+                    self.model.InitSequence(SysModel.m1x_0, T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ---------------- Stats for M-network ----------------
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                    # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                    A1 = (x_curr @ x_prev.T) / T
+                    # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                    A2 = (x_prev @ x_prev.T) / T
+                    # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                    x_minus = F_current @ x_prev  # [m, T_eff]
+                    # Δx_t = x_t - F*x_{t-1|T}
+                    delta_x = x_curr - x_minus  # [m, T]
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                    delta_centered = delta_x - delta_mean
+                    # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+                    if non_linear_h:
+                        # y_hat_t = h(x_t) for each t
+                        y_hat_list = []
+                        for t in range(T):
+                            # shape [m] -> whatever h expects; .view(m,1) is safe with your linear h
+                            x_t = x_curr[:, t].view(SysModel.m, 1)
+                            y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                            y_hat_list.append(y_t_hat.view(-1))
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H
+                        Hx_curr = H @ x_curr  # [n, T]
+                    nu = y_seq - Hx_curr
+                    # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                    nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+                    # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    if em_iter == 0:
+                        F_for_update = F_current  # no detach, so F1 depends on ΔF0
+                    else:
+                        F_for_update = F_current.detach()  # cut gradients to previous ΔF's
+
+                    # Stats do NOT need gradient, detach them before feeding to M_k:
+                    z_in = torch.cat([
+                        A1.reshape(-1).detach(),
+                        A2.reshape(-1).detach(),
+                        S_delta_x.reshape(-1).detach(),
+                        S_nu.reshape(-1).detach(),
+                        C_delta_x_xminus.reshape(-1).detach(),
+                        F_for_update.reshape(-1)  # only this may have grad (for current Mk)
+                    ], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                    # Predict ΔF and update F
+                    deltaF = M_k(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_for_update  + deltaF_mat
+
+                    # Loss: Frobenius(F_next - F_true)^2 + regularization
+                    f_loss = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    ##########################################################
+                    # # y-loss (measurement-space loss)
+                    # H = SysModel.H.to(device)  # [n, m]
+                    # y_hat = H @ x_curr  # [n, T]
+                    # y_loss = torch.mean((y_hat - y_seq) ** 2)
+                    # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
+                    ##########################################################
+
+                    if em_iter ==0:
+                        # Iter 1 & 2:
+                        #  - f1,x1,f2,x2 go into total_loss_12 (train M1,M2)
+                        loss_iter_1 = 15*f_loss + reg
+                        total_loss_1 +=  loss_iter_1
+                    elif em_iter ==1:
+                        loss_iter_2 = 15*f_loss + reg
+                        total_loss_2 +=  loss_iter_2
+                        loss_iter_1 = x_loss
+                        total_loss_1 +=  loss_iter_1
+                    else:
+                        # Iter 3:
+                        #  - x3 goes to total_loss_12 (so M1,M2 see it)
+                        total_loss_3 += f_loss + reg
+                        loss_iter_2 = x_loss
+                        total_loss_2 +=  loss_iter_2
+
+                    F_current = F_next  # use updated F in next EM iteration
+
+                # after `for em_iter in range(num_em_iters):`
+                total_loss = total_loss_1 +total_loss_2 + total_loss_3  # full loss used for backward
+
+                loss = total_loss / float(num_em_iters)  # for logging
+
+                epoch_loss_sum += total_loss
+                train_loss_sum += loss.detach().item()
+
+            epoch_loss_mean = epoch_loss_sum / float(self.N_B)
+            # one backward pass for the whole batch
+            epoch_loss_mean.backward()
+
+            for idx, M_model in enumerate(self.M_models):
+                grad_norm = 0.0
+                for p in M_model.parameters():
+                    if p.grad is not None:
+                        grad_norm += p.grad.norm().item()
+                print(f"[DEBUG] epoch={epoch} M{idx + 1} grad_norm={grad_norm:.3e}")
+
+            for M_model, opt in zip(self.M_models, self.M_optimizers):
+                torch.nn.utils.clip_grad_norm_(M_model.parameters(), max_norm=1.0)
+                opt.step()
+
+            train_epoch = epoch_loss_mean.item()
+
+            # ---------------- Validation ----------------
+            for M_model in self.M_models:
+                M_model.eval()
+            self.RTS_model.eval()
+            cv_loss_sum = 0.0
+
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    y_cv = cv_input[j]  # [n, T_cv]
+                    x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                    T_cv = y_cv.size(-1)
+
+                    # choose base F and F_true for this CV sequence
+                    if generate_f is True:
+                        f_index_cv = j // 10
+                        F_base_cv = SysModel.F_valid[f_index_cv]
+                        F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                    else:
+                        F_base_cv = SysModel.F_valid[j]
+                        F_true_cv = SysModel.F_valid_TRUE[j]
+
+                    F_current_cv = F_base_cv.clone()
+                    total_loss_cv = 0.0
+                    total_loss_1_cv = 0.0
+                    total_loss_2_cv = 0.0
+                    total_loss_3_cv = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        M_k = self.M_models[em_iter]
+                        self.model = self.RTS_model
+
+                        # --- RTS smoother with current F_current_cv ---
+                        self.model.update_F(F_current_cv)
+                        self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                        x_f_cv = torch.empty(m, T_cv, device=device)
+                        x_s_cv = torch.empty(m, T_cv, device=device)
+
+                        for t in range(T_cv):
+                            x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                        x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                        self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                        x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                        for t in range(T_cv - 3, -1, -1):
+                            x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                        # -------- stats, same as training --------
+                        x_curr = x_s_cv  # [m, T_cv]
+                        ################################################
+                        if epoch % 10 == 0 and j == 2:
+                            # מרחק של F_current לפני העדכון מה-F_true
+                            f_err_before = torch.mean((F_current_cv - F_true_cv) ** 2).item()
+                            x_err_before = torch.mean((x_curr - x_true_cv_seq) ** 2).item()
+                            print(
+                                f"[DEBUG][epoch={epoch} em={em_iter}] F_err_before={f_err_before:.3e}, x_err_before={x_err_before:.3e}")
+                            #######################################
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+
+                        A1_cv = (x_curr @ x_prev.T) / T_cv
+                        A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                        x_minus_cv = F_current_cv @ x_prev
+                        delta_x_cv = x_curr - x_minus_cv
+
+                        delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                        delta_centered_cv = delta_x_cv - delta_mean_cv
+                        S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                        if non_linear_h:
+                            y_hat_cv_list = []
+                            for t in range(T_cv):
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_t_hat = SysModel.h(x_t)  # non-linear h
+                                y_hat_cv_list.append(y_t_hat.view(-1))
+                            Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                        else:
+                            H = SysModel.H.to(device)
+                            Hx_curr_cv = H @ x_curr
+                        nu_cv = y_cv - Hx_curr_cv
+
+                        nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                        nu_centered_cv = nu_cv - nu_mean_cv
+                        S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                        z_cv = torch.cat([
+                            A1_cv.reshape(-1),
+                            A2_cv.reshape(-1),
+                            S_delta_x_cv.reshape(-1),
+                            S_nu_cv.reshape(-1),
+                            C_delta_x_xminus_cv.reshape(-1),
+                            F_current_cv.reshape(-1)
+                        ], dim=0).reshape(1, -1)
+
+                        # --- M-step forward only (no grad) ---
+                        dF_cv = M_k(z_cv)
+                        dF_cv_mat = dF_cv.view(m, m)
+                        F_next_cv = F_current_cv + dF_cv_mat
+
+                        # same loss as train (but no backward)
+                        f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                        reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                        x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                        ##########################################################
+                        # # y-loss (measurement-space loss)
+                        # H = SysModel.H.to(device)  # [n, m]
+                        # y_hat_cv  = H @ x_curr  # [n, T]
+                        # y_loss_cv = torch.mean((y_hat_cv  - y_cv) ** 2)
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
+                        ##########################################################
+
+                        if em_iter == 0:
+                            # Iter 1 & 2:
+                            #  - f1,x1,f2,x2 go into total_loss_12 (train M1,M2)
+                            loss_iter_1_cv = 0.05*f_loss_cv + reg_cv
+                        elif em_iter == 1:
+                            loss_iter_2_cv = 0.1*f_loss_cv + reg_cv+ 0.1*x_loss_cv
+                            total_loss_2_cv += loss_iter_2_cv
+                        else:
+                            # Iter 3:
+                            #  - x3 goes to total_loss_12 (so M1,M2 see it)
+                            total_loss_3_cv += 5*f_loss_cv + reg_cv +x_loss_cv
+
+                        #########################################################################
+                        # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                        F_current_cv = F_next_cv
+
+                    total_loss_cv = total_loss_1_cv + total_loss_2_cv + total_loss_3_cv
+                    cv_loss_seq = total_loss_cv / float(num_em_iters)
+                    cv_loss_sum += cv_loss_seq.item()
+
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                for k in range(num_em_iters):
+                    torch.save(self.M_models[k], destination_path_M[k])
+            print(
+                f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+
+
+    def NO_RTS_end_to_end_test_mstep_net(self, SysModel, test_input, test_target, destination_path_RTS, destination_path_M,
+                                  num_em_iters=3,alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, init_x_list=None,
+                                  init_P_list=None, non_linear_h=False):
+        """
+        Testing-only version for the M-step network.
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Use CURRENT M-step network (self.M_model) to predict ΔF.
+        - Run num_em_iters EM iterations per test sequence.
+        - No training, no optimizer step.
+        - Returns per-sequence loss and mean loss.
+        """
+
+        N_T = len(test_input)
+        m = SysModel.m
+
+        all_test_losses = []
+        all_f_losses = []
+
+        RTS_models = []
+
+        self.model = torch.load(destination_path_RTS, weights_only=False, map_location=device).to(device).eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+
+        M_models = []
+        for k in range(num_em_iters):
+            M_k = torch.load(destination_path_M[k], weights_only=False, map_location=device)
+            M_k = M_k.to(device).eval()
+            M_models.append(M_k)
+
+        loss_list = torch.zeros(N_T, device=device)
+        x_loss_sum_per_iter = torch.zeros(num_em_iters, device=device)
+        final_F_list = []
+        final_x_list = []
+        with torch.no_grad():
+            for j in range(N_T):
+                # ----- one test sequence -----
+                y_seq = test_input[j]  # [n, T]
+                x_true_seq = test_target[j]  # [m, T]
+
+                T = y_seq.size(-1)
+
+                # Select F_base and F_true for this test sequence
+                if generate_f is True:
+                    f_index = j // 10
+                    F_base = SysModel.F_test[f_index].to(device)
+                    F_true = SysModel.F_test_TRUE[f_index].to(device)
+                else:
+                    # fallback: sequence-wise
+                    F_base = SysModel.F_test[j].to(device)
+                    F_true = SysModel.F_test_TRUE[j].to(device)
+
+                F_current = F_base.clone()
+                total_loss = 0.0
+                F_estimates = []
+                F_losses_mse = []
+                F_losses_total = []
+                x_losses_mse = []
+
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+
+                for em_iter in range(num_em_iters):
+
+                    M_k = M_models[em_iter]
+
+                    # ----- RTS smoother with current F_current -----
+                    self.model.update_F(F_current)
+                    self.model.InitSequence(x0.clone().detach(), T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = P0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ----- stats for M-network -----
+                    x_curr = x_smooth  # [m, T]
+                    x_prev = torch.empty_like(x_curr)  # [m, T]
+                    x_prev[:, 0] = x0.view(-1)  # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}
+
+                    A1 = (x_curr @ x_prev.T) / T
+                    A2 = (x_prev @ x_prev.T) / T
+
+                    x_minus = F_current @ x_prev  # [m, T]
+                    delta_x = x_curr - x_minus  # [m, T]
+
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)
+                    delta_centered = delta_x - delta_mean
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+
+                    # ---------- linear vs non-linear h ----------
+                    if non_linear_h:
+                        # y_hat_t = h(x_t) for each t
+                        y_hat_list = []
+                        for t in range(T):
+                            x_t = x_curr[:, t].view(SysModel.m, 1)  # [m,1]
+                            y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                            y_hat_list.append(y_t_hat.view(-1))  # flatten to [n]
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H.to(device)
+                        Hx_curr = H @ x_curr  # [n, T]
+                    nu = y_seq - Hx_curr
+
+                    nu_mean = nu.mean(dim=1, keepdim=True)
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    z_in = torch.cat([
+                        A1.reshape(-1),
+                        A2.reshape(-1),
+                        S_delta_x.reshape(-1),
+                        S_nu.reshape(-1),
+                        C_delta_x_xminus.reshape(-1),
+                        F_current.reshape(-1)
+                    ], dim=0).reshape(1, -1)
+
+                    # ----- M-step forward only -----
+                    deltaF = M_k(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+
+                    mse_F = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    # x-loss: same as in training
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    loss_em = 3 * mse_F + reg + x_loss
+                    x_loss_sum_per_iter[em_iter] += x_loss.item()
+
+                    # same alpha weighting as in training
+                    if em_iter == 0:
+                        weight = alpha[0]
+                    elif em_iter == 1:
+                        weight = alpha[1]
+                    else:
+                        weight = alpha[2]
+
+                    total_loss += weight * loss_em
+                    F_current = F_next
+
+                    all_test_losses.append(loss_em.item())
+                    all_f_losses.append(mse_F.item())
+
+                    # store F estimates for the chosen sequence
+                    if j % 5 == 0:
+                        F_estimates.append(F_next.detach())
+                        F_losses_mse.append(mse_F.item())
+                        F_losses_total.append(loss_em.item())
+                        x_losses_mse.append(x_loss.item())
+
+                # store final F and final x_smooth for this sequence (after last EM iter)
+                final_F_list.append(F_current.detach().clone())  # [m, m]
+                final_x_list.append(x_curr[:, -1].unsqueeze(-1).detach().clone())  # [m, T]
+                # final loss for this sequence (already weighted)
+                loss_list[j] = total_loss / float(num_em_iters)
+                # Mean x-loss for this sequence
+                # if this is the chosen sequence, print F_true and all F_est
+                if j % 5 == 0:
+                    print(f"\n[M-step TEST] sequence {j} summary")
+                    print("F_true:\n", F_true.detach())
+                    print("F_init (F_base):\n", F_base.detach())
+
+                    mse_F_init = torch.mean((F_base - F_true) ** 2).item()
+                    print(f"Initial F MSE loss = {mse_F_init:.6e}")
+                    for k, (F_est, f_mse, x_mse, total_val) in enumerate(
+                            zip(F_estimates, F_losses_mse, x_losses_mse, F_losses_total)):
+                        f_db = 10.0 * math.log10(f_mse)
+                        x_db = 10.0 * math.log10(x_mse)
+                        tot_db = 10.0 * math.log10(total_val)
+                        print(f"\n  EM iter {k + 1}:")
+                        print("  F_est:\n", F_est)
+                        print(f"  F-loss (MSE_F)                 = {f_db:.2f} dB")
+                        print(f"  x-loss (MSE_x)                 = {x_db:.2f} dB")
+                        print(f"  total loss (F + reg + x)       = {tot_db:.2f} dB")
+
+        mean_loss = loss_list.mean().item()
+        print(f"[M-step TEST] mean_loss={mean_loss:.6f}")
+        # average x-MSE for each EM iteration over all sequences
+        mean_x_mse_per_iter = x_loss_sum_per_iter / float(N_T)
+
+        print("[M-step TEST] Mean x-MSE per EM iteration:")
+        for k in range(num_em_iters):
+            mse_k = mean_x_mse_per_iter[k].item()
+            db_k = 10.0 * math.log10(mse_k)
+            print(f"  EM iter {k + 1}: mean x-MSE = {mse_k:.6e}  ({db_k: .2f} dB)")
+
+        # convert per-iteration mean x-MSE to numpy (linear and dB)
+        mean_x_mse_per_iter_np = mean_x_mse_per_iter.detach()
+        mean_x_mse_per_iter_db_np = (10.0 * torch.log10(mean_x_mse_per_iter)).detach()
+
+        return mean_x_mse_per_iter_np, mean_x_mse_per_iter_db_np, final_F_list, final_x_list
+
+
+    def batch_one_train_m_step_net(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS,  lambda_F=1e-3, generate_f=True, non_linear_h=False):
+        """
+        Single-function M-step training (no helpers, no .to(...)).
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+        - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+        """
+        # Basic sizes
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+        m = SysModel.m
+
+        # Load and freeze RTSNet (smoother only)
+        self.model = torch.load(destination_path_RTS, weights_only=False).to(self.device).train()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # M-step model and optimizer
+        model_mstep = self.M_model.train()
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        ######################################################
+        # for name, param in model_mstep.named_parameters():
+        #     if "weight" in name or "bias" in name:
+        #         param.data.zero_()
+        ##################################################
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            model_mstep.train()
+            train_loss_sum = 0.0
+            batch_x_before_sum = 0.0
+            batch_x_after_sum = 0.0
+            batch_f_loss_sum = 0.0
+            self.M_optimizer.zero_grad()
+            total_loss_batch = 0.0
+            for _ in range(self.N_B):
+
+                # Pick one training sequence
+                n_e = random.randint(0, self.N_E - 1)
+                y_seq = train_input[n_e]  # [n, T]
+                x_true_seq = train_target[n_e]  # [m, T]
+                T = y_seq.size(-1)
+
+                # Select F_i and F_true by group
+                if generate_f is True:
+                    f_index = n_e // 10
+                    F_base = SysModel.F_train[f_index]
+                    F_true = SysModel.F_train_TRUE[f_index]
+                else:
+                    F_base = SysModel.F_train[n_e]
+                    F_true = SysModel.F_train_TRUE[n_e]
+                # --------- EM unrolling over F ---------
+                F_current = F_base  # this will be updated each EM iteration
+
+
+                self.model.update_F(F_current)
+
+                # E-step via frozen RTSNet → x_smooth
+                self.model.InitSequence(SysModel.m1x_0, T)
+                self.model.init_hidden()
+                self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                x_forward = torch.empty(m, T, device=device)
+                x_smooth = torch.empty(m, T, device=device)
+
+                for t in range(T):
+                    x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                self.model.InitBackward(x_smooth[:, T - 1])
+                x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                for t in range(T - 3, -1, -1):
+                    x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                x_loss_before = torch.mean((x_smooth - x_true_seq) ** 2)
+
+
+                # ---------------- Stats for M-network ----------------
+                x_curr = x_smooth  # [m, T]
+                x_prev = torch.empty_like(x_curr)  # [m, T]
+                x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                A1 = (x_curr @ x_prev.T) / T
+                # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                A2 = (x_prev @ x_prev.T) / T
+                # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                x_minus = F_current @ x_prev  # [m, T_eff]
+                # Δx_t = x_t - F*x_{t-1|T}
+                delta_x = x_curr - x_minus  # [m, T]
+                delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                delta_centered = delta_x - delta_mean
+                # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                S_delta_x = (delta_centered @ delta_centered.T) / T
+                if non_linear_h:
+                    # y_hat_t = h(x_t) for each t
+                    y_hat_list = []
+                    for t in range(T):
+                        # shape [m] -> whatever h expects; .view(m,1) is safe with your linear h
+                        x_t = x_curr[:, t].view(SysModel.m, 1)
+                        y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                        y_hat_list.append(y_t_hat.view(-1))
+                    Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                else:
+                    H = SysModel.H
+                    Hx_curr = H @ x_curr  # [n, T]
+                nu = y_seq - Hx_curr
+                # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                nu_centered = nu - nu_mean
+                S_nu = (nu_centered @ nu_centered.T) / T
+                # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
+                                  C_delta_x_xminus.reshape(-1),
+                                  F_current.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                # Predict ΔF and update F
+                deltaF = model_mstep(z_in)
+                deltaF_mat = deltaF.view(m, m)
+                # print('for nir delta f =',deltaF_mat)
+                F_next = F_current + deltaF_mat
+
+                F_current =F_next
+
+                self.model.update_F(F_current)
+
+                # E-step via frozen RTSNet → x_smooth
+                self.model.InitSequence(SysModel.m1x_0, T)
+                self.model.init_hidden()
+                self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                x_forward = torch.empty(m, T, device=device)
+                x_smooth = torch.empty(m, T, device=device)
+
+                for t in range(T):
+                    x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                self.model.InitBackward(x_smooth[:, T - 1])
+                x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                for t in range(T - 3, -1, -1):
+                    x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+
+
+                # Loss: Frobenius(F_next - F_true)^2 + regularization
+                f_loss = torch.mean((F_current - F_true) ** 2)
+                reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                # x-loss AFTER M-step (with updated F)
+                x_loss_after = torch.mean((x_smooth - x_true_seq) ** 2)
+
+                # ---- compute loss ----
+                loss = 5*f_loss + reg + x_loss_after
+
+                # for optimization (keep graph)
+                total_loss_batch += loss
+                # ---- only for logging / printing ----
+
+                batch_x_before_sum += x_loss_before.detach()
+                batch_x_after_sum  += x_loss_after.detach()
+                batch_f_loss_sum   += f_loss.detach()
+
+            # ---- backward + step (one SGD step per sequence) ----
+
+            mean_total_loss_batch = total_loss_batch / self.N_B
+            mean_total_loss_batch.backward()
+            torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+            self.M_optimizer.step()
+            batch_loss = mean_total_loss_batch.detach()
+            train_loss_sum += batch_loss.item()
+            # averages over sequences in this batch
+            mean_x_before = batch_x_before_sum / self.N_B
+            mean_x_after  = batch_x_after_sum / self.N_B
+            mean_f_loss   = batch_f_loss_sum / self.N_B
+
+            eps = 1e-12
+            batch_loss_db   = 10.0 * math.log10(batch_loss.item()   + eps)
+            x_before_db     = 10.0 * math.log10(mean_x_before.item() + eps)
+            x_after_db      = 10.0 * math.log10(mean_x_after.item()  + eps)
+            f_loss_db       = 10.0 * math.log10(mean_f_loss.item()   + eps)
+            print(
+                f"[M-step][train] epoch={epoch:03d} "
+                f"batch_loss={batch_loss.item():.6e} ({batch_loss_db:.2f} dB) "
+                f"x_before={mean_x_before.item():.6e} ({x_before_db:.2f} dB) "
+                f"x_after={mean_x_after.item():.6e} ({x_after_db:.2f} dB) "
+                f"F_loss={mean_f_loss.item():.6e} ({f_loss_db:.2f} dB)"
+            )
+
+                # ---------------- Validation ----------------
+            model_mstep.eval()
+            cv_loss_sum = 0.0
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    y_cv = cv_input[j]  # [n, T_cv]
+                    x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                    T_cv = y_cv.size(-1)
+
+                    # choose base F and F_true for this CV sequence
+                    if generate_f is True:
+                        f_index_cv = j // 10
+                        F_base_cv = SysModel.F_valid[f_index_cv]
+                        F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                    else:
+                        F_base_cv = SysModel.F_valid[j]
+                        F_true_cv = SysModel.F_valid_TRUE[j]
+
+                    F_current_cv = F_base_cv.clone()
+
+                    # --- RTS smoother with current F_current_cv ---
+                    self.model.update_F(F_current_cv)
+                    self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                    x_f_cv = torch.empty(m, T_cv, device=device)
+                    x_s_cv = torch.empty(m, T_cv, device=device)
+
+                    for t in range(T_cv):
+                        x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                    x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                    self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                    x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                    for t in range(T_cv - 3, -1, -1):
+                        x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                    # -------- stats, same as training --------
+                    x_curr = x_s_cv  # [m, T_cv]
+                    x_prev = torch.empty_like(x_curr)
+                    x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                    x_prev[:, 1:] = x_curr[:, :-1]
+
+                    A1_cv = (x_curr @ x_prev.T) / T_cv
+                    A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                    x_minus_cv = F_current_cv @ x_prev
+                    delta_x_cv = x_curr - x_minus_cv
+
+                    delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                    delta_centered_cv = delta_x_cv - delta_mean_cv
+                    S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+                    if non_linear_h:
+                        y_hat_cv_list = []
+                        for t in range(T_cv):
+                            x_t = x_curr[:, t].view(SysModel.m, 1)
+                            y_t_hat = SysModel.h(x_t)  # non-linear h
+                            y_hat_cv_list.append(y_t_hat.view(-1))
+                        Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                    else:
+                        H = SysModel.H.to(device)
+                        Hx_curr_cv = H @ x_curr
+                    nu_cv = y_cv - Hx_curr_cv
+
+                    nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                    nu_centered_cv = nu_cv - nu_mean_cv
+                    S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                    C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+
+                    z_cv = torch.cat([
+                        A1_cv.reshape(-1),
+                        A2_cv.reshape(-1),
+                        S_delta_x_cv.reshape(-1),
+                        S_nu_cv.reshape(-1),
+                        C_delta_x_xminus_cv.reshape(-1),
+                        F_current_cv.reshape(-1)
+                    ], dim=0).reshape(1, -1)
+
+                    # --- M-step forward only (no grad) ---
+                    dF_cv = model_mstep(z_cv)
+                    dF_cv_mat = dF_cv.view(m, m)
+                    F_next_cv = F_current_cv + dF_cv_mat
+
+                    F_current_cv = F_next_cv
+
+                    # --- RTS smoother with current F_current_cv ---
+                    self.model.update_F(F_current_cv)
+                    self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                    x_f_cv = torch.empty(m, T_cv, device=device)
+                    x_s_cv = torch.empty(m, T_cv, device=device)
+
+                    for t in range(T_cv):
+                        x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                    x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                    self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                    x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                    for t in range(T_cv - 3, -1, -1):
+                        x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                    # same loss as train (but no backward)
+                    f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                    reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                    x_loss_cv = torch.mean((x_s_cv - x_true_cv_seq) ** 2)
+
+                    cv_loss_seq =5*f_loss_cv + reg_cv + x_loss_cv
+
+                    cv_loss_sum += cv_loss_seq.item()
+
+
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                torch.save(model_mstep, destination_path_M)
+
+
+            train_epoch_db = 10.0 * math.log10(train_loss_sum )
+            cv_epoch_db = 10.0 * math.log10(cv_epoch)
+            best_cv_db = 10.0 * math.log10(self.MSE_cv_dB_opt)
+
+            print(f"[M-step] epoch={epoch:03d} "
+                f"train={train_loss_sum:.6e} ({train_epoch_db:.2f} dB) "
+                f"cv={cv_epoch:.6e} ({cv_epoch_db:.2f} dB) "
+                f"best_cv={self.MSE_cv_dB_opt:.6e} ({best_cv_db:.2f} dB)")
+
+    def train_mstep_net_with_new_enters(self, SysModel, cv_input, cv_target, train_input, train_target,
+                            destination_path_M, destination_path_RTS, num_em_iters=3,
+                            alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+            """
+            Single-function M-step training (no helpers, no .to(...)).
+            - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+            - Build A1/A2 from x_smooth, zeros for the rest, feed M-net to predict ΔF.
+            - Minimize Frobenius loss to ground-truth F (train/CV), save best M-model.
+            """
+                # Basic sizes
+            self.N_E = len(train_input)
+            self.N_CV = len(cv_input)
+            m = SysModel.m
+
+            # Load and freeze RTSNet (smoother only)
+            self.model = torch.load(destination_path_RTS, weights_only=False).to(self.device).train()
+            for p in self.model.parameters():
+                p.requires_grad_(False)
+
+            # M-step model and optimizer
+            model_mstep = self.M_model.train()
+
+
+            self.MSE_cv_dB_opt = 1000
+            self.MSE_cv_idx_opt = 0
+
+
+            for epoch in range(self.N_steps):
+                # ---------------- Training ----------------
+                model_mstep.train()
+                train_loss_sum = 0.0
+
+
+                for _ in range(self.N_B):
+                    self.M_optimizer.zero_grad()
+
+                    # Pick one training sequence
+                    n_e = random.randint(0, self.N_E - 1)
+                    y_seq = train_input[n_e]   # [n, T]
+                    x_true_seq = train_target[n_e]  # [m, T]
+                    T = y_seq.size(-1)
+
+                    # Select F_i and F_true by group
+                    if generate_f is True:
+                        f_index = n_e // 10
+                        F_base = SysModel.F_train[f_index]
+                        F_true = SysModel.F_train_TRUE[f_index]
+                    else:
+                        F_base = SysModel.F_train[n_e]
+                        F_true = SysModel.F_train_TRUE[n_e]
+                    # --------- EM unrolling over F ---------
+                    F_current = F_base  # this will be updated each EM iteration
+                    total_loss = 0.0
+
+                    for em_iter in range(num_em_iters):
+
+                        self.model.update_F(F_current)
+
+                        # E-step via frozen RTSNet → x_smooth
+                        self.model.InitSequence(SysModel.m1x_0, T)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                        x_forward = torch.empty(m, T, device=device)
+                        x_smooth = torch.empty(m, T, device=device)
+
+                        for t in range(T):
+                            x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                        x_smooth[:, T - 1] = x_forward[:, T - 1]
+
+                        self.model.InitBackward(x_smooth[:, T - 1])
+                        x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                        for t in range(T - 3, -1, -1):
+                            x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                        # ---------------- Stats for M-network ----------------
+                        x_curr = x_smooth  # [m, T]
+                        x_prev = torch.empty_like(x_curr)  # [m, T]
+                        x_prev[:, 0] = SysModel.m1x_0.view(-1)  # x_0
+                        x_prev[:, 1:] = x_curr[:, :-1]  # x_{t-1|T}, t>=1
+                        # Ā1 = 1/T Σ x_t x_{t-1|T}^T  (cross moment)
+                        A1 = (x_curr @ x_prev.T)/T
+                        # Ā2 = 1/T Σ x_{t-1|T} x_{t-1|T}^T  (auto moment)
+                        A2 = (x_prev @ x_prev.T)/T
+                        # Predicted previous state: x⁻_t = F_current x_{t-1|T}
+                        x_minus = F_current @ x_prev  # [m, T_eff]
+                        # Δx_t = x_t - F*x_{t-1|T}
+                        delta_x = x_curr - x_minus  # [m, T]
+                        delta_mean = delta_x.mean(dim=1, keepdim=True)  # \bar{Δx}
+                        delta_centered = delta_x - delta_mean
+                        # S_Δx = 1/T Σ (Δx_t - \bar{Δx})(Δx_t - \bar{Δx})^T
+                        S_delta_x = (delta_centered @ delta_centered.T) / T
+                        if non_linear_h:
+                            # y_hat_t = h(x_t) for each t
+                            y_hat_list = []
+                            for t in range(T):
+                                # shape [m] -> whatever h expects; .view(m,1) is safe with your linear h
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                                y_hat_list.append(y_t_hat.view(-1))
+                            Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                        else:
+                            H = SysModel.H
+                            Hx_curr = H @ x_curr  # [n, T]
+                        nu = y_seq - Hx_curr
+                        # S_ν = 1/T Σ (ν_t − \bar{ν})(ν_t − \bar{ν})^T
+                        nu_mean = nu.mean(dim=1, keepdim=True)  # [n,1]
+                        nu_centered = nu - nu_mean
+                        S_nu = (nu_centered @ nu_centered.T) / T
+                        # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
+                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                        epsI = 1e-4 * torch.eye(m, device=A2.device, dtype=A2.dtype)
+                        A2_reg = A2 + epsI
+                        F_em = A1 @ torch.linalg.inv(A2_reg)  # [m, m]
+                        deltaF_em = F_em - F_current  # [m, m]
+
+                        # ----- 2) sequence SNR: snr_y = E_x / (E_nu + eps) -----
+                        # E_x = mean_t ||x_t||^2
+                        E_x = (x_curr ** 2).sum(dim=0).mean()  # scalar
+
+                        # E_nu = mean_t ||nu_t||^2
+                        E_nu = (nu ** 2).sum(dim=0).mean()  # scalar
+
+                        snr_y = E_x / (E_nu + 1e-6)  # scalar
+
+                        # make it a 1D tensor so we can cat
+                        snr_y_vec = snr_y.view(1)
+                        z_in = torch.cat([A1.reshape(-1),A2.reshape(-1),S_delta_x.reshape(-1),S_nu.reshape(-1),C_delta_x_xminus.reshape(-1),
+                            F_current.reshape(-1),snr_y_vec], dim=0).reshape(1, -1)  # [1, feature_dim]
+
+                        # Predict ΔF and update F
+                        deltaF = model_mstep(z_in)
+                        deltaF_mat = deltaF.view(m, m)
+                        F_next = F_current + deltaF_mat
+
+                        # Loss: Frobenius(F_next - F_true)^2 + regularization
+                        f_loss = torch.mean((F_next - F_true) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                        ##########################################################
+                        # # y-loss (measurement-space loss)
+                        # H = SysModel.H.to(device)  # [n, m]
+                        # y_hat = H @ x_curr  # [n, T]
+                        # y_loss = torch.mean((y_hat - y_seq) ** 2)
+                        # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
+                        ##########################################################
+                        if em_iter == num_em_iters - 1:
+                            loss_em = 15*f_loss + reg + x_loss
+                        else:
+                            loss_em = f_loss + reg+ x_loss
+    #############################################################################################################
+                        # loss_em = 3 * f_loss + reg + x_loss
+                        # Apply your specific weighting: 0.05, 0.1, 0.85
+                        if em_iter == 0:
+                            weight = alpha[0]  # First EM iteration
+                        elif em_iter == 1:
+                            weight = alpha[1]  # Second EM iteration
+                        else:
+                            weight = alpha[2]  # Third EM iteration (rest)
+                        total_loss += weight*loss_em
+                        F_current = F_next  # use updated F in next EM iteration
+
+
+                    # after `for em_iter in range(num_em_iters):`
+                    loss = total_loss / float(num_em_iters)   # average over EM iterations
+                    loss_mult = loss
+                    loss_mult.backward()
+                    torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+                    self.M_optimizer.step()
+
+                    train_loss_sum += loss.detach().item()
+
+                    # ---------------- Validation ----------------
+                model_mstep.eval()
+                cv_loss_sum = 0.0
+
+                with torch.no_grad():
+                    for j in range(self.N_CV):
+                        y_cv = cv_input[j]  # [n, T_cv]
+                        x_true_cv_seq = cv_target[j]  # [m, T_cv]
+                        T_cv = y_cv.size(-1)
+
+                        # choose base F and F_true for this CV sequence
+                        if generate_f is True:
+                            f_index_cv = j // 10
+                            F_base_cv = SysModel.F_valid[f_index_cv]
+                            F_true_cv = SysModel.F_valid_TRUE[f_index_cv]
+                        else:
+                            F_base_cv = SysModel.F_valid[j]
+                            F_true_cv = SysModel.F_valid_TRUE[j]
+
+                        F_current_cv = F_base_cv.clone()
+                        total_loss_cv = 0.0
+
+                        for em_iter in range(num_em_iters):
+
+                            # --- RTS smoother with current F_current_cv ---
+                            self.model.update_F(F_current_cv)
+                            self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                            self.model.init_hidden()
+                            self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+
+                            x_f_cv = torch.empty(m, T_cv, device=device)
+                            x_s_cv = torch.empty(m, T_cv, device=device)
+
+                            for t in range(T_cv):
+                                x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+
+                            x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                            self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                            x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                            for t in range(T_cv - 3, -1, -1):
+                                x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+
+                            # -------- stats, same as training --------
+                            x_curr = x_s_cv  # [m, T_cv]
+                            x_prev = torch.empty_like(x_curr)
+                            x_prev[:, 0] = SysModel.m1x_0.view(-1)
+                            x_prev[:, 1:] = x_curr[:, :-1]
+
+                            A1_cv = (x_curr @ x_prev.T) / T_cv
+                            A2_cv = (x_prev @ x_prev.T) / T_cv
+
+                            x_minus_cv = F_current_cv @ x_prev
+                            delta_x_cv = x_curr - x_minus_cv
+
+                            delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                            delta_centered_cv = delta_x_cv - delta_mean_cv
+                            S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+
+
+                            if non_linear_h:
+                                y_hat_cv_list = []
+                                for t in range(T_cv):
+                                    x_t = x_curr[:, t].view(SysModel.m, 1)
+                                    y_t_hat = SysModel.h(x_t)  # non-linear h
+                                    y_hat_cv_list.append(y_t_hat.view(-1))
+                                Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)  # [n, T_cv]
+                            else:
+                                H = SysModel.H.to(device)
+                                Hx_curr_cv = H @ x_curr
+                            nu_cv = y_cv - Hx_curr_cv
+
+                            nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                            nu_centered_cv = nu_cv - nu_mean_cv
+                            S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            epsI = 1e-4 * torch.eye(m, device=A2_cv.device, dtype=A2.dtype)
+                            A2_reg_cv = A2_cv + epsI
+                            F_em_cv = A1_cv @ torch.linalg.inv(A2_reg_cv)  # [m, m]
+                            deltaF_em_cv = F_em_cv - F_current_cv  # [m, m]
+
+                            # ----- 2) sequence SNR: snr_y = E_x / (E_nu + eps) -----
+                            # E_x = mean_t ||x_t||^2
+                            E_x_cv = (x_curr ** 2).sum(dim=0).mean()  # scalar
+
+                            # E_nu = mean_t ||nu_t||^2
+                            E_nu_cv = (nu_cv ** 2).sum(dim=0).mean()  # scalar
+
+                            snr_y_cv = E_x_cv / (E_nu_cv + 1e-6)  # scalar
+                            # make it a 1D tensor so we can cat
+                            snr_y_vec_cv = snr_y_cv.view(1)
+
+                            z_cv = torch.cat([
+                                A1_cv.reshape(-1),
+                                A2_cv.reshape(-1),
+                                S_delta_x_cv.reshape(-1),
+                                S_nu_cv.reshape(-1),
+                                C_delta_x_xminus_cv.reshape(-1),
+                                F_current_cv.reshape(-1),snr_y_vec_cv
+                                ], dim=0).reshape(1, -1)
+
+                            # --- M-step forward only (no grad) ---
+                            dF_cv = model_mstep(z_cv)
+                            dF_cv_mat = dF_cv.view(m, m)
+                            F_next_cv = F_current_cv + dF_cv_mat
+
+                            # same loss as train (but no backward)
+                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)  # MSE on F
+                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                            ##########################################################
+                            # # y-loss (measurement-space loss)
+                            # H = SysModel.H.to(device)  # [n, m]
+                            # y_hat_cv  = H @ x_curr  # [n, T]
+                            # y_loss_cv = torch.mean((y_hat_cv  - y_cv) ** 2)
+                            # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
+                            ##########################################################
+                            if em_iter == num_em_iters - 1:
+                                loss_em_cv = 15*f_loss_cv + reg_cv + x_loss_cv
+                            else:
+                                loss_em_cv =  f_loss_cv + reg_cv + x_loss_cv
+                            #########################################################################
+                            # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
+                            if em_iter == 0:
+                                weight = alpha[0]
+                            elif em_iter == 1:
+                                weight = alpha[1]
+                            else:
+                                weight =  alpha[2]  # if you really want the same scaling as in train
+
+                            total_loss_cv += weight * loss_em_cv
+                            F_current_cv = F_next_cv
+                        cv_loss_seq = total_loss_cv / float(num_em_iters)
+                        cv_loss_sum += cv_loss_seq.item()
+
+                train_epoch = train_loss_sum / max(1, self.N_B)
+                cv_epoch = cv_loss_sum / max(1, self.N_CV)
+
+                if cv_epoch < self.MSE_cv_dB_opt:
+                    self.MSE_cv_dB_opt = cv_epoch
+                    torch.save(model_mstep, destination_path_M)
+
+                print(f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+
+
+
+    def test_mstep_net_with_new_enteries(self, SysModel, test_input, test_target,
+                       destination_path_RTS,destination_path_M, num_em_iters=3,
+                       alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False):
+        """
+        Testing-only version for the M-step network.
+        - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
+        - Use CURRENT M-step network (self.M_model) to predict ΔF.
+        - Run num_em_iters EM iterations per test sequence.
+        - No training, no optimizer step.
+        - Returns per-sequence loss and mean loss.
+        """
+
+
+        N_T = len(test_input)
+        m = SysModel.m
+
+        all_test_losses = []
+        all_f_losses = []
+
+
+        # Load and freeze RTSNet (smoother only)
+        self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        # Load M-step network from checkpoint (NO training)
+        model_mstep = torch.load(destination_path_M, weights_only=False).to(device).eval()
+
+        loss_list = torch.zeros(N_T, device=device)
+        x_loss_sum_per_iter = torch.zeros(num_em_iters, device=device)
+        final_F_list = []
+        final_x_list = []
+        with torch.no_grad():
+            for j in range(N_T):
+                # ----- one test sequence -----
+                y_seq = test_input[j]    # [n, T]
+                x_true_seq = test_target[j]  # [m, T]
+
+                T = y_seq.size(-1)
+
+                # Select F_base and F_true for this test sequence
+                if generate_f is True:
+                    f_index = j // 10
+                    F_base = SysModel.F_test[f_index].to(device)
+                    F_true = SysModel.F_test_TRUE[f_index].to(device)
+                else:
+                    # fallback: sequence-wise
+                    F_base = SysModel.F_test[j].to(device)
+                    F_true = SysModel.F_test_TRUE[j].to(device)
+
+                F_current = F_base.clone()
+                total_loss = 0.0
+                F_estimates =[]
+                F_losses_mse = []
+                F_losses_total = []
+                x_losses_mse = []
+                y_loss_tot = []
+
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+
+                for em_iter in range(num_em_iters):
+
+                    # ----- RTS smoother with current F_current -----
+                    self.model.update_F(F_current)
+                    self.model.InitSequence(x0.clone().detach(), T)
+                    self.model.init_hidden()
+                    self.model.prior_Sigma = P0.clone().detach()
+
+                    x_forward = torch.empty(m, T, device=device)
+                    x_smooth = torch.empty(m, T, device=device)
+
+                    for t in range(T):
+                        x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+
+                    x_smooth[:, T - 1] = x_forward[:, T - 1]
+                    self.model.InitBackward(x_smooth[:, T - 1])
+                    x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                    # ----- stats for M-network -----
+                    x_curr = x_smooth                    # [m, T]
+                    x_prev = torch.empty_like(x_curr)    # [m, T]
+                    x_prev[:, 0] = x0.view(-1)   # x_0
+                    x_prev[:, 1:] = x_curr[:, :-1]                      # x_{t-1|T}
+
+                    A1 = (x_curr @ x_prev.T) / T
+                    A2 = (x_prev @ x_prev.T) / T
+
+                    x_minus = F_current @ x_prev        # [m, T]
+                    delta_x = x_curr - x_minus          # [m, T]
+
+                    delta_mean = delta_x.mean(dim=1, keepdim=True)
+                    delta_centered = delta_x - delta_mean
+                    S_delta_x = (delta_centered @ delta_centered.T) / T
+
+
+                    # ---------- linear vs non-linear h ----------
+                    if non_linear_h:
+                        # y_hat_t = h(x_t) for each t
+                        y_hat_list = []
+                        for t in range(T):
+                            x_t = x_curr[:, t].view(SysModel.m, 1)  # [m,1]
+                            y_t_hat = SysModel.h(x_t)  # [n,1] or [n]
+                            y_hat_list.append(y_t_hat.view(-1))  # flatten to [n]
+                        Hx_curr = torch.stack(y_hat_list, dim=1)  # [n, T]
+                    else:
+                        H = SysModel.H.to(device)
+                        Hx_curr = H @ x_curr  # [n, T]
+                    nu = y_seq - Hx_curr
+
+                    nu_mean = nu.mean(dim=1, keepdim=True)
+                    nu_centered = nu - nu_mean
+                    S_nu = (nu_centered @ nu_centered.T) / T
+
+                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                    epsI = 1e-4 * torch.eye(m, device=A2.device, dtype=A2.dtype)
+                    A2_reg = A2 + epsI
+                    F_em = A1 @ torch.linalg.inv(A2_reg)  # [m, m]
+                    deltaF_em = F_em - F_current  # [m, m]
+
+                    # ----- 2) sequence SNR: snr_y = E_x / (E_nu + eps) -----
+                    # E_x = mean_t ||x_t||^2
+                    E_x = (x_curr ** 2).sum(dim=0).mean()  # scalar
+
+                    # E_nu = mean_t ||nu_t||^2
+                    E_nu = (nu ** 2).sum(dim=0).mean()  # scalar
+
+                    snr_y = E_x / (E_nu + 1e-6)  # scalar
+                    # make it a 1D tensor so we can cat
+                    snr_y_vec = snr_y.view(1)
+
+                    z_in = torch.cat([
+                        A1.reshape(-1),
+                        A2.reshape(-1),
+                        S_delta_x.reshape(-1),
+                        S_nu.reshape(-1),
+                        C_delta_x_xminus.reshape(-1),
+                        F_current.reshape(-1),snr_y_vec
+                    ], dim=0).reshape(1, -1)
+
+                    # ----- M-step forward only -----
+                    deltaF = model_mstep(z_in)
+                    deltaF_mat = deltaF.view(m, m)
+                    F_next = F_current + deltaF_mat
+                   ####################################################################
+                    # eigvals = torch.linalg.eigvals(F_next)
+                    # rho = eigvals.abs().max()
+                    #
+                    # # rho is a scalar complex tensor -> take real part for safety
+                    # rho_real = rho.real
+                    # max_rho = 1.07
+                    # if rho_real > max_rho:
+                    #     scale = (max_rho / rho_real)
+                    #     F_next = F_next * scale
+                    ##########################################################
+                    mse_F = torch.mean((F_next - F_true) ** 2)
+                    reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                    # x-loss: same as in training
+                    x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                    ##########################################################
+                    # # y-loss (measurement-space loss)
+                    # H = SysModel.H.to(device)  # [n, m]
+                    # y_hat  = H @ x_curr  # [n, T]
+                    # y_loss = torch.mean((y_hat  - y_seq) ** 2)
+                    # y_loss_tot.append(y_loss.item())
+                    ##########################################################
+                    loss_em = 3*mse_F + reg + x_loss
+                    x_loss_sum_per_iter[em_iter] += x_loss.item()
+
+                    # same alpha weighting as in training
+                    if em_iter == 0:
+                        weight = alpha[0]
+                    elif em_iter == 1:
+                        weight = alpha[1]
+                    else:
+                        weight = alpha[2]
+
+                    total_loss += weight * loss_em
+                    F_current = F_next
+
+                    all_test_losses.append(loss_em.item())
+                    all_f_losses.append(mse_F.item())
+
+                    # store F estimates for the chosen sequence
+                    if j %5 ==0:
+                        F_estimates.append(F_next.detach())
+                        F_losses_mse.append(mse_F.item())
+                        F_losses_total.append(loss_em.item())
+                        x_losses_mse.append(x_loss.item())
+
+                # store final F and final x_smooth for this sequence (after last EM iter)
+                final_F_list.append(F_current.detach().clone())   # [m, m]
+                final_x_list.append(x_curr[:, -1].unsqueeze(-1).detach().clone())      # [m, T]
+                        # final loss for this sequence (already weighted)
+                loss_list[j] = total_loss / float(num_em_iters)
+                # Mean x-loss for this sequence
+                # if this is the chosen sequence, print F_true and all F_est
+                if j %5 ==0:
+                    print(f"\n[M-step TEST] sequence {j} summary")
+                    print("F_true:\n", F_true.detach())
+                    print("F_init (F_base):\n", F_base.detach())
+
+                    mse_F_init = torch.mean((F_base - F_true) ** 2).item()
+                    print(f"Initial F MSE loss = {mse_F_init:.6e}")
+                    for k, (F_est, f_mse, x_mse, total_val) in enumerate(zip(F_estimates, F_losses_mse, x_losses_mse, F_losses_total)):
+                        f_db = 10.0 * math.log10(f_mse)
+                        x_db = 10.0 * math.log10(x_mse)
+                        tot_db = 10.0 * math.log10(total_val)
+                        print(f"\n  EM iter {k + 1}:")
+                        print("  F_est:\n", F_est)
+                        print(f"  F-loss (MSE_F)                 = {f_db:.2f} dB")
+                        print(f"  x-loss (MSE_x)                 = {x_db:.2f} dB")
+                        print(f"  total loss (F + reg + x)       = {tot_db:.2f} dB")
+                        # print(f"y_loss = {y_loss_tot[k]:2f}")
+
+
+        mean_loss = loss_list.mean().item()
+        print(f"[M-step TEST] mean_loss={mean_loss:.6f}")
+        # average x-MSE for each EM iteration over all sequences
+        mean_x_mse_per_iter = x_loss_sum_per_iter / float(N_T)
+
+        print("[M-step TEST] Mean x-MSE per EM iteration:")
+        for k in range(num_em_iters):
+            mse_k = mean_x_mse_per_iter[k].item()
+            db_k = 10.0 * math.log10(mse_k )
+            print(f"  EM iter {k + 1}: mean x-MSE = {mse_k:.6e}  ({db_k: .2f} dB)")
+
+        # convert per-iteration mean x-MSE to numpy (linear and dB)
+        mean_x_mse_per_iter_np = mean_x_mse_per_iter.detach()
+        mean_x_mse_per_iter_db_np = (10.0 * torch.log10(mean_x_mse_per_iter)).detach()
+
+
+        return mean_x_mse_per_iter_np,mean_x_mse_per_iter_db_np, final_F_list,final_x_list
+

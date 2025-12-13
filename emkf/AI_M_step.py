@@ -52,6 +52,8 @@ class DeltaF_MStepNet(nn.Module):
         z_in: [B, d_z] on CUDA
         returns ΔF: [B, m, m] on CUDA
         """
+        m = self.m
+        n=self.n
         B, dz = z_in.shape
         # blocks = []
         # start = 0
@@ -63,6 +65,12 @@ class DeltaF_MStepNet(nn.Module):
         #     start = end
         #
         # z_in = torch.cat(blocks, dim=1)
+        # z_in[:, 0: (m * m)] = 0          # no A1
+        # z_in[:, (m * m): (2 * m * m)] = 0#no A_2
+        # z_in[:, 2 * (self.m * self.m): 2 * (self.m * self.m) + (self.n * self.n)] = 0 #no S_delta_x
+        # # z_in[:, 3 * (m * m): 3 * (m * m) + (n * n)] = 0 #no S_nu
+        # z_in[:, 3 * (m * m) + (n * n): 4 * (m * m) + (n * n)] = 0# no C_delta_x_xminus
+        # z_in[:, 4 * (m * m) + (n * n): 5 * (m * m) + (n * n)] = 0 #NO F_current
 
         z = self.ln(z_in)
 
@@ -74,79 +82,80 @@ class DeltaF_MStepNet(nn.Module):
 # ============================================================
 # 2. Helpers for statistics and loss
 # ============================================================
-def compute_mstep_stats(x_smooth, x_prev_smooth, delta_x, nu, x_prev_hat, x_0):
-    """
-    All inputs are CUDA tensors.
-    Shapes (YOUR convention):
-      x_smooth      : [B, m, T]
-      x_prev_smooth : [B, m, T]
-      delta_x       : [B, m, T]
-      nu            : [B, n, T]
-      x_prev_hat    : [B, m, T]
-
-    Returns:
-      A1, A2, Sdx, Sv, Cdx
-      A1, A2, Sdx, Cdx : [B, m, m]
-      Sv               : [B, n, n]
-    """
-    B, m, T = x_smooth.shape
-    _, n, _ = nu.shape
-
-    # ---------- A1 = (1/T) Σ_t x_t x_{t-1}^T ----------
-    A1 = torch.zeros(B, m, m, device=x_smooth.device)
-
-    for t in range(T):
-        # x_t, x_prev: [B, m]
-        x_t = x_smooth[:, :, t]        # [B, m]
-        x_prev = x_prev_smooth[:, :, t]   # [B, m]
-
-        # [B, m, 1] * [B, 1, m] -> [B, m, m]
-        A1 += x_t.unsqueeze(2) * x_prev.unsqueeze(1)
-
-    A1 = A1 / T
-
-    # ---------- A2 = (1/T) Σ_t x_{t-1} x_{t-1}^T ----------
-    A2 = torch.zeros(B, m, m, device=x_smooth.device)
-
-    for t in range(T):
-        x_prev = x_prev_smooth[:, :, t]   # [B, m]
-        A2 += x_prev.unsqueeze(2) * x_prev.unsqueeze(1)
-
-    A2 = A2 / T
-
-    # ---------- S_Δx ----------
-    # delta_x: [B, m, T]
-    dx_mean   = delta_x.mean(dim=2, keepdim=True)   # [B, m, 1]  (mean over time)
-    dx_center = delta_x - dx_mean                   # [B, m, T]
-
-    Sdx = torch.zeros(B, m, m, device=delta_x.device)
-    for t in range(T):
-        dx_t = dx_center[:, :, t]                   # [B, m]
-        Sdx += dx_t.unsqueeze(2) * dx_t.unsqueeze(1)
-    Sdx = Sdx / T
-
-    # ---------- S_ν ----------
-    # nu: [B, n, T]
-    nu_mean   = nu.mean(dim=2, keepdim=True)        # [B, n, 1]
-    nu_center = nu - nu_mean                        # [B, n, T]
-
-    Sv = torch.zeros(B, n, n, device=nu.device)
-    for t in range(T):
-        nu_t = nu_center[:, :, t]                   # [B, n]
-        Sv += nu_t.unsqueeze(2) * nu_t.unsqueeze(1)
-    Sv = Sv / T
-    Sv = torch.zeros_like(Sv)
-
-    # ---------- C_{Δx, x-} = (1/T) Σ_t Δx_t x_{t-1}^T ----------
-    # delta_x: [B, m, T], x_prev_hat: [B, m, T]
-    Cdx = torch.zeros(B, m, m, device=delta_x.device)
-    for t in range(T):
-        dx_t    = delta_x[:, :, t]                  # [B, m]
-        xprev_t = x_prev_hat[:, :, t]               # [B, m]
-        Cdx += dx_t.unsqueeze(2) * xprev_t.unsqueeze(1)
-    Cdx = Cdx / T
-
-    return A1, A2, Sdx, Sv, Cdx
+# def compute_mstep_stats(x_smooth, x_prev_smooth, delta_x, nu, x_prev_hat, x_0):
+#     """
+#     All inputs are CUDA tensors.
+#     Shapes (YOUR convention):
+#       x_smooth      : [B, m, T]
+#       x_prev_smooth : [B, m, T]
+#       delta_x       : [B, m, T]
+#       nu            : [B, n, T]
+#       x_prev_hat    : [B, m, T]
+#
+#     Returns:
+#       A1, A2, Sdx, Sv, Cdx
+#       A1, A2, Sdx, Cdx : [B, m, m]
+#       Sv               : [B, n, n]
+#     """
+#     B, m, T = x_smooth.shape
+#     _, n, _ = nu.shape
+#
+#     # ---------- A1 = (1/T) Σ_t x_t x_{t-1}^T ----------
+#     A1 = torch.zeros(B, m, m, device=x_smooth.device)
+#
+#     for t in range(T):
+#         # x_t, x_prev: [B, m]
+#         x_t = x_smooth[:, :, t]        # [B, m]
+#         x_prev = x_prev_smooth[:, :, t]   # [B, m]
+#
+#         # [B, m, 1] * [B, 1, m] -> [B, m, m]
+#         A1 += x_t.unsqueeze(2) * x_prev.unsqueeze(1)
+#
+#     A1 = A1 / T
+#
+#     # ---------- A2 = (1/T) Σ_t x_{t-1} x_{t-1}^T ----------
+#     A2 = torch.zeros(B, m, m, device=x_smooth.device)
+#
+#     for t in range(T):
+#         x_prev = x_prev_smooth[:, :, t]   # [B, m]
+#         A2 += x_prev.unsqueeze(2) * x_prev.unsqueeze(1)
+#
+#     A2 = A2 / T
+#
+#     # ---------- S_Δx ----------
+#     # delta_x: [B, m, T]
+#     dx_mean   = delta_x.mean(dim=2, keepdim=True)   # [B, m, 1]  (mean over time)
+#     dx_center = delta_x - dx_mean                   # [B, m, T]
+#
+#     Sdx = torch.zeros(B, m, m, device=delta_x.device)
+#     for t in range(T):
+#         dx_t = dx_center[:, :, t]                   # [B, m]
+#         Sdx += dx_t.unsqueeze(2) * dx_t.unsqueeze(1)
+#     Sdx = Sdx / T
+#
+#     # ---------- S_ν ----------
+#     # nu: [B, n, T]
+#     nu_mean   = nu.mean(dim=2, keepdim=True)        # [B, n, 1]
+#     nu_center = nu - nu_mean                        # [B, n, T]
+#
+#     Sv = torch.zeros(B, n, n, device=nu.device)
+#     for t in range(T):
+#         nu_t = nu_center[:, :, t]                   # [B, n]
+#         Sv += nu_t.unsqueeze(2) * nu_t.unsqueeze(1)
+#     Sv = Sv / T
+#
+#
+#     # ---------- C_{Δx, x-} = (1/T) Σ_t Δx_t x_{t-1}^T ----------
+#     # delta_x: [B, m, T], x_prev_hat: [B, m, T]
+#     Cdx = torch.zeros(B, m, m, device=delta_x.device)
+#     for t in range(T):
+#         dx_t    = delta_x[:, :, t]                  # [B, m]
+#         xprev_t = x_prev_hat[:, :, t]               # [B, m]
+#         Cdx += dx_t.unsqueeze(2) * xprev_t.unsqueeze(1)
+#     Cdx = Cdx / T
+#
+#
+#     return A1, A2, Sdx, Sv, Cdx
 
 
 

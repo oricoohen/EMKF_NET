@@ -1,133 +1,341 @@
+####the old one without the f
 
-# Save as `tests/instability_debug.py` and run from project root.
-
-import importlib
-import traceback
-from importlib import reload
+####the old one without the f
 import torch
-import math
+import torch.nn as nn
+from datetime import datetime
 
-torch.manual_seed(0)
-torch.set_printoptions(profile="short")
+from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F,det
+from emkf.main_emkf_func_AI import EMKF_F
 
-# pick one failing config you reported (example)
-cfg = dict(use_proj=True, detach_prev=False, reset_hidden=False, detach_hidden_after=False, seed_psmooth_from_input=True)
+from Simulations.utils import DataLoader, DataGen, estimate_QR
 
-# reload module
-import RTSNet.PsmoothNN_combined as mod
-reload(mod)
+import Simulations.config as config
+from Simulations.Linear_canonical.parameters import F, H, Q_structure, R_structure,m1_0, m2_0
 
-PNotSmoothNN = mod.PNotSmoothNN
-PsmoothFromPnot = mod.PsmoothFromPnot
+from Smoothers.KalmanFilter_test import KFTest
+from Smoothers.RTS_Smoother_test import S_Test
 
-# helper to report a tensor
-def report_tensor(name, x):
-    if x is None:
-        print(f"{name}: None")
-        return
-    print(f"{name}: shape={tuple(x.shape)}, nan={bool(torch.isnan(x).any())}, inf={bool(torch.isinf(x).any())}, min={float(x.min()):.6g}, max={float(x.max()):.6g}")
+from RTSNet.RTSNet_nn import RTSNetNN
 
-def debug_one(config):
-    device = torch.device("cpu")
-    m = 3; n = 2; lr = 1e-3; T = 10
-    # small models
-    p0 = torch.eye(m)
-    net_not = PNotSmoothNN(m, n, p0.clone())
-    net_smooth = PsmoothFromPnot(m)
-    net_not.to(device); net_smooth.to(device)
-    opt = torch.optim.SGD(list(net_not.parameters()) + list(net_smooth.parameters()), lr=lr)
 
-    K_t = torch.randn(m, n, device=device)
-    S_gain = torch.randn(m, m, device=device)
-    A = torch.randn(m, m, device=device)
-    P_target = (A @ A.T).detach()
+from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
-    P_prev = p0.clone().to(device)
-    net_not.train(); net_smooth.train()
-    net_not.reset_state(); net_smooth.reset_state()
-    if not config['seed_psmooth_from_input']:
-        net_smooth.start = 1
-        net_smooth.h_Psmooth = torch.zeros(1, 1, net_smooth.d_hidden_Psmooth, device=device)
 
-    # optionally replace projector
-    reload(mod)
-    if not config['use_proj']:
-        mod.enforce_covariance_properties = lambda P, eps=1e-6: P
+import shutil
 
-    # enable anomaly detection to get stack when autograd fails
-    torch.autograd.set_detect_anomaly(True)
+print("Pipeline Start")
+print(torch.cuda.is_available())  # should be True
+print(torch.cuda.get_device_name(0))
+device = torch.device("cuda")
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = True
 
-    for t in range(T):
-        try:
-            if config['reset_hidden']:
-                net_not.reset_state(); net_smooth.reset_state()
-                if not config['seed_psmooth_from_input']:
-                    net_smooth.start = 1
-                    net_smooth.h_Psmooth = torch.zeros(1, 1, net_smooth.d_hidden_Psmooth, device=device)
+################
+### Get Time ###
+################
+today = datetime.today()
+now = datetime.now()
+strToday = today.strftime("%m.%d.%y")
+strNow = now.strftime("%H:%M:%S")
+strTime = strToday + "_" + strNow
+print("Current Time =", strTime)
+path_results_True = 'RTSNet/AI_M_step/exp_5/r_1/True_F/'######################################################################################################################################################################
+gauss = False
+path_results_False = 'RTSNet/AI_M_step/exp_5/r_1/False_F/'######################################################################################################################################################################
 
-            net_not.F = torch.randn(m, m, device=device) * 0.1
-            P_feed = P_prev if not config['detach_prev'] else P_prev.detach()
+####################
+### Design Model ###
+####################
+InitIsRandom_train = False
+InitIsRandom_cv = False
+InitIsRandom_test = False
+LengthIsRandom = False
 
-            opt.zero_grad()
+args = config.general_settings()
+args.N_E = 400  # Number of training examples (size of the training dataset).50
+args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
+args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-            # forward P_not
-            try:
-                P_not = net_not.forward(K_t.to(device), P_feed.to(device))
-            except Exception as e:
-                print("Exception during net_not.forward():", repr(e))
-                traceback.print_exc()
-                return
-            report_tensor("P_not (after forward)", P_not)
+args.T = 30    # Length of the time series for training and cross-validation sequences.
+args.T_test = 30 # Length of the time series for test sequences.
 
-            # forward P_smooth
-            try:
-                P_smooth = net_smooth.forward(P_not, S_gain.to(device))
-            except Exception as e:
-                print("Exception during net_smooth.forward():", repr(e))
-                traceback.print_exc()
-                # print intermediate debug info from net_smooth inputs
-                report_tensor("Input to Psmooth (P_not)", P_not)
-                return
-            report_tensor("P_smooth (after forward)", P_smooth)
+### training parameters
+args.n_steps = 175  # Number of training steps or iterations for optimization.
+args.n_batch = 10    # Batch size: the number of sequences processed at each training step.10
+args.lr = 1e-4       # Learning rate: controls how quickly the model updates during training.
+args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights to reduce overfitting.
 
-            loss = torch.norm(P_smooth - P_target)**2
-            print(f"step={t} loss finite={torch.isfinite(loss).item()} loss={float(loss):.6g}")
+max_iter = 3
 
-            # backward with anomaly detection
-            try:
-                loss.backward()
-            except Exception as e:
-                print("Exception during backward:", repr(e))
-                traceback.print_exc()
-                # print grads presence
-                for name, p in list(net_not.named_parameters()) + list(net_smooth.named_parameters()):
-                    if p.grad is None:
-                        continue
-                    if torch.isnan(p.grad).any() or torch.isinf(p.grad).any():
-                        print("bad grad:", name, "nan/inf present")
-                return
 
-            # compute grad norm
-            total = 0.0
-            any_nan = False
-            for p in list(net_not.parameters()) + list(net_smooth.parameters()):
-                if p.grad is None:
-                    continue
-                g = p.grad
-                if torch.isnan(g).any() or torch.isinf(g).any():
-                    any_nan = True
-                total += (g.detach().norm()**2).item()
-            grad_norm = math.sqrt(total)
-            print(f"step={t} grad_norm={grad_norm:.6g} any_nan_grad={any_nan}")
+# True model
+q2 = 0.01
+r2 =1.
+v_db = 0
+# snr_db =10.0######################################################################################################################################################################
+# r2 = 10.0**(-snr_db/10.0)
+# q2 = r2/(10.0**v_db/10.0)
 
-            opt.step()
-            P_prev = P_not
+Q = q2 * Q_structure.to(device)
+R = r2 * R_structure.to(device)
+s = 0.951456
+F = s*torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
+H = torch.tensor([[1., 1.], [0.25, 1.]], device=device)
+sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
+SystemModel.F_gen = True
+m1_0 = m1_0.to(device)
+m2_0 = m2_0.to(device)
+sys_model.InitSequence(m1_0, m2_0)
+print("State Evolution Matrix:",F)
+print("Observation Matrix:",H)
 
-        except Exception as e:
-            print("Outer exception:", repr(e))
-            traceback.print_exc()
-            return
 
-if __name__ == "__main__":
-    print("Debugging config:", cfg)
-    debug_one(cfg)
+###################################
+### Data Loader (Generate Data) ###
+###################################
+dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
+dataFileName = '2x2_1.pt'
+dataFileName_F = '2x2_F_reg+5_deg'
+print("Start Data Gen")
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+print("Data Load")
+
+
+[train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
+[F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F, map_location=device)
+print("trainset size:",train_target.size())#(seq,m,T)
+print("cvset size:",cv_target.size())
+print("testset size:",test_target.size())
+
+
+###############################################################################################
+# ##estimate Q and R from data
+# if gauss:
+#     Q_hat, R_hat = estimate_QR(train_input, train_target)
+#     Q = Q_hat
+#     R = R_hat
+#     sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
+
+#################################################################################################
+
+############################
+# --- GPU moves for datasets (dtype aligned with F) ---
+ddtype = F.dtype
+train_input = train_input.to(device=device, dtype=ddtype)
+train_target = train_target.to(device=device, dtype=ddtype)
+cv_input = cv_input.to(device=device, dtype=ddtype)
+cv_target = cv_target.to(device=device, dtype=ddtype)
+test_input = test_input.to(device=device, dtype=ddtype)
+test_target = test_target.to(device=device, dtype=ddtype)
+############################
+sys_model.F_train = F_train_mat
+sys_model.F_valid = F_val_mat
+sys_model.F_test = F_test_mat
+sys_model.F_train_TRUE = F_train_mat
+sys_model.F_valid_TRUE = F_val_mat
+sys_model.F_test_TRUE = F_test_mat
+# print(F_train_mat,'111111111111111')
+# print(F_val_mat,'22222222222222222222')
+print(F_test_mat,'333333333333333')
+########################################
+### Evaluate Observation Noise Floor ###
+########################################
+
+
+
+
+loss_obs = nn.MSELoss(reduction='mean')
+MSE_obs_linear_arr = torch.empty(args.N_T, device=device)# MSE [Linear]
+for j in range(0, args.N_T):
+   MSE_obs_linear_arr[j] = loss_obs(test_input[j], test_target[j]).item()
+MSE_obs_linear_avg = torch.mean(MSE_obs_linear_arr)
+MSE_obs_dB_avg = 10 * torch.log10(MSE_obs_linear_avg)
+
+# Standard deviation
+MSE_obs_linear_std = torch.std(MSE_obs_linear_arr, unbiased=True)
+
+# Confidence interval
+obs_std_dB = 10 * torch.log10(MSE_obs_linear_std + MSE_obs_linear_avg) - MSE_obs_dB_avg
+
+print("Observation Noise Floor - MSE LOSS:", MSE_obs_dB_avg, "[dB]")
+print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
+
+
+
+# ##############################
+# ### Evaluate Kalman Filter ###
+# ##############################
+print("Evaluate Kalman Filter True")
+KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
+# #############################
+### Evaluate RTS Smoother ###
+############################
+
+print("Evaluate RTS Smoother True")
+S_Test(sys_model, test_input, test_target,F = F_test_mat)
+
+######BAD F############################
+
+##################second training
+sys_model_2 = SystemModel(F, Q, H, R, args.T, args.T_test)
+sys_model_2.InitSequence(m1_0, m2_0)
+######create new data
+
+
+
+sys_model_2.F_train_TRUE = F_train_mat
+sys_model_2.F_valid_TRUE = F_val_mat
+sys_model_2.F_test_TRUE = F_test_mat
+
+
+
+#########change to wrong f option B
+
+# sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+# sys_model_2.F_valid = rotate_F(F_val_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+# sys_model_2.F_test= rotate_F(F_test_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+sys_model_2.F_train = F_train_mat.copy()
+sys_model_2.F_valid = F_val_mat.copy()
+sys_model_2.F_test = F_test_mat.copy()
+# for i in range(len(F_train_mat)):
+#     sys_model_2.F_train[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+# for i in range(len(F_val_mat)):
+#     sys_model_2.F_valid[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+# for i in range(len(F_test_mat)):
+#     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+    # sys_model_2.F_test[i] = torch.tensor([[1.2237, -0.0927],[1.8518, 0.0819]], device=device, dtype=ddtype)
+
+
+# random WRONG F per sequence using your helper
+sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+sys_model_2.F_valid = rotate_F(F_val_mat,  i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+sys_model_2.F_test  = rotate_F(F_test_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+
+
+sys_model_2.args = args
+print("F WRONGGGGGG:",sys_model_2.F_test)
+
+
+
+###################check the regu;ar rts
+print('regular kalman and rts with wrong F')
+KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+
+S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+
+#######################
+### RTSNet Pipeline ###
+#######################
+########emkf#################################
+
+rtsnet_models= []
+
+
+# Create RTSNet
+RTSNet_model = RTSNetNN()
+RTSNet_model.NNBuild(sys_model, args)
+RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
+RTSNet_Pipeline.setssModel(sys_model)
+RTSNet_Pipeline.setModel(RTSNet_model,args)
+RTSNet_Pipeline.setTrainingParams(args)
+RTSNet_model.to(device)
+
+path_results_True_rts = path_results_True+'best-rts_true.pt'
+path_results_wrong_rts = path_results_False+'best-rts_false.pt'
+#####TRAIN GOOD F#####
+print('rtssnet and psmooth with trueeeeeeee F')
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+
+### Test Neural Network
+RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_True_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
+
+
+#RTSNet_Pipeline.setTrainingParams(args_big)
+print('rtssnet and psmooth with WRONGGGGGGG F')
+#######TRAIN BAD F########
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+
+## Test Neural Network
+RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
+
+# The folder where the new copies will be saved.
+destination_folder = 'RTSNet/AI_M_step/exp_5/r_1/EMKF/False/'######################################################################################################################################################################
+
+# --- Step 2: Loop 5 times and copy the file ---
+# Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
+# Build the full destination path
+# destination_path_RTS = destination_folder + file_rtsnet
+
+destination_path_M= destination_folder + f"try_15_on_last_f_3_iter_mix_f_snr_add.pt"
+
+# destination_path_M = [destination_folder + "M_iter0.pt",destination_folder + "M_iter1.pt",destination_folder + "M_iter2.pt"]
+# load_m= destination_folder + f"M_rand_false_trained.pt"
+######START THE EMKF TRAINING##########
+
+
+# model_pathes = []
+# m_step_pathes = []
+# for i in range(max_iter):
+#     # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
+#
+#     file_rtsnet = f"model_e_q{i}_rand_false_trained_2iter.pt"
+#     file_m_step = f"m_step_e_q{i}M_rand_false_trained_with_rts_2_iter_.pt"
+#     # Build the full destination path
+#     destination_path_RTS = destination_folder + file_rtsnet
+#     destination_path_m_step = destination_folder + file_m_step
+#     model_pathes.append(destination_path_RTS)
+#     m_step_pathes.append(destination_path_m_step)
+
+sys_model_2.args = args
+RTSNet_Pipeline.setTrainingParams(args)
+
+
+# RTSNet_Pipeline.end_To_end_m_net(sys_model_2,cv_input,cv_target,train_input,train_target,destination_path_M,destination_path_RTS=path_results_wrong_rts,
+#                     load_base_m_mmodel=load_m,num_em_iters=3,alpha=(0.05, 0.1, 0.85),lambda_F=0.01,generate_f=True,non_linear_h=False)
+
+# RTSNet_Pipeline.end_to_end_test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, non_linear_h=False)
+
+# RTSNet_Pipeline.train_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+#
+
+
+
+# RTSNet_Pipeline.train_mstep_net_batch(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+
+# print('check FFFFFFFFFFFF', sys_model_2.F_test)
+# RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
+
+
+# RTSNet_Pipeline.one_train_m_step_net( sys_model_2, cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, destination_path_RTS = path_results_wrong_rts,  lambda_F=1e-3, generate_f=True, non_linear_h=False)
+
+#
+# RTSNet_Pipeline.one_test_mstep_net(sys_model_2, test_input, test_target,
+#                        destination_path_RTS =path_results_wrong_rts ,destination_path_M=destination_path_M, lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False)
+#
+# sys_model_2.F_test = rotate_F(F_test_mat)
+# print('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
+# sys_model_2.F_test = F_test_mat
+# for i in range(len(F_test_mat)):
+#     # sys_model_2.F_train =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+#     # sys_model_2.F_valid =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+#     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+# EMKF_F(sys_model_2,RTSNet_Pipeline,train_input, train_target, cv_input, cv_target,test_input, test_target,model_pathes,psmooth_pathes,3)
+
+
+
+
+
+# RTSNet_Pipeline.train_mstep_net_with_new_enters(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+
+
+
+RTSNet_Pipeline.test_mstep_net_with_new_enteries(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+                   alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
+

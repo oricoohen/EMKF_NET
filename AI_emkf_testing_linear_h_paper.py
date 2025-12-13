@@ -240,7 +240,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 model_pathes = []
 psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/paper/exp_1/r_10/EMKF/False/'###############################################################################################################################################
+destination_folder = 'RTSNet/paper/exp_2/r_10/EMKF/False/'###############################################################################################################################################
 for i in range(max_iter):
     file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
     file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"

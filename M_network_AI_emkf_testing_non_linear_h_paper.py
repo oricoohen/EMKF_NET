@@ -36,9 +36,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_3/r_1/True_F/'  ###############################################################################################################################################
+path_results_True = 'RTSNet/AI_M_step/exp_3/r_001/True_F/'  ###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_3/r_1/False_F/'  ###############################################################################################################################################
+path_results_False = 'RTSNet/AI_M_step/exp_3/r_001/False_F/'  ###############################################################################################################################################
 
 
 ####################
@@ -63,7 +63,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 1.
+r2 = 0.01
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -228,8 +228,8 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet//AI_M_step/exp_3/r_1/EMKF/False/'###############################################################################################################################################
-destination_path_M = destination_folder + 'M_rand_false_trained.pt'
+destination_folder = 'RTSNet//AI_M_step/exp_3/r_001/EMKF/False/'###############################################################################################################################################
+destination_path_M = destination_folder + 'try_10_on_last_f_3_iter_mixed_f.pt'
 #############################################################################
 # AI EMKF Sequential Testing
 print('\n=== AI EMKF Sequential Learning and Testing ===')

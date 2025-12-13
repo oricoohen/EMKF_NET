@@ -36,7 +36,8 @@ def generate_random_F_matrices(num_F: int, delta_ = 0.5):
     # base = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]],device = DEVICE, dtype=torch.float32)
     base = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=DEVICE)
     for _ in range(num_F):
-        F_i = rotate_F(base.clone(), i=0, j=1, theta=1, many=False, randomit=True)
+        # F_i = rotate_F(base.clone(), i=0, j=1, theta=1, many=False, randomit=True)
+        F_i = rotate_F(base.clone(), i=0, j=1, theta=0.2, many=False, randomit=False)
         # F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
 
         F_mats.append(F_i.clone())

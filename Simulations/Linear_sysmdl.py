@@ -43,14 +43,16 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2):
         List[torch.Tensor]: List of random state evolution matrices F.
     """
     F_matrices = []
-    F = torch.tensor([[0.999, 0.1],
-                      [0.2, 0.8]], device=DEVICE)
+    # F = torch.tensor([[0.999, 0.1],
+    #                   [0.2, 0.8]], device=DEVICE)
+    s = 0.951456
     F = torch.tensor([[0.83, 0.2],
                         [0.2, 0.83]], device=DEVICE)
     for _ in range(num_F+1):
         # F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
         # F_i = torch.tensor([[0.7954, 0.1970], [0.1970, 0.8646]], device=DEVICE)
         F_i = rotate_F(F, i=0, j=1, theta=1,mult=1, many=False, randomit=True)
+        # F_i = rotate_F(F, i=0, j=1, theta=0.6,mult=1, many=False, randomit=False)
                 # F = torch.tensor([[-0.9, 0.],
         #                    [0.05, 1.98]])
 #         F[0, 1] = F[0, 1] + uniform_two_ranges(0.0, 1) * delta_t * 0.125  # random
@@ -260,7 +262,7 @@ class SystemModel:
         xt = self.x_prev
 
         q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(10, device=self.device, dtype=self.F.dtype)  # Var(r)
+        r2 = torch.tensor(1., device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
         lam_r = 1.0 / torch.sqrt(r2)
@@ -285,7 +287,7 @@ class SystemModel:
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
 
-                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
+                # lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
                 # eq = Exponential(lam_vec_q).sample()  # shape (n,)
                 # eq = z - (1.0 / lam_vec_q)
                 ###################################
@@ -310,7 +312,7 @@ class SystemModel:
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
                 er = distrib.rsample()
                 ####################################ori added
-                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
+                # lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
                 # er = Exponential(lam_vec_r).sample()  # shape (n,)
                 # er = z -(1.0/lam_vec_r)
                 ######################################
