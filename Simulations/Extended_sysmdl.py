@@ -1,17 +1,3 @@
-"""# **Class: System Model for Non-linear Cases**
-
-1 Store system model parameters: 
-    state transition function f, 
-    observation function h, 
-    process noise Q, 
-    observation noise R, 
-    train&CV dataset sequence length T,
-    test dataset sequence length T_test,
-    state dimension m,
-    observation dimension n, etc.
-
-2 Generate datasets for non-linear cases
-"""
 
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
@@ -275,7 +261,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True,x0_list = None, F_init=None):
+    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True, H_gen=False,x0_list = None, F_init=None, H_init=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -298,12 +284,20 @@ class SystemModel:
         else:
             F_matrices = F_gen
 
+        if H_gen == True:
+            from Simulations.Linear_sysmdl import generate_random_H_matrices
+            H_matrices = generate_random_H_matrices(size // 10 + 1, obs_dim=self.n, state_dim=self.m, H_init=H_init)
+        else:
+            # For non-linear h, H_matrices will be None or can be a placeholder
+            H_matrices = H_gen
 
         for i in range(0, size):
             index_F = i // 10
             self.F = F_matrices[index_F]
             self.F_T = F_matrices[index_F].T
             self.update_f(F_matrices[index_F])
+            self.H = H_matrices[index_F]
+            self.H_T = H_matrices[index_F].T
             # Generate Sequence
             ### Generate Examples
             # ---- choose init x0 for this sequence i ----ori
@@ -332,4 +326,4 @@ class SystemModel:
                 # Training sequence output
                 self.Target[i, :, :] = self.x
 
-        return F_matrices
+        return F_matrices, H_matrices

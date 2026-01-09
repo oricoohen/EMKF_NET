@@ -37,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_1/r_0001/True_F/'  ###############################################################################################################################################
+path_results_True = 'RTSNet/AI_M_step/exp_2/r_0001/True_F/'  ###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_1/r_0001/False_F/'  ###############################################################################################################################################
+path_results_False = 'RTSNet/AI_M_step/exp_2/r_0001/False_F/'  ###############################################################################################################################################
 
 
 ####################
@@ -232,8 +232,8 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet//AI_M_step/exp_1/r_0001/EMKF/False/'###############################################################################################################################################
-destination_path_M = destination_folder + 'M_net_trained_3_datasets_no_mult.pt'
+destination_folder = 'RTSNet//AI_M_step/exp_2/r_0001/EMKF/False/'###############################################################################################################################################
+destination_path_M = destination_folder + 'M_rand_false_trained.pt'
 # destination_path_M_2 =  destination_folder + 'try_one_iter_just_x_mix_f.pt'
 # destination_path_M = destination_folder +f"M_rand_false_trained_F_20_net_paper.pt"
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'

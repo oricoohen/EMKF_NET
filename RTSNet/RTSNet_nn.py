@@ -23,7 +23,8 @@ class RTSNetNN(KalmanNetNN):
     #############
     def NNBuild(self, ssModel, args):
 
-
+        self.F = ssModel.F
+        self.H = ssModel.H
         self.InitSystemDynamics(ssModel.f, ssModel.h, ssModel.m, ssModel.n)
 
         self.InitKGainNet(ssModel.prior_Q, ssModel.prior_Sigma, ssModel.prior_S, args)
@@ -62,6 +63,19 @@ class RTSNetNN(KalmanNetNN):
         nn.Linear(self.d_hidden_FF1_bw, self.d_hidden_FF2_bw), nn.ReLU(),
         nn.LayerNorm(self.d_hidden_FF2_bw))
 
+        # ─── NEW: two-layer embedder for H.flatten() (H diversity support) ───
+        self.d_input_HH_bw = self.n * self.m  # raw H.flatten() size
+        self.d_hidden_HH1_bw = self.d_input_HH_bw * 2  # intermediate layer
+        self.d_hidden_HH2_bw = self.n * args.in_mult_RTSNet  # final embed dim
+        self.FC_H_bw = nn.Sequential(
+            nn.Linear(self.d_input_HH_bw, self.d_hidden_HH1_bw),
+            nn.ReLU(),
+            nn.LayerNorm(self.d_hidden_HH1_bw),
+            nn.Linear(self.d_hidden_HH1_bw, self.d_hidden_HH2_bw),
+            nn.ReLU(),
+            nn.LayerNorm(self.d_hidden_HH2_bw))
+
+
         # BW GRU to track Q
         self.d_input_Q_bw = self.m * args.in_mult_RTSNet
         self.d_hidden_Q_bw = self.m ** 2
@@ -71,7 +85,9 @@ class RTSNetNN(KalmanNetNN):
 
         # BW GRU to track Sigma
         #self.d_input_Sigma_bw = self.d_hidden_Q_bw + 2 * self.m * args.in_mult_RTSNet oriiiiiii
-        self.d_input_Sigma_bw = (self.d_hidden_Q_bw + 2 * self.m * args.in_mult_RTSNet+ self.d_hidden_FF2_bw)
+        # Updated to include both F and H embeddings
+        self.d_input_Sigma_bw = (self.d_hidden_Q_bw + 2 * self.m * args.in_mult_RTSNet +
+                                 self.d_hidden_FF2_bw + self.d_hidden_HH2_bw)
         self.d_hidden_Sigma_bw = mult_bw*self.m ** 2
         self.GRU_Sigma_bw = nn.GRU(self.d_input_Sigma_bw, self.d_hidden_Sigma_bw)
         self.h_Sigma_bw = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma_bw,
@@ -213,16 +229,20 @@ class RTSNetNN(KalmanNetNN):
         in_FC4 = torch.cat((bw_innov_diff, bw_evol_diff), 2)
         out_FC4 = self.FC4_bw(in_FC4)
 
-
-
-         # embed the current F ori
-
+        # Embed the current F
         F_vec = self.F.flatten().view(1, 1, -1)  # [1,1,m²]
-        F_vec =self.standardize(F_vec)
+        F_vec = self.standardize(F_vec)
         F_emb = self.FC_F_bw(F_vec)  # [1,1,d_hidden_FF2_bw]
-        # Sigma_GRU
-        # in_Sigma = torch.cat((out_Q, out_FC4), 2) ori just this from all the blockk
-        in_Sigma = torch.cat((out_Q, out_FC4, F_emb), 2)#ori
+
+        # Embed the current H (NEW for H diversity)
+        H_vec = self.H.flatten().view(1, 1, -1)  # [1,1,n*m]
+        H_vec = self.standardize(H_vec)
+        H_emb = self.FC_H_bw(H_vec)  # [1,1,d_hidden_HH2_bw]
+
+        # Sigma_GRU - now includes both F and H information
+        # in_Sigma = torch.cat((out_Q, out_FC4), 2)  # Original
+        # in_Sigma = torch.cat((out_Q, out_FC4, F_emb), 2)  # With F only
+        in_Sigma = torch.cat((out_Q, out_FC4, F_emb, H_emb), 2)  # With F and H
 
         out_Sigma, self.h_Sigma_bw = self.GRU_Sigma_bw(in_Sigma, self.h_Sigma_bw)
 

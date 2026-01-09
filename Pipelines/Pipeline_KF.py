@@ -45,7 +45,7 @@ class Pipeline_KF:
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay)
 
 
-    def NNTrain(self, n_Examples, train_input, train_target, n_CV, cv_input, cv_target, many_F = True):
+    def NNTrain(self, n_Examples, train_input, train_target, n_CV, cv_input, cv_target, many_F = True, many_H = False):
 
         self.N_E = n_Examples
         self.N_CV = n_CV
@@ -83,6 +83,11 @@ class Pipeline_KF:
                     index = j // 10
                     self.ssModel.F = self.ssModel.F_valid[index]
                     self.model.update_F(self.ssModel.F)
+
+                if many_H:
+                    index = j // 10
+                    self.ssModel.H = self.ssModel.H_valid[index]
+                    self.model.update_H(self.ssModel.H)
 
                 y_cv = cv_input[j, :, :]
                 self.model.InitSequence(self.ssModel.m1x_0, self.ssModel.T)
@@ -124,6 +129,11 @@ class Pipeline_KF:
                     index = n_e // 10
                     self.ssModel.F = self.ssModel.F_train[index]
                     self.model.update_F(self.ssModel.F)
+
+                if many_H:
+                    index = n_e // 10
+                    self.ssModel.H = self.ssModel.H_train[index]
+                    self.model.update_H(self.ssModel.H)
 
                 y_training = train_input[n_e, :, :]
                 self.model.InitSequence(self.ssModel.m1x_0, self.ssModel.T)
@@ -198,7 +208,7 @@ class Pipeline_KF:
 
             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
 
-    def NNTest(self, n_Test, test_input, test_target,sysmodel = None, many_F = True):
+    def NNTest(self, n_Test, test_input, test_target,sysmodel = None, many_F = True, many_H = False):
 
         self.N_T = n_Test
 
@@ -234,6 +244,11 @@ class Pipeline_KF:
                 index = j // 10
                 self.ssModel.F = self.ssModel.F_test[index]
                 self.model.update_F(self.ssModel.F)
+
+            if many_H:
+                index = j // 10
+                self.ssModel.H = self.ssModel.H_test[index]
+                self.model.update_H(self.ssModel.H)
 
             y_mdl_tst = test_input[j, :, :]
 

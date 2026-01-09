@@ -63,7 +63,7 @@ def compute_cross_covariances(F, H, Ks, Ps, SGains):
     return V
 
 
-def S_Test(SysModel, test_input, test_target, F, generate_f=True, allStates=True, randomInit=False, test_init=None,
+def S_Test(SysModel, test_input, test_target, F, H=None, generate_f=True,generate_h = True, allStates=True, randomInit=False, test_init=None,
 
            init_x_list=None, init_P_list=None):
     # LOSS
@@ -108,6 +108,26 @@ def S_Test(SysModel, test_input, test_target, F, generate_f=True, allStates=True
             KF.F_T = F[j].T
             RTS.F = F[j]
             RTS.F_T = F[j].T
+            # print('F matrix used in sequence', j, ':', SysModel.F)
+
+
+        if generate_h == True:  # Use same indexing as F
+            H_index = j // 10
+            SysModel.H = H[H_index]
+            SysModel.H_T = SysModel.H.T
+            KF.H = H[H_index]
+            KF.H_T = H[H_index].T
+            RTS.H = H[H_index]
+            RTS.H_T = H[H_index].T
+
+        else:
+            SysModel.H = H[j]
+            SysModel.H_T = SysModel.H.T
+            KF.H = H[j]
+            KF.H_T = H[j].T
+            RTS.H = H[j]
+            RTS.H_T = H[j].T
+            # print('H matrix used in sequence', j, ':', SysModel.H)
         if (randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j, :], 1), SysModel.m2x_0)
         else:

@@ -63,7 +63,7 @@ def estimate_QR(x, y, F, H=None, h=None, unbiased=False):
     R_hat = enforce_covariance_properties1(R_hat)
 
     return Q_hat, R_hat
-def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True,x0_list=None,F_init=None):
+def DataGen(args, SysModel_data, fileName,fileName_F,fileName_H=None,delta = 0.5, randomInit_train=False,randomInit_cv=False,randomInit_test=False,randomLength=False,Test = False,F_gen = True,H_gen = True,x0_list=None,F_init=None,H_init=None):
 
     if Test is False:
         ##################################
@@ -72,14 +72,14 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
         #ori generate F
         if x0_list is not None:
             if F_init is not None:
-                F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list[0], F_init=F_init[0])
+                F_matrices_train, H_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list[0], F_init=F_init[0], H_init=H_init[0] if H_init is not None else None)
             else:
-                F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, x0_list=x0_list[0],F_init=F_init)
+                F_matrices_train, H_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, H_gen=H_gen, x0_list=x0_list[0],F_init=F_init, H_init=H_init[0] if H_init is not None else None)
         else:
             if F_init is not None:
-                F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, x0_list=x0_list, F_init=F_init[0])
+                F_matrices_train, H_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, H_gen=H_gen, x0_list=x0_list, F_init=F_init[0], H_init=H_init[0] if H_init is not None else None)
             else:
-                F_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, x0_list=x0_list, F_init=F_init)
+                F_matrices_train, H_matrices_train = SysModel_data.GenerateBatch(args.N_E, args.T, delta, randomInit=randomInit_train,randomLength=randomLength, F_gen=F_gen, H_gen=H_gen, x0_list=x0_list, F_init=F_init, H_init=H_init[0] if H_init is not None else None)
         training_input = SysModel_data.Input
         training_target = SysModel_data.Target
         if(randomInit_train):
@@ -93,14 +93,14 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
         ####################################
         if x0_list is not None:
             if F_init is not None:
-                F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list[1], F_init=F_init[1])
+                F_matrices_val, H_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list[1], F_init=F_init[1], H_init=H_init[1] if H_init is not None else None)
             else:
-                F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list[1], F_init=F_init)
+                F_matrices_val, H_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list[1], F_init=F_init, H_init=H_init[1] if H_init is not None else None)
         else:
             if F_init is not None:
-                F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list, F_init=F_init[1])
+                F_matrices_val, H_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list, F_init=F_init[1], H_init=H_init[1] if H_init is not None else None)
             else:
-                F_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list, F_init=F_init)
+                F_matrices_val, H_matrices_val =SysModel_data.GenerateBatch(args.N_CV, args.T, delta, randomInit=randomInit_cv,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list, F_init=F_init, H_init=H_init[1] if H_init is not None else None)
         cv_input = SysModel_data.Input
         cv_target = SysModel_data.Target
         if(randomInit_cv):
@@ -113,10 +113,14 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
             x0_list = x0_list[2]
         if F_init is not None:
             F_init = F_init[2]
+        if H_init is not None:
+            H_init = H_init[2]
     else:
         print("Generating data for test set only...")
         F_matrices_train = None
+        H_matrices_train = None
         F_matrices_val = None
+        H_matrices_val = None
         training_input = None
         training_target = None
         training_init = None
@@ -126,7 +130,7 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
     ##############################
     ### Generate Test Sequence ###
     ##############################
-    F_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=F_gen,x0_list = x0_list, F_init=F_init)
+    F_matrices_test, H_matrices_test = SysModel_data.GenerateBatch(args.N_T, args.T_test, delta, randomInit=randomInit_test,randomLength=randomLength,F_gen=F_gen,H_gen=H_gen,x0_list = x0_list, F_init=F_init, H_init=H_init)
     test_input = SysModel_data.Input
     test_target = SysModel_data.Target
     if(randomInit_test):
@@ -142,9 +146,13 @@ def DataGen(args, SysModel_data, fileName,fileName_F,delta = 0.5, randomInit_tra
     if(randomInit_train or randomInit_cv or randomInit_test):
         torch.save([training_input, training_target, training_init, cv_input, cv_target, cv_init, test_input, test_target, test_init], fileName)
         torch.save([F_matrices_train,F_matrices_val,F_matrices_test], fileName_F)
+        if fileName_H is not None:
+            torch.save([H_matrices_train,H_matrices_val,H_matrices_test], fileName_H)
     else:
         torch.save([training_input, training_target, cv_input, cv_target, test_input, test_target], fileName)
         torch.save([F_matrices_train,F_matrices_val,F_matrices_test], fileName_F)
+        if fileName_H is not None:
+            torch.save([H_matrices_train,H_matrices_val,H_matrices_test], fileName_H)
 
 
 

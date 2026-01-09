@@ -26,16 +26,16 @@ print("Pipeline Start")
 print(torch.cuda.is_available())  # should be True
 print(torch.cuda.get_device_name(0))
 device = torch.device("cuda")
-import torch.backends.cudnn as cudnn
-cudnn.benchmark = True
-SEED = 0
-
-random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
-
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
+# import torch.backends.cudnn as cudnn
+# cudnn.benchmark = True
+# SEED = 0
+#
+# random.seed(SEED)
+# torch.manual_seed(SEED)
+# torch.cuda.manual_seed_all(SEED)
+#
+# torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.deterministic = True
 ################
 ### Get Time ###
 ################
@@ -75,8 +75,8 @@ max_iter = 3
 
 
 # True model
-q2 = 0.1
-r2 =0.1
+q2 = 1.
+r2 =1.
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
@@ -99,9 +99,9 @@ print("Observation Matrix:",H)
 ### Data Loader (Generate Data) ###
 ###################################
 dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
-dataFileName = '2x2_2.pt'
-dataFileName_F = '2x2_F_fixed2'  # F is fixed (not diverse)
-dataFileName_H = '2x2_H_diverse2'  # Only H is diverse
+dataFileName = '2x2_1.pt'
+dataFileName_F = '2x2_F_fixed'  # F is fixed (not diverse)
+dataFileName_H = '2x2_H_diverse'  # Only H is diverse
 print("Start Data Gen")
 F_in = [F for _ in range(args.N_E)]  # F is fixed (not diverse)
 DataGen(args, sys_model, dataFolderName + dataFileName, dataFolderName + dataFileName_F, fileName_H=dataFolderName + dataFileName_H, delta=1, randomInit_train=InitIsRandom_train, randomInit_cv=InitIsRandom_cv,
@@ -279,7 +279,7 @@ print('RTSNet and Psmooth with FIXED F (true) and WRONG H')
 # RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target,
 #                         path_results=path_results_wrong_rts, load_model_path=path_results_True_rts,
 #                         generate_f=False, generate_h=True)  # F is fixed, only H diverse
-
+#
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,
                             generate_f=False, generate_h=True,  # F is fixed, only H diverse
@@ -304,8 +304,8 @@ sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
 
 
-# RTSNet_Pipeline.train_H_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
-#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_H=1e-4, generate_h=True)
+RTSNet_Pipeline.train_H_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
+                        destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_H=1e-4, generate_h=True)
 
 
 

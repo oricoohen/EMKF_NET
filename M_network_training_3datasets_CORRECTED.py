@@ -87,17 +87,6 @@ print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT F MATRICES")
 print("="*80)
 
-# Generate 3 different F matrices for the 3 datasets
-F_matrices_for_datasets = [
-    torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE),
-    torch.tensor([[0.85, 0.15], [0.15, 0.85]], device=DEVICE, dtype=DTYPE),
-    torch.tensor([[0.80, 0.25], [0.25, 0.80]], device=DEVICE, dtype=DTYPE),
-]
-
-print("\nF matrices for each dataset:")
-for i, F_mat in enumerate(F_matrices_for_datasets):
-    print(f"Dataset {i}:")
-    print(F_mat)
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
@@ -120,7 +109,7 @@ for dataset_id in range(cycles):
     print(f"{'='*80}")
 
     # Create system model with this F
-    F_current = F_matrices_for_datasets[dataset_id]
+    F_current = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
     sys_model = SystemModel(F_current, Q, H, R, args.T, args.T_test)
     sys_model.InitSequence(m1_0, m2_0)
 
@@ -206,7 +195,7 @@ print("SETTING UP SYSTEM MODEL AND PIPELINE")
 print("="*80)
 
 # Create system model (F will be updated during training)
-F_initial = F_matrices_for_datasets[0]
+F_initial = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
 sys_model = SystemModel(F_initial, Q, H, R, args.T, args.T_test)
 sys_model.InitSequence(m1_0, m2_0)
 
@@ -284,95 +273,4 @@ print("TRAINING COMPLETE")
 print("="*80)
 print(f"Best M-network model saved to: {destination_path_M}")
 
-#########################################################################################################
-# OPTIONAL: TEST THE TRAINED MODEL
-#########################################################################################################
-
-print("\n" + "="*80)
-print("TESTING ON 3 DATASETS (OPTIONAL)")
-print("="*80)
-
-# After training, you can test on each dataset separately
-# Or implement a test function that handles the 3-dataset structure
-
-for dataset_id in range(cycles):
-    print(f"\n--- Testing Dataset {dataset_id} ---")
-
-    test_input = all_test_inputs[dataset_id]
-    test_target = all_test_targets[dataset_id]
-    true_F = F_matrices_for_datasets[dataset_id]
-
-    # Set up system model with true F for this dataset
-    sys_model_test = SystemModel(true_F, Q, H, R, args.T, args.T_test)
-    sys_model_test.InitSequence(m1_0, m2_0)
-    sys_model_test.F_test = all_F_matrices_test[dataset_id]
-    sys_model_test.F_test_TRUE = all_F_matrices_test[dataset_id]
-
-    # You can use one of these test functions:
-    # 1. Test with true F (baseline)
-    if dataset_id == 0:
-        results = RTSNet_Pipeline.NNTest_no_p(
-            sys_model_test,
-            test_input,
-            test_target,
-            load_model_path=path_results_True_rts,
-            generate_f=False,
-            init_x_list=None,
-            init_P_list=None
-        )
-    else:
-        # Use last state from previous dataset for continuity
-        x_last = results[3][:, :, -1].clone()
-        xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]
-        pT0_last = sys_model_test.m2x_0.clone().detach()
-
-        results = RTSNet_Pipeline.NNTest_no_p(
-            sys_model_test,
-            test_input,
-            test_target,
-            load_model_path=path_results_True_rts,
-            generate_f=False,
-            init_x_list=xT0_last,
-            init_P_list=pT0_last
-        )
-
-    mse_db = results[2]
-    print(f"Dataset {dataset_id} - MSE: {mse_db:.3f} dB")
-
-print("\n" + "="*80)
-print("ALL DONE!")
-print("="*80)
-
-"""
-KEY DIFFERENCES FROM YOUR ORIGINAL CODE:
-
-1. CORRECTED: Now storing train, cv, AND test data
-   - all_train_inputs, all_train_targets (for training)
-   - all_cv_inputs, all_cv_targets (for validation)
-   - all_test_inputs, all_test_targets (for testing)
-
-2. CORRECTED: Calling train_mstep_net_3_datasets with proper data
-   - train_input=all_train_inputs (not all_inputs_by_F which was test data)
-   - cv_input=all_cv_inputs (not test data)
-
-3. CORRECTED: F structure setup
-   - sys_model.F_train_TRUE = all_F_matrices_train (list of 3 lists)
-   - sys_model.F_valid_TRUE = all_F_matrices_cv (list of 3 lists)
-
-4. ADDED: Data structure verification
-   - Asserts to check correct shapes
-   - Clear logging of data dimensions
-
-5. ADDED: 3 different F matrices
-   - F_matrices_for_datasets list with 3 distinct F values
-   - Models F changing every 30 timesteps
-
-YOUR ORIGINAL CODE ISSUES:
-- Only stored test data (all_inputs_by_F, all_targets_by_F)
-- Tried to train on test data (which has N_T sequences, not N_E)
-- Used same F for all 3 datasets (all datasets had [[0.83, 0.2], [0.2, 0.83]])
-- Missing the train/cv data split needed for training
-
-NOW IT WILL WORK CORRECTLY!
-"""
 

@@ -6,7 +6,7 @@ from Smoothers.Linear_KF import KalmanFilter
 dev = torch.device("cuda")
 
 
-def KFTest(args, SysModel, test_input, test_target, F=None, allStates=True, randomInit=False, test_init=None):
+def KFTest(args, SysModel, test_input, test_target, F=None, H=None, allStates=True, randomInit=False, test_init=None):
     # LOSS
     loss_fn = nn.MSELoss(reduction='mean')
 
@@ -28,6 +28,14 @@ def KFTest(args, SysModel, test_input, test_target, F=None, allStates=True, rand
             SysModel.F = F[F_index]
             KF.F = F[F_index]
             KF.F_T = F[F_index].T
+
+        # NEW: Update H if diverse H matrices provided
+        if H is not None:
+            H_index = j // 10
+            SysModel.H = H[H_index]
+            KF.H = H[H_index]
+            KF.H_T = H[H_index].T
+
 
         if (randomInit):
             KF.InitSequence(torch.unsqueeze(test_init[j, :], 1), SysModel.m2x_0)

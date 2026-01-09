@@ -74,6 +74,33 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2,F_init=None):
     # print('ori seltaaaaaa', F_i)
     return F_matrices
 
+def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2, H_init=None):
+    """
+    Generate a list of random H matrices using rotation.
+    Args:
+        num_H (int): Number of random H matrices to generate.
+        obs_dim (int): Dimensionality of the observation vector.
+        state_dim (int): Dimensionality of the state vector.
+        H_init (torch.Tensor or list, optional): Initial H matrix or list of matrices. Defaults to None.
+    Returns:
+        List[torch.Tensor]: List of random observation matrices H.
+    """
+    H_matrices = []
+    if H_init is None:
+        # Default H: start with a base that isn't identity for better diversity
+        H = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
+    else:
+        H = H_init
+    for k in range(num_H + 1):
+        if H_init is None:
+            # For square matrices, rotate directly in observation space
+            H_i = rotate_F(H, i=0, j=1, theta=1, mult=1, many=False, randomit=True)
+        else:
+            H_i = rotate_F(H[k], i=0, j=1, theta=0.3,mult=1, many=False, randomit=True)
+        # H_i = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
+        H_matrices.append(H_i)
+    return H_matrices
+
 def change_F(F, mult=0.0001, many=True):
 
     def apply_change(F_single, mult):
@@ -198,6 +225,13 @@ class SystemModel:
         ### Observation Model ###
         #########################
         self.H = H
+        self.H_train = None
+        self.H_valid = None
+        self.H_test = None
+        self.H_train_TRUE = None
+        self.H_valid_TRUE = None
+        self.H_test_TRUE = None
+        self.H_gen = None
         self.n = self.H.size()[0]
         self.R = R
 
@@ -266,8 +300,8 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(1., device=self.device, dtype=self.F.dtype)  # Var(r)
+        q2 = torch.tensor(0.1, device=self.device, dtype=self.F.dtype)  # Var(q)
+        r2 = torch.tensor(0.1, device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
         lam_r = 1.0 / torch.sqrt(r2)
@@ -286,14 +320,13 @@ class SystemModel:
                 xt = torch.add(xt,eq)
             else:
                 xt = self.F.matmul(self.x_prev)
-                mean = torch.zeros([self.m], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                eq = distrib.rsample()
+                # mean = torch.zeros([self.m], device=DEVICE)
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                # eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
-
-                # lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
+                eq = Exponential(lam_vec_q).sample()  # shape (n,)
                 # eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
@@ -313,12 +346,12 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                mean = torch.zeros([self.n], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                er = distrib.rsample()
+                # mean = torch.zeros([self.n], device=DEVICE)
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                # er = distrib.rsample()
                 ####################################ori added
-                # lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                # er = Exponential(lam_vec_r).sample()  # shape (n,)
+                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
+                er = Exponential(lam_vec_r).sample()  # shape (n,)
                 # er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())
@@ -344,7 +377,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T,delta=0.5, randomInit=False, randomLength=False,F_gen=True, x0_list=None,F_init=None):
+    def GenerateBatch(self, size, T,delta=0.5, randomInit=False, randomLength=False,F_gen=True, H_gen=True, x0_list=None,F_init=None, H_init=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -369,11 +402,19 @@ class SystemModel:
         #print('11111111111111', F_matrices)
         else:
             F_matrices = F_gen
+
+        if H_gen == True:
+            H_matrices = generate_random_H_matrices(size // 10 + 1, obs_dim=self.n, state_dim=self.m, H_init=H_init)
+            print('for ori H matrices', H_matrices[0], H_matrices[1], H_matrices[2])
+        else:
+            H_matrices = H_gen
+
         for i in range(0, size):
             index_F =i//10
             self.F = F_matrices[index_F]
             self.F_T = F_matrices[index_F].T
-
+            self.H = H_matrices[index_F]
+            self.H_T = H_matrices[index_F].T
             if x0_list is not None:
                 x0_i = x0_list[i]
                 # ensure column shape [m,1]
@@ -417,7 +458,7 @@ class SystemModel:
                 # Training sequence output
                 self.Target[i, :, :] = self.x
         print('size',self.Input.size())
-        return F_matrices
+        return F_matrices, H_matrices
 
     def sampling(self, q, r, gain):
 
