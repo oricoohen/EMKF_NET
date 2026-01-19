@@ -90,7 +90,8 @@ print("\n--- Running Kalman Filter with TRUE diverse H ---")
 
 ############rts_TRUE (with true diverse H)##############################
 print("\n--- Running Classical RTS Smoother with TRUE diverse H ---")
-[MSE_RTS_linear_arr, MSE_RTS_linear_avg_1, MSE_RTS_dB_avg, RTS_out, P_smooth, V_test] = S_Test(sys_model, test_input, test_target, F=F_test_mat, H=H_test_mat)
+[MSE_RTS_linear_arr, MSE_RTS_linear_avg_1, MSE_RTS_dB_avg, RTS_out, P_smooth, V_test] = S_Test(sys_model, test_input, test_target,
+                                                                                               F=F_test_mat, H=H_test_mat)
 #########################################################################################################
 # RTS_out has shape [N_T, m, T] and is our "x_est"
 # P_smooth has shape [N_T, m, m, T] and is the covariance we want to evaluate

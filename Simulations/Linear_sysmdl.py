@@ -16,6 +16,7 @@ from torch.distributions.multivariate_normal import MultivariateNormal
 import random
 from torch.distributions import MultivariateNormal, Exponential
 DEVICE =torch.device("cuda")
+device = DEVICE
 def uniform_two_ranges(a: float, b: float):
     """
     Draws a single sample that is uniform either in  [a , b]
@@ -200,7 +201,7 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
 
 class SystemModel:
 
-    def __init__(self, F, Q, H, R, T, T_test,F_initial_guess=None, prior_Q=None, prior_Sigma=None, prior_S=None,device: torch.device = DEVICE):
+    def __init__(self, F, Q, H, R, T, T_test,F_initial_guess=None, prior_Q=None, prior_Sigma=None, prior_S=None):
 
         ####################
         ### Motion Model ###
@@ -220,6 +221,7 @@ class SystemModel:
 
         self.m = self.F.size()[0]
         self.Q = Q
+
 
         #########################
         ### Observation Model ###
@@ -261,9 +263,13 @@ class SystemModel:
             self.prior_S = prior_S
 
 
-    def f(self, x):
+    def f(self, x, u=None):
+        # State transition: x_next = F*x + B*u (if control exists)
         # print(self.F,'oiriiiiiiiii')
-        return torch.matmul(self.F, x)
+        result = torch.matmul(self.F, x)
+        if self.B is not None and u is not None:
+            result = result + torch.matmul(self.B, u)
+        return result
 
     def h(self, x):
         return torch.matmul(self.H, x)
@@ -291,7 +297,7 @@ class SystemModel:
     #########################
     ### Generate Sequence ###
     #########################
-    def GenerateSequence(self, Q_gen, R_gen, T):
+    def GenerateSequence(self, Q_gen, R_gen, T, U=None):
         # Pre allocate an array for current state
         self.x = torch.empty(size=[self.m, T], device=self.device, dtype=self.F.dtype)
         # Pre allocate an array for current observation
@@ -311,22 +317,30 @@ class SystemModel:
             ########################
             #### State Evolution ###
             ########################
+            # Get control input at time t if provided
+            ut = None
+            if U is not None:
+                ut = torch.squeeze(U[:, t])
+                if ut.dim() == 0:
+                    ut = ut.unsqueeze(0)
+                ut = ut.unsqueeze(1)  # Make it column vector [p, 1]
+
             if torch.equal(Q_gen,torch.zeros(self.m,self.m, device=self.device)):# No noise
-                xt = self.F.matmul(self.x_prev)
+                xt = self.f(self.x_prev, ut)
             elif self.m == 1: # 1 dim noise
-                xt = self.F.matmul(self.x_prev)
+                xt = self.f(self.x_prev, ut)
                 eq = torch.normal(mean=0, std=Q_gen)
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
             else:
-                xt = self.F.matmul(self.x_prev)
-                # mean = torch.zeros([self.m], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                # eq = distrib.rsample()
+                xt = self.f(self.x_prev, ut)
+                mean = torch.zeros([self.m], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                eq = distrib.rsample()
                 # eq = torch.normal(mean, self.q)
                 ##################################ori added
-                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                # lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
+                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
                 # eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
@@ -346,12 +360,12 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                # mean = torch.zeros([self.n], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                # er = distrib.rsample()
+                mean = torch.zeros([self.n], device=DEVICE)
+                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                er = distrib.rsample()
                 ####################################ori added
-                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                er = Exponential(lam_vec_r).sample()  # shape (n,)
+                # lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
+                # er = Exponential(lam_vec_r).sample()  # shape (n,)
                 # er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())

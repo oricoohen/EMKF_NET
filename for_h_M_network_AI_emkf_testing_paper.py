@@ -244,9 +244,9 @@ average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
 destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/'###############################################################################################################################################
-# destination_path_M = destination_folder + 'M_net_H_trained_3_datasets.pt'
+destination_path_M = destination_folder + 'M_net_H_trained_3_datasets2.pt'
 # destination_path_M_2 =  destination_folder + 'try_one_iter_just_x_mix_f.pt'
-destination_path_M = destination_folder +f"M_rand_false_trained_12_20_f_rtsnet_new_net.pt"
+# destination_path_M = destination_folder +f"M_rand_false_trained_12_20_f_rtsnet_new_net.pt"
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
 #############################################################################
 # AI EMKF Sequential Testing

@@ -184,7 +184,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
                 sys_model.InitSequence(x_0, P_0)
             # print('q_iter:', q, 'F_est:', F_est)
             [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
-                F=F_est.unsqueeze(0),generate_f=False, init_x_list=x0_j,
+                F=F_est.unsqueeze(0),H=H,generate_f=False, init_x_list=x0_j,
                 init_P_list=P0_j)
             # Compute *our* MSE for this sequence & iteration (linear, not dB)
             sum_lin_per_iter[q] += float(_mse_avg)
