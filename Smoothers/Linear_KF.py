@@ -23,27 +23,11 @@ class KalmanFilter:
 
         self.device = SystemModel.F.device
         self.dtype = SystemModel.F.dtype
-
-        # Control input matrix B (if exists in SystemModel)
-        self.B = getattr(SystemModel, 'B', None)
-        if self.B is not None:
-            self.B_T = torch.transpose(self.B, 0, 1)
-            self.p = self.B.size()[1]  # control input dimension
     # Predict
 
-    def Predict(self, u=None):
+    def Predict(self):
         # Predict the 1-st moment of x
         self.m1x_prior = torch.squeeze(torch.matmul(self.F, self.m1x_posterior))
-
-        # Add control input if B and u are provided
-        if self.B is not None and u is not None:
-            # Ensure u is properly shaped
-            if u.dim() == 0:  # scalar
-                u = u.unsqueeze(0).unsqueeze(1)  # [1, 1]
-            elif u.dim() == 1:
-                u = u.unsqueeze(1)  # Make it a column vector [p, 1]
-            control_contrib = torch.squeeze(torch.matmul(self.B, u))
-            self.m1x_prior = self.m1x_prior + control_contrib
 
         # Predict the 2-nd moment of x
         self.m2x_prior = torch.matmul(self.F, self.m2x_posterior)
@@ -78,8 +62,8 @@ class KalmanFilter:
         self.m2x_posterior = torch.matmul(self.m2y, torch.transpose(self.KG, 0, 1))
         self.m2x_posterior = self.m2x_prior - torch.matmul(self.KG, self.m2x_posterior)
 
-    def Update(self, y, u=None):
-        self.Predict(u)
+    def Update(self, y):
+        self.Predict()
         self.KGain()
         self.Innovation(y)
         self.Correct()
@@ -94,7 +78,7 @@ class KalmanFilter:
 
     ### Generate Sequence ###
     #########################
-    def GenerateSequence(self, y, T, U=None):
+    def GenerateSequence(self, y, T):
         # Pre allocate an array for predicted state and variance
         self.x = torch.empty(size=[self.m, T],device=self.device, dtype=self.dtype)
         self.sigma = torch.empty(size=[self.m, self.m, T],device=self.device, dtype=self.dtype)
@@ -104,10 +88,6 @@ class KalmanFilter:
 
         for t in range(0, T):
             yt = torch.squeeze(y[:, t])
-            # Get control input at time t if provided
-            ut = None
-            if U is not None:
-                ut = torch.squeeze(U[:, t])
-            xt,sigmat = self.Update(yt, ut)
+            xt,sigmat = self.Update(yt)
             self.x[:, t] = torch.squeeze(xt)
             self.sigma[:, :, t] = torch.squeeze(sigmat)

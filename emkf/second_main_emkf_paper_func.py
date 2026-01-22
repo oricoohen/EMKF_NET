@@ -112,7 +112,7 @@ def compute_stats_decrypt(X_s, P_s, V_s, Y, U_in=None):
 # Composite (linear EM) update for F,B,H together
 # ============================================================
 @torch.no_grad()
-def update_composites_FBH(stats, eps=1e-7):
+def update_composites_FBH(stats, eps=1e-4):
     """
     Returns:
       F_hat: [m,m]
@@ -236,9 +236,23 @@ def EMKF_FHB_decrypt_style_seq_core(
         # ===== E-step: RTS smoother =====
         sys_model.InitSequence(x0, P0)
 
-        [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(sys_model,Y_seq.unsqueeze(0),X_true_seq.unsqueeze(0),F=F_now.unsqueeze(0),H=[H_now],
-            generate_f=False,generate_h=False,init_x_list=[x0],init_P_list=[P0])
+        # Use S_Test with control only if U_seq is provided
+        if use_control:
+            U_rts = U_seq.unsqueeze(0)
+            # [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(sys_model,Y_seq.unsqueeze(0),X_true_seq.unsqueeze(0),F=F_now.unsqueeze(0),H=[H_now],test_input_u=U_rts,
+            #     generate_f=False,generate_h=False,init_x_list=[x0],init_P_list=[P0])
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(sys_model,Y_seq.unsqueeze(0),X_true_seq.unsqueeze(0),F=F_now.unsqueeze(0),H=[H_now],
+                generate_f=False,generate_h=False,init_x_list=[x0],init_P_list=[P0])
+        else:
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(sys_model,Y_seq.unsqueeze(0),X_true_seq.unsqueeze(0),F=F_now.unsqueeze(0),H=[H_now],
+                generate_f=False,generate_h=False,init_x_list=[x0],init_P_list=[P0])
         mse_list.append(float(_mse_avg))
+
+        # Early stopping if MSE explodes (indicating instability)
+        if _mse_db > 100.0:  # MSE > 100 dB is clearly unstable
+            print(f"EM iteration {it}: MSE exploded to {_mse_db:.2f} dB. Stopping early.")
+            break
+
         X_s = X_smooth.squeeze(0)   # [m, T]
         P_s = P_smooth.squeeze(0)   # [m, m, T]
         V_s = V_smooth.squeeze(0)   # [m, m, T]
@@ -265,6 +279,11 @@ def EMKF_FHB_decrypt_style_seq_core(
                 I = torch.eye(T10.shape[0], device=T10.device, dtype=T10.dtype)
                 T10.copy_(I); T11.copy_(I); T12.copy_(F_hat)
 
+            # Update system model F for next iteration
+            F_composite = T10 @ T11 @ T12
+            sys_model.F = F_composite
+            sys_model.F_T = F_composite.T
+
         if update_H:
             if n_sweeps_factor > 0:
                 D0, D1, D2 = factorize_3_als_relu(H_hat, D0, D1, D2, n_sweeps=n_sweeps_factor)
@@ -272,6 +291,11 @@ def EMKF_FHB_decrypt_style_seq_core(
                 I_n = torch.eye(D0.shape[0], device=D0.device, dtype=D0.dtype)
                 I_m = torch.eye(D2.shape[1], device=D2.device, dtype=D2.dtype)
                 D0.copy_(I_n); D1.copy_(I_m); D2.copy_(H_hat)
+
+            # Update system model H for next iteration
+            H_composite = D0 @ D1 @ D2
+            sys_model.H = H_composite
+            sys_model.H_T = H_composite.T
 
         if use_control and update_B:
             if n_sweeps_factor > 0:

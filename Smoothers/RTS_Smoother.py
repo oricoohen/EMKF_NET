@@ -26,12 +26,6 @@ class rts_smoother:
         self.device = SystemModel.F.device
         self.dtype = SystemModel.F.dtype
         self.SGains = []
-
-        # Control input matrix B (if exists in SystemModel)
-        self.B = getattr(SystemModel, 'B', None)
-        if self.B is not None:
-            self.B_T = torch.transpose(self.B, 0, 1)
-            self.p = self.B.size()[1]  # control input dimension
     # Compute the Smoother Gain
     def SGain(self, filter_sigma):
         self.SG = torch.matmul(filter_sigma, self.F_T)
@@ -40,19 +34,8 @@ class rts_smoother:
         self.SG = torch.matmul(self.SG, torch.inverse(filter_sigma_prior))
 
     # Innovation for Smoother
-    def S_Innovation(self, filter_x, filter_sigma, u=None):
+    def S_Innovation(self, filter_x, filter_sigma):
         filter_x_prior = torch.matmul(self.F, filter_x)
-
-        # Add control input if B and u are provided
-        if self.B is not None and u is not None:
-            # Ensure u is properly shaped
-            if u.dim() == 0:  # scalar
-                u = u.unsqueeze(0).unsqueeze(1)  # [1, 1]
-            elif u.dim() == 1:
-                u = u.unsqueeze(1)  # Make it a column vector [p, 1]
-            control_contrib = torch.squeeze(torch.matmul(self.B, u))
-            filter_x_prior = filter_x_prior + control_contrib
-
         filter_sigma_prior = torch.matmul(self.F, filter_sigma)
         filter_sigma_prior = torch.matmul(filter_sigma_prior, self.F_T) + self.Q
         self.dx = self.s_m1x_nexttime - filter_x_prior
@@ -67,9 +50,9 @@ class rts_smoother:
         self.s_m2x_nexttime = torch.matmul(self.dsigma, torch.transpose(self.SG, 0, 1))
         self.s_m2x_nexttime = filter_sigma - torch.matmul(self.SG, self.s_m2x_nexttime)
 
-    def S_Update(self, filter_x, filter_sigma, u=None):
+    def S_Update(self, filter_x, filter_sigma):
         self.SGain(filter_sigma)
-        self.S_Innovation(filter_x, filter_sigma, u)
+        self.S_Innovation(filter_x, filter_sigma)
         self.S_Correct(filter_x, filter_sigma)
 
         return self.s_m1x_nexttime,self.s_m2x_nexttime,self.SG
@@ -77,7 +60,7 @@ class rts_smoother:
 
     ### Generate Sequence ###
     #########################
-    def GenerateSequence(self, filter_x, filter_sigma, T, U=None):
+    def GenerateSequence(self, filter_x, filter_sigma, T):
         # Pre allocate an array for predicted state and variance
         self.s_x = torch.empty(size=[self.m, T],device=self.device, dtype=self.dtype)
         self.s_sigma = torch.empty(size=[self.m, self.m, T],device=self.device, dtype=self.dtype)
@@ -98,19 +81,13 @@ class rts_smoother:
         for t in range(T-2,-1,-1):
             filter_xt = filter_x[:, t]
             filter_sigmat = filter_sigma[:, :, t]
-            # Get control input at time t if provided
-            ut = None
-            if U is not None:
-                ut = torch.squeeze(U[:, t])
-            s_xt,s_sigmat,S_t = self.S_Update(filter_xt, filter_sigmat, ut)
+            s_xt,s_sigmat,S_t = self.S_Update(filter_xt, filter_sigmat)
             self.s_x[:, t] = torch.squeeze(s_xt)
             self.s_sigma[:, :, t] = torch.squeeze(s_sigmat)
             self.SGains.append(S_t.clone())
         #####COMPUTE S(0)#####
-        # No control input at initial time step
         s_xt, s_sigmat, S_t = self.S_Update(self.m1x_0, self.m2x_0)
         self.SGains.append(S_t.clone())
-
 
 
 

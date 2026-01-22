@@ -18,12 +18,22 @@ tickers = ["BTC-USD", "ETH-USD"]
 
 data = yf.download(
     tickers,
-    start="2018-01-01",
-    end="2023-01-01",
+    start="2019-07-07",
+    end="2022-05-05",
     interval="1d",
     auto_adjust=False,
     progress=True
 )
+
+
+# data = yf.download(
+#     tickers,
+#     start="2018-01-01",
+#     end="2023-01-01",
+#     interval="1d",
+#     auto_adjust=False,
+#     progress=True
+# )
 
 btc = data.xs("BTC-USD", level=1, axis=1)
 eth = data.xs("ETH-USD", level=1, axis=1)
@@ -115,11 +125,11 @@ print("ETH train:", Xtr_eth.shape, "test:", Xte_eth.shape)
 # ======================================================
 # PICK ASSET (BTC or ETH)
 # ======================================================
-X_train = torch.tensor(Xtr_btc, dtype=torch.float32, device=device)
-U_train = torch.tensor(Utr_btc, dtype=torch.float32, device=device)
+X_train = torch.tensor(Xtr_btc, dtype=torch.float32, device=device)#[N_train, 5, 50]
+U_train = torch.tensor(Utr_btc, dtype=torch.float32, device=device)#[N_train, 1, 50]
 
-X_test  = torch.tensor(Xte_btc, dtype=torch.float32, device=device)
-U_test  = torch.tensor(Ute_btc, dtype=torch.float32, device=device)
+X_test  = torch.tensor(Xte_btc, dtype=torch.float32, device=device)#[N_test, 5, 50]
+U_test  = torch.tensor(Ute_btc, dtype=torch.float32, device=device)#[N_test, 1, 50]
 
 # ======================================================
 # STATE-SPACE DIMENSIONS
@@ -135,14 +145,14 @@ N_seq = X_train.shape[0]
 # INITIAL MODEL (INTENTIONALLY WRONG F)
 # ======================================================
 F_init = torch.eye(m, device=device) * 0.9
-B_init = torch.randn(m, p, device=device) * 0.1  # Random initial B
+B_init =  0.5 * torch.ones(m, p, device=device)  # Random initial B
 H_true = torch.eye(n, m, device=device)
 
-Q = 1e-4 * torch.eye(m, device=device)
-R = 1e-3 * torch.eye(n, device=device)
+Q = 1e-10 * torch.eye(m, device=device)
+R = 1e-2* torch.eye(n, device=device)
 
-x0 = torch.zeros(m, 1, device=device)
-P0 = torch.eye(m, device=device)
+x0 = torch.zeros(m, 1, device=device)#[5,1]
+P0 =1e-2*  torch.eye(m, device=device)#[5,5]
 
 # ======================================================
 # SYSTEM MODEL
@@ -165,10 +175,10 @@ factors_init = {
     "T11": I_m.clone(),
     "T12": F_init.clone(),
 
-    # B factors (THIS WAS MISSING)
-    "T20": I_m.clone(),
-    "T21": I_p.clone(),
-    "T22": torch.zeros(5, 1, device=device),
+    # B factors: [5x1] = [5x5] @ [5x1] @ [1x1]
+    "T20": I_m.clone(),                             # [5x5]
+    "T21": torch.randn(m, 1, device=device),       # [5x1]
+    "T22": torch.ones(1, 1, device=device),        # [1x1]
 
     # H fixed
     "D0": torch.eye(5, device=device),
@@ -204,7 +214,7 @@ hist, x_last, p_last = EMKF_FHB_decrypt_style_batch(
     P_0=P0,
     factors_init=factors_init,
     U_in=U_train,
-    max_it=5,
+    max_it=50,
     n_sweeps_factor=1,
     update_F=True,
     update_B=True,        # ✅ MUST BE TRUE
@@ -216,10 +226,13 @@ hist, x_last, p_last = EMKF_FHB_decrypt_style_batch(
 # FINAL LEARNED F (AVERAGE OVER SEQUENCES)
 # ======================================================
 F_final = torch.stack([hist["F_list"][j][-1] for j in range(N_seq)]).mean(dim=0)
+B_final = torch.stack([hist["B_list"][j][-1] for j in range(N_seq)]).mean(dim=0)
+
 
 print("\nLearned F:")
 print(F_final)
-
+print("\nLearned B:")
+print(B_final)
 # ======================================================
 # TEST WITH LEARNED F
 # ======================================================
