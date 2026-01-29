@@ -453,3 +453,86 @@ def EMKF_H_analitic(sys_model, F, H_0_matrices, Q, R, Y, x_0, P_0, X, max_it=3, 
 
     return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list
 
+
+
+
+
+def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_true,max_it=5, generate_f=True, generate_h=True,init_x_list=None, init_P_list=None,  update_F=True, update_H=True):
+
+    N = Y.size(0)
+    T = Y.size(-1)
+    m = sys_model.m
+    n = sys_model.n
+
+    F_hist, H_hist = [], []
+    last_x_list, last_P_list = [], []
+
+    for j in range(N):
+        f_idx = j // 10 if generate_f else j
+        h_idx = j // 10 if generate_h else j
+
+        F_est = F_init_list[f_idx].clone()
+        H_est = H_init_list[h_idx].clone()
+
+        Y_j = Y[j]
+        X_true_j = X_true[j]
+
+        F_all_j = [F_est.clone()]
+        H_all_j = [H_est.clone()]
+
+        if init_x_list is not None:
+            x0_j = init_x_list[j]
+            P0_j = init_P_list[j]
+        else:
+            x0_j = x_0
+            P0_j = P_0
+
+        for q in range(max_it):
+            # ---------- E-step ----------
+            sys_model.InitSequence(x0_j, P0_j)
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(sys_model,Y_j.unsqueeze(0),X_true_j.unsqueeze(0),F=F_est.unsqueeze(0),H=[H_est],generate_f=False,generate_h=False,init_x_list=[x0_j],
+                init_P_list=[P0_j],)
+
+            X_s = X_smooth.squeeze(0)    # [m,T]
+            P_s = P_smooth.squeeze(0)    # [m,m,T]
+            V_s = V_smooth.squeeze(0)    # [m,m,T]
+
+            # ---------- M-step (F) ----------
+            if update_F:
+                A_1 = compute_A1(x_0, X_s, V_s, m, T)  # (m,m )
+                A_2 = compute_A2(x_0, P_0, X_s, P_s, m, T)  # (m,m)
+                # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
+                eps = 1e-7 * torch.eye(n, device=A_2.device)
+                A_2 = A_2 + eps
+                F_new = torch.linalg.solve(A_2.T, A_1.T).T
+            else:
+                F_new = F_est
+            # F_new = clamp(F_new)
+
+            # ---------- M-step (H) ----------
+            if update_H:
+                C1 = torch.zeros((n, m), dtype=Y.dtype, device=Y.device)
+                C2 = torch.zeros((m, m), dtype=Y.dtype, device=Y.device)
+                for t in range(T):
+                    C1 += Y_j[:, t].unsqueeze(1) @ X_s[:, t].unsqueeze(0)
+                    C2 += X_s[:, t].unsqueeze(1) @ X_s[:, t].unsqueeze(0) + P_s[:, :, t]
+
+                eps = 1e-6 * torch.eye(m, device=Y.device, dtype=Y.dtype)
+                H_new = torch.linalg.solve((C2 + eps).T, C1.T).T
+            else:
+                H_new = H_est
+            # ---------- commit ----------
+            F_est = F_new
+            H_est = H_new
+            F_all_j.append(F_est.clone())
+            H_all_j.append(H_est.clone())
+
+        F_hist.append(F_all_j)
+        H_hist.append(H_all_j)
+
+        x_T = X_s[:, -1].unsqueeze(-1).clone()
+        P_T = P_s[:, :, -1].clone()
+        last_x_list.append(x_T)
+        last_P_list.append(P_T)
+
+    return F_hist, H_hist, last_x_list, last_P_list

@@ -63,7 +63,7 @@ def compute_A1(x_0, x_t, V,n,T):
     #nonsing_simetric(A1)
     return A1
 
-def compute_A2(x_0, P_0, x_t, P_t,n,T):
+def compute_A2(x_0, P_0, x_t, P_t,m,T):
     """
     Computes A2 = sum_t(x_{t-1} x_{t-1}^T + P_{t-1})
     Args:
@@ -75,7 +75,7 @@ def compute_A2(x_0, P_0, x_t, P_t,n,T):
         A2: [n, n] matrix
     """
     # Compute the first term (x_0 * x_0^T + P_0)
-    A2 = torch.zeros((n, n), dtype=x_t.dtype, device=x_t.device)
+    A2 = torch.zeros((m, m), dtype=x_t.dtype, device=x_t.device)
     #A2 = x_0.unsqueeze(1)  @ x_0.unsqueeze(0)  + P_0
 
     for t in range(1, T):

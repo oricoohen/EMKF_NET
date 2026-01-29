@@ -267,8 +267,8 @@ class SystemModel:
         # State transition: x_next = F*x + B*u (if control exists)
         # print(self.F,'oiriiiiiiiii')
         result = torch.matmul(self.F, x)
-        if self.B is not None and u is not None:
-            result = result + torch.matmul(self.B, u)
+        # if self.B is not None and u is not None:
+        #     result = result + torch.matmul(self.B, u)
         return result
 
     def h(self, x):
@@ -317,23 +317,23 @@ class SystemModel:
             ########################
             #### State Evolution ###
             ########################
-            # Get control input at time t if provided
-            ut = None
-            if U is not None:
-                ut = torch.squeeze(U[:, t])
-                if ut.dim() == 0:
-                    ut = ut.unsqueeze(0)
-                ut = ut.unsqueeze(1)  # Make it column vector [p, 1]
+            # # Get control input at time t if provided
+            # ut = None
+            # if U is not None:
+            #     ut = torch.squeeze(U[:, t])
+            #     if ut.dim() == 0:
+            #         ut = ut.unsqueeze(0)
+            #     ut = ut.unsqueeze(1)  # Make it column vector [p, 1]
 
             if torch.equal(Q_gen,torch.zeros(self.m,self.m, device=self.device)):# No noise
-                xt = self.f(self.x_prev, ut)
+                xt = self.f(self.x_prev)
             elif self.m == 1: # 1 dim noise
-                xt = self.f(self.x_prev, ut)
+                xt = self.f(self.x_prev)
                 eq = torch.normal(mean=0, std=Q_gen)
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
             else:
-                xt = self.f(self.x_prev, ut)
+                xt = self.f(self.x_prev)
                 mean = torch.zeros([self.m], device=DEVICE)
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
                 eq = distrib.rsample()

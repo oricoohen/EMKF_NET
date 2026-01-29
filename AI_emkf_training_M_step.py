@@ -79,6 +79,7 @@ Q = q2 * Q_structure.to(device)
 R = r2 * R_structure.to(device)
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
 H = torch.tensor([[1., 1.], [0.25, 1.]], device=device)
+H_in = [H.clone() for _ in range(args.N_T)]
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
 SystemModel.F_gen = True
 m1_0 = m1_0.to(device)
@@ -95,8 +96,10 @@ dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
 dataFileName = '2x2_1.pt'
 dataFileName_F = '2x2_F_reg+5_deg'
 print("Start Data Gen")
-DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv
+        ,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom,Test=False,F_gen=True,H_gen=H_in)
 print("Data Load")
+
 
 
 [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
@@ -132,6 +135,8 @@ sys_model.F_test = F_test_mat
 sys_model.F_train_TRUE = F_train_mat
 sys_model.F_valid_TRUE = F_val_mat
 sys_model.F_test_TRUE = F_test_mat
+
+sys_model.H_test = H_in
 # print(F_train_mat,'111111111111111')
 # print(F_val_mat,'22222222222222222222')
 print(F_test_mat,'333333333333333')
@@ -164,13 +169,13 @@ print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
 # ### Evaluate Kalman Filter ###
 # ##############################
 print("Evaluate Kalman Filter True")
-KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
+KFTest(args, sys_model, test_input, test_target,F = F_test_mat,H=H_in)
 # #############################
 ### Evaluate RTS Smoother ###
 ############################
 
 print("Evaluate RTS Smoother True")
-S_Test(sys_model, test_input, test_target,F = F_test_mat)
+S_Test(sys_model, test_input, test_target,F = F_test_mat,H=H_in)
 
 ######BAD F############################
 
@@ -207,7 +212,7 @@ sys_model_2.F_test = F_test_mat.copy()
 sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
 sys_model_2.F_valid = rotate_F(F_val_mat,  i=0, j=1, theta=1, mult=1, many=True, randomit=True)
 sys_model_2.F_test  = rotate_F(F_test_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
-
+sys_model_2.H_test = H_in
 
 sys_model_2.args = args
 print("F WRONGGGGGG:",sys_model_2.F_test)
@@ -216,9 +221,9 @@ print("F WRONGGGGGG:",sys_model_2.F_test)
 
 ###################check the regu;ar rts
 print('regular kalman and rts with wrong F')
-KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test,H=H_in)
 
-S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
+S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test,H=H_in)
 
 #######################
 ### RTSNet Pipeline ###
@@ -228,6 +233,12 @@ S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 rtsnet_models= []
 
 
+# Q2 = q2 *5* Q_structure.to(device)
+# R2= r2 *100* R_structure.to(device)
+# sys_model.Q = Q2
+# sys_model.R = R2
+# sys_model_2.Q = Q2
+# sys_model_2.R = R2
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -254,7 +265,7 @@ print('rtssnet and psmooth with WRONGGGGGGG F')
 
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
-
+5
 # The folder where the new copies will be saved.
 destination_folder = 'RTSNet/AI_M_step/exp_1/r_1/EMKF/False/'######################################################################################################################################################################
 
