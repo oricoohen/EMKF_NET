@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import os
 import random
@@ -21,14 +20,12 @@ import Simulations.config as config
 
 from RTSNet.RTSNet_nn import RTSNetNN
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
-from Pipelines.Pipeline_ERTS import train_joint_rtsnet_and_mnet_em2_batch5
 
 
 # ======================================================
 # DETERMINISM
 # ======================================================
 random.seed(seed)
-np.random.seed(seed)
 torch.manual_seed(seed)
 if torch.cuda.is_available():
     torch.cuda.manual_seed(seed)
@@ -117,7 +114,7 @@ if isinstance(data.columns, pd.MultiIndex):
 
 px = data["Adj Close"].dropna().copy()
 dates = px.index
-z = px.values.astype(np.float64)
+z = px.values.astype(float)  # Use native Python float
 
 if len(z) < TAU + 2:
     raise ValueError(f"Need at least TAU+2={TAU+2} points, got {len(z)}")
@@ -143,8 +140,8 @@ for t0 in range(K, len(z) - TAU):  # Start from K to have enough history
 
     # Compute trend_0: mean of past K price differences
     past = z[t0 - K : t0 + 1]                # length K+1 (includes t0)
-    diffs = past[1:] - past[:-1]             # length K
-    trend_0 = float(np.mean(diffs))          # mean of differences
+    diffs = past[1:] - past[:-1]             # length K (numpy array)
+    trend_0 = float(diffs.mean())            # mean of differences (use numpy's mean on numpy array)
 
     x0_vector = torch.tensor([price_before, trend_0], device=device, dtype=dtype)  # [2]
 
@@ -320,7 +317,7 @@ if isinstance(test_data.columns, pd.MultiIndex):
 
 test_px = test_data["Adj Close"].dropna().copy()
 test_dates = test_px.index
-test_z = test_px.values.astype(np.float64)
+test_z = test_px.values.astype(float)  # Use native Python float
 
 # Build test dataset
 test_input = []
@@ -330,7 +327,8 @@ test_dates_list = []
 
 K = 5  # lookback for trend computation
 
-for t0 in range(K, len(test_z) - TAU):  # Start from K to have enough history
+# Start from max(TAU, K) to ensure consistency with EMKF and M-Network
+for t0 in range(max(TAU, K), len(test_z) - TAU):  # Consistent with EMKF/MNet
     y_win = test_z[t0 : t0 + TAU]           # window
     y_next = test_z[t0 + TAU]                # next price (target)
 
@@ -339,8 +337,8 @@ for t0 in range(K, len(test_z) - TAU):  # Start from K to have enough history
 
     # Compute trend_0: mean of past K price differences
     past = test_z[t0 - K : t0 + 1]          # length K+1
-    diffs = past[1:] - past[:-1]            # length K
-    trend_0 = float(np.mean(diffs))         # mean of differences
+    diffs = past[1:] - past[:-1]            # length K (numpy array)
+    trend_0 = float(diffs.mean())           # mean of differences (use numpy's mean on numpy array)
 
     x0_vector = torch.tensor([price_before, trend_0], device=device, dtype=dtype)  # [2]
 
@@ -388,16 +386,21 @@ emkf_dates = []
 
 # Warm-starts for EM
 F_prev_emkf = F0.clone()
-x0_prev_emkf = torch.tensor([[test_z[TAU - 1]], [0.1]], device=device, dtype=dtype)
 P0_prev_emkf = P0_default.clone()
 
-for t in range(TAU, len(test_z)):
-    win_start = t - TAU
-    win_end = t
-    win_prices = test_z[win_start:win_end]
+K = 5  # lookback for trend computation
+
+# Use same loop range as RTSNet and M-Network for consistency
+for idx in range(len(test_input)):  # Process same windows as RTSNet
+    # Get the corresponding window data
+    y_win = test_input[idx].squeeze()  # [TAU]
+
+    # Get x0 (same as used for RTSNet/MNet)
+    x0_vec = test_x0[idx]  # [2] tensor: [price, trend]
+    x0_prev_emkf = x0_vec.view(m, 1).to(device)
 
     # No normalization (same as real_exp_poland_ori_stocks.py)
-    y_win_norm = win_prices.copy()
+    y_win_norm = y_win.cpu().numpy()
 
     Y = torch.tensor(y_win_norm, device=device, dtype=dtype).view(1, 1, TAU)
     X_dummy = torch.zeros((1, m, TAU), device=device, dtype=dtype)
@@ -425,15 +428,15 @@ for t in range(TAU, len(test_z)):
     pred_price_emkf = (H_fixed @ x_next_emkf)[0, 0].item()
 
     emkf_pred_prices.append(pred_price_emkf)
-    emkf_dates.append(test_dates[t])
+    emkf_dates.append(test_dates_list[idx])
 
     # Warm-start for next window
     F_prev_emkf = F_hat_emkf
-    x0_prev_emkf = torch.tensor([[y_win_norm[0]], [0.]], device=device, dtype=dtype)
+    P0_prev_emkf = last_P_list[0].detach().clone()
 
-    if (t - TAU) % 50 == 0:
-        print(f"  EMKF: Processed {t - TAU + 1}/{len(test_z) - TAU} windows")
-        print(f"  EMKF Final F matrix at window {t - TAU + 1}:")
+    if idx % 50 == 0:
+        print(f"  EMKF: Processed {idx + 1}/{len(test_input)} windows")
+        print(f"  EMKF Final F matrix at window {idx + 1}:")
         print(f"    {F_hat_emkf.cpu().numpy()}")
 
 print(f"EMKF Analytic: {len(emkf_pred_prices)} predictions")
@@ -445,43 +448,10 @@ print("\n" + "="*80)
 print("RUNNING M-NETWORK FOR COMPARISON (using test_mstep_net_price)")
 print("="*80)
 
-# Prepare test data in the format expected by test_mstep_net_price
-# test_input: list of [n, T] windows
-# test_target: list of [n, T] next-day aligned targets
-# test_x0: list of scalar pre-window prices
+# Use the SAME test data as RTSNet (no need to recreate)
+# test_input, test_target, test_x0 are already created above and used by RTSNet
 
-mnet_test_input = []
-mnet_test_target = []
-mnet_test_x0 = []
-
-K = 5  # lookback for trend computation
-
-for t in range(max(TAU, K), len(test_z)):  # Need K history for trend
-    win_start = t - TAU
-    win_prices = test_z[win_start:t]  # window of TAU prices
-    next_prices = test_z[win_start+1:t+1]  # next-day aligned (same length TAU)
-
-    # x0 = [price_before_window, trend_0]
-    price_before = float(test_z[win_start - 1]) if win_start > 0 else float(test_z[0])
-
-    # Compute trend_0: mean of past K price differences
-    if win_start >= K:
-        past = test_z[win_start - K : win_start + 1]  # length K+1
-        diffs = past[1:] - past[:-1]  # length K
-        trend_0 = float(np.mean(diffs))
-    else:
-        trend_0 = 0.0  # Not enough history
-
-    x0_vector = torch.tensor([price_before, trend_0], device=device, dtype=dtype)  # [2]
-
-    y_win_t = torch.tensor(win_prices, device=device, dtype=dtype).view(1, TAU)
-    y_next_t = torch.tensor(next_prices, device=device, dtype=dtype).view(1, TAU)
-
-    mnet_test_input.append(y_win_t)
-    mnet_test_target.append(y_next_t)
-    mnet_test_x0.append(x0_vector)
-
-print(f"Prepared {len(mnet_test_input)} test windows for M-Network")
+print(f"Using {len(test_input)} test windows (same as RTSNet)")
 
 # Set F_test for SysModel (test_mstep_net_price expects it)
 sys_model_mnet = SystemModel(F0, Q, H_fixed, R, TAU, TAU)
@@ -492,9 +462,9 @@ sys_model_mnet.InitSequence(x0_dummy, P0_default)
 # Call the pipeline's test function
 mean_price_mse_per_iter, mean_price_mse_db_per_iter, final_F_list,pred = RTSNet_Pipeline.test_mstep_net_price(
     SysModel=sys_model_mnet,
-    test_input=mnet_test_input,
-    test_target=mnet_test_target,
-    test_x0=mnet_test_x0,
+    test_input=test_input,  # Same as RTSNet
+    test_target=test_target,  # Same as RTSNet
+    test_x0=test_x0,  # Same as RTSNet
     destination_path_RTS=path_results_rts,
     destination_path_M=path_results_m,
     num_em_iters=2,
@@ -503,88 +473,35 @@ mean_price_mse_per_iter, mean_price_mse_db_per_iter, final_F_list,pred = RTSNet_
     use_smoothed=True
 )
 
-# Extract predictions from the test function results
-# The function computes MSE internally, but we need individual predictions for trading
-# So we need to run prediction loop to get individual prices
-print("\nExtracting M-Network predictions for trading simulation...")
+# Extract M-Network predictions from test_mstep_net_price results
+print("\nExtracting M-Network predictions from test results...")
 
-# Re-run prediction to get individual prices (using final learned F patterns)
+# The pred variable contains a list of dicts with denormalized predictions
 mnet_pred_prices = []
 mnet_dates = []
 
-# Use the test_mstep_net_price results
-# Since the function returns MSE per iter, we'll extract the final iteration predictions
-# by re-running with the logic from the function
+for pred_dict in pred:
+    # Extract denormalized prediction for y_{T+1}
+    y_pred_Tp1 = pred_dict["y_pred_Tp1"]
+    if torch.is_tensor(y_pred_Tp1):
+        pred_price = y_pred_Tp1.item() if y_pred_Tp1.numel() == 1 else y_pred_Tp1[0].item()
+    else:
+        pred_price = float(y_pred_Tp1)
 
-# Load models
-rts_model_mnet = torch.load(path_results_rts, map_location=device, weights_only=False).eval()
-m_model_mnet = torch.load(path_results_m, map_location=device, weights_only=False).eval()
+    mnet_pred_prices.append(pred_price)
 
-with torch.no_grad():
-    for idx in range(len(mnet_test_input)):
-        y_win = mnet_test_input[idx]
-        y_next = mnet_test_target[idx]
-
-        # Normalize
-        y_mean = y_win.mean()
-        y_std = y_win.std()
-        if float(y_std.item()) < 1e-6:
-            y_std = torch.tensor(1.0, device=device, dtype=dtype)
-
-        y_win_n = (y_win - y_mean) / y_std
-        y_next_n = (y_next - y_mean) / y_std
-
-        # Build x0
-        x0_raw = mnet_test_x0[idx]
-        x0_norm = (x0_raw - float(y_mean.item())) / float(y_std.item())
-        x0 = torch.empty(m, device=device, dtype=dtype)
-        x0[0] = x0_norm
-        x0[1] = 0.5
-        x0 = x0.view(m, 1)
-
-        # Use final F from final_F_list
-        F_final = final_F_list[idx]
-
-        # Run smoothing with final F
-        rts_model_mnet.update_F(F_final)
-        rts_model_mnet.InitSequence(x0.clone(), TAU)
-        rts_model_mnet.init_hidden()
-
-        x_forward = torch.empty(m, TAU, device=device, dtype=dtype)
-        for ti in range(TAU):
-            x_forward[:, ti] = rts_model_mnet(y_win_n[:, ti], None, None, None)
-
-        # Backward smoothing
-        x_state = torch.empty(m, TAU, device=device, dtype=dtype)
-        x_state[:, TAU - 1] = x_forward[:, TAU - 1]
-        rts_model_mnet.InitBackward(x_state[:, TAU - 1])
-        if TAU >= 2:
-            x_state[:, TAU - 2] = rts_model_mnet(None, x_forward[:, TAU - 2], x_forward[:, TAU - 1], None)
-        for ti in range(TAU - 3, -1, -1):
-            x_state[:, ti] = rts_model_mnet(None, x_forward[:, ti], x_forward[:, ti + 1], x_state[:, ti + 2])
-
-        # Predict next price using last smoothed state
-        x_last = x_state[:, -1].view(m, 1)
-        x_next = F_final @ x_last
-        y_next_norm = (H_fixed @ x_next)[0, 0].item()
-
-        # Denormalize
-        pred_price = (y_next_norm * float(y_std.item())) + float(y_mean.item())
-        mnet_pred_prices.append(pred_price)
-        mnet_dates.append(test_dates[TAU + idx])
-
-        # Print F matrix every 50 windows
-        if idx % 50 == 0:
-            print(f"  M-Network: Window {idx + 1}/{len(mnet_test_input)}")
-            print(f"  M-Network Final F matrix at window {idx + 1}:")
-            print(f"    {F_final.cpu().numpy()}")
+# Print F matrix samples
+for i in range(0, len(final_F_list), 50):
+    print(f"  M-Network: Window {i + 1}/{len(final_F_list)}")
+    print(f"  M-Network Final F matrix at window {i + 1}:")
+    print(f"    {final_F_list[i].cpu().numpy()}")
 
 print(f"M-Network: {len(mnet_pred_prices)} predictions")
 
-# Compute M-Network metrics
+# Compute M-Network metrics (use same ground truth as RTSNet)
 mnet_pred_tensor = torch.tensor(mnet_pred_prices, device=device, dtype=dtype)
-mnet_true_prices = test_z[TAU:]
-mnet_true_tensor = torch.tensor(mnet_true_prices, device=device, dtype=dtype)
+# Use real_prices which is the ground truth from RTSNet test
+mnet_true_tensor = real_prices[:len(mnet_pred_prices)]
 
 mnet_sq_err = (mnet_pred_tensor - mnet_true_tensor) ** 2
 mnet_mse = torch.mean(mnet_sq_err)
@@ -599,10 +516,10 @@ print(f"RMSE(price): {mnet_rmse.item():.6f}")
 print(f"MAE(price): {mnet_mae.item():.6f}")
 print(f"Mean Relative Error: {mnet_rel_err_mean.item():.6f}")
 
-# Convert EMKF predictions to tensor for comparison
+# Convert EMKF predictions to tensor for comparison (use same ground truth as RTSNet)
 emkf_pred_tensor = torch.tensor(emkf_pred_prices, device=device, dtype=dtype)
-emkf_true_prices = test_z[TAU:]
-emkf_true_tensor = torch.tensor(emkf_true_prices, device=device, dtype=dtype)
+# Use real_prices which is the ground truth from RTSNet test
+emkf_true_tensor = real_prices[:len(emkf_pred_prices)]
 
 # Compute EMKF metrics
 emkf_sq_err = (emkf_pred_tensor - emkf_true_tensor) ** 2
@@ -625,16 +542,16 @@ print("\n" + "="*80)
 print("NAIVE BASELINE: Tomorrow's price = Today's price")
 print("="*80)
 
-# Naive prediction: predict tomorrow's price = today's price
+# Naive prediction: predict tomorrow's price = today's price (use same test windows)
 naive_pred_prices = []
-for i in range(len(test_z) - TAU):
-    today_price = float(test_z[TAU + i - 1])  # Last day of window
+for i in range(len(test_input)):
+    # Get the last price in the window
+    today_price = test_input[i][0, -1].item()  # Last price in window
     naive_pred_prices.append(today_price)  # Predict tomorrow = today
 
-# Compute Naive baseline metrics
+# Compute Naive baseline metrics (use same ground truth as RTSNet)
 naive_pred_tensor = torch.tensor(naive_pred_prices, device=device, dtype=dtype)
-naive_true_prices = test_z[TAU:]
-naive_true_tensor = torch.tensor(naive_true_prices, device=device, dtype=dtype)
+naive_true_tensor = real_prices[:len(naive_pred_prices)]
 
 naive_sq_err = (naive_pred_tensor - naive_true_tensor) ** 2
 naive_mse = torch.mean(naive_sq_err)
@@ -789,10 +706,10 @@ emkf_sig_label = "hold"
 
 for i in range(len(emkf_pred_prices)):
     pred_price_emkf = emkf_pred_prices[i]
-    true_price_emkf = float(emkf_true_prices[i])
+    true_price_emkf = emkf_true_tensor[i].item()
 
     # FIXED: today_price is the last price in the window, tomorrow is the target
-    today_price = float(test_z[TAU + i - 1])  # Last day of window
+    today_price = test_input[i][0, -1].item()  # Last price in window
     tomorrow_price = true_price_emkf           # Next day (target)
 
     pred_ret = (pred_price_emkf - today_price) / (today_price + 1e-12)
@@ -861,10 +778,10 @@ mnet_sig_label = "hold"
 
 for i in range(len(mnet_pred_prices)):
     pred_price_mnet = mnet_pred_prices[i]
-    true_price_mnet = float(mnet_true_prices[i])
+    true_price_mnet = mnet_true_tensor[i].item()
 
     # FIXED: today_price is the last price in the window, tomorrow is the target
-    today_price = float(test_z[TAU + i - 1])  # Last day of window
+    today_price = test_input[i][0, -1].item()  # Last price in window
     tomorrow_price = true_price_mnet           # Next day (target)
 
     pred_ret = (pred_price_mnet - today_price) / (today_price + 1e-12)
@@ -1070,11 +987,6 @@ plt.title(f"RTSNet\nMSE = {mse_price.item():.4f}")
 plt.legend()
 plt.grid(True, alpha=0.3)
 
-# Plot 6: Scatter - EMKF
-ax5 = plt.subplot(2, 3, 5)
-emkf_pred_aligned = emkf_pred_tensor[:len(test_dates_list)].tolist()
-real_aligned = real_prices.tolist()
-plt.scatter(real_aligned, emkf_pred_aligned, alpha=0.5, s=20, color='orange')
 # Plot 6: Scatter - EMKF
 ax6 = plt.subplot(2, 4, 6)
 emkf_pred_aligned = emkf_pred_tensor[:len(test_dates_list)].tolist()
