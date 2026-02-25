@@ -1,4 +1,6 @@
 ####the old one without the f
+
+####the old one without the f
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -38,9 +40,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_1/r_1/True_F/'######################################################################################################################################################################
+path_results_True = '../RTSNet/AI_M_step/exp_1/r_1/True_F/'  ######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_1/r_1/False_F/'######################################################################################################################################################################
+path_results_False = '../RTSNet/AI_M_step/exp_1/r_1/False_F/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -77,9 +79,9 @@ v_db = 0
 
 Q = q2 * Q_structure.to(device)
 R = r2 * R_structure.to(device)
+#s = 0.951456
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
 H = torch.tensor([[1., 1.], [0.25, 1.]], device=device)
-H_in = [H.clone() for _ in range(args.N_T)]
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
 SystemModel.F_gen = True
 m1_0 = m1_0.to(device)
@@ -96,10 +98,14 @@ dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
 dataFileName = '2x2_1.pt'
 dataFileName_F = '2x2_F_reg+5_deg'
 print("Start Data Gen")
-DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv
-        ,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom,Test=False,F_gen=True,H_gen=H_in)
+m = 2  # vector length
+a, b = -1.0, 1.0
+x0_list = []
+for i in range(args.N_E):
+    x = a + (b - a) * torch.rand(m).to(device)
+    x0_list.append(x)
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom,x0_list=x0_list)
 print("Data Load")
-
 
 
 [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
@@ -135,8 +141,6 @@ sys_model.F_test = F_test_mat
 sys_model.F_train_TRUE = F_train_mat
 sys_model.F_valid_TRUE = F_val_mat
 sys_model.F_test_TRUE = F_test_mat
-
-sys_model.H_test = H_in
 # print(F_train_mat,'111111111111111')
 # print(F_val_mat,'22222222222222222222')
 print(F_test_mat,'333333333333333')
@@ -169,13 +173,13 @@ print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
 # ### Evaluate Kalman Filter ###
 # ##############################
 print("Evaluate Kalman Filter True")
-KFTest(args, sys_model, test_input, test_target,F = F_test_mat,H=H_in)
+KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
 # #############################
 ### Evaluate RTS Smoother ###
 ############################
 
 print("Evaluate RTS Smoother True")
-S_Test(sys_model, test_input, test_target,F = F_test_mat,H=H_in)
+S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 ######BAD F############################
 
@@ -205,14 +209,15 @@ sys_model_2.F_test = F_test_mat.copy()
 # for i in range(len(F_val_mat)):
 #     sys_model_2.F_valid[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 # for i in range(len(F_test_mat)):
+#     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
     # sys_model_2.F_test[i] = torch.tensor([[1.2237, -0.0927],[1.8518, 0.0819]], device=device, dtype=ddtype)
-    # sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+
 
 # random WRONG F per sequence using your helper
 sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
 sys_model_2.F_valid = rotate_F(F_val_mat,  i=0, j=1, theta=1, mult=1, many=True, randomit=True)
 sys_model_2.F_test  = rotate_F(F_test_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
-sys_model_2.H_test = H_in
+
 
 sys_model_2.args = args
 print("F WRONGGGGGG:",sys_model_2.F_test)
@@ -221,9 +226,9 @@ print("F WRONGGGGGG:",sys_model_2.F_test)
 
 ###################check the regu;ar rts
 print('regular kalman and rts with wrong F')
-KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test,H=H_in)
+KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 
-S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test,H=H_in)
+S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 
 #######################
 ### RTSNet Pipeline ###
@@ -233,12 +238,6 @@ S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test,H=H_in)
 rtsnet_models= []
 
 
-# Q2 = q2 *5* Q_structure.to(device)
-# R2= r2 *100* R_structure.to(device)
-# sys_model.Q = Q2
-# sys_model.R = R2
-# sys_model_2.Q = Q2
-# sys_model_2.R = R2
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -265,7 +264,7 @@ print('rtssnet and psmooth with WRONGGGGGGG F')
 
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
-5
+
 # The folder where the new copies will be saved.
 destination_folder = 'RTSNet/AI_M_step/exp_1/r_1/EMKF/False/'######################################################################################################################################################################
 
@@ -274,12 +273,25 @@ destination_folder = 'RTSNet/AI_M_step/exp_1/r_1/EMKF/False/'###################
 # Build the full destination path
 # destination_path_RTS = destination_folder + file_rtsnet
 
-destination_path_M= destination_folder + f"M_rand_false_trained_12_20_f_rtsnet_new.pt"
+destination_path_M= destination_folder + f"try_one_iter_20_on_f_mix_f_with_high_x_0.pt"
 
 # destination_path_M = [destination_folder + "M_iter0.pt",destination_folder + "M_iter1.pt",destination_folder + "M_iter2.pt"]
 # load_m= destination_folder + f"M_rand_false_trained.pt"
 ######START THE EMKF TRAINING##########
 
+
+# model_pathes = []
+# m_step_pathes = []
+# for i in range(max_iter):
+#     # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
+#
+#     file_rtsnet = f"model_e_q{i}_rand_false_trained_2iter.pt"
+#     file_m_step = f"m_step_e_q{i}M_rand_false_trained_with_rts_2_iter_.pt"
+#     # Build the full destination path
+#     destination_path_RTS = destination_folder + file_rtsnet
+#     destination_path_m_step = destination_folder + file_m_step
+#     model_pathes.append(destination_path_RTS)
+#     m_step_pathes.append(destination_path_m_step)
 
 sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
@@ -293,19 +305,24 @@ RTSNet_Pipeline.setTrainingParams(args)
 
 # RTSNet_Pipeline.train_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
 #                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+#
 
 
+
+# RTSNet_Pipeline.train_mstep_net_batch(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
 
 # print('check FFFFFFFFFFFF', sys_model_2.F_test)
-RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
-                   alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
+# RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
 
 
 # RTSNet_Pipeline.one_train_m_step_net( sys_model_2, cv_input, cv_target, train_input, train_target,
 #                         destination_path_M, destination_path_RTS = path_results_wrong_rts,  lambda_F=1e-3, generate_f=True, non_linear_h=False)
 
-# RTSNet_Pipeline.one_test_mstep_net(sys_model_2, test_input, test_target,
-#                        destination_path_RTS =path_results_wrong_rts ,destination_path_M=destination_path_M, lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False)
+#
+RTSNet_Pipeline.one_test_mstep_net(sys_model_2, test_input, test_target,
+                       destination_path_RTS =path_results_wrong_rts ,destination_path_M=destination_path_M, lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False)
 #
 # sys_model_2.F_test = rotate_F(F_test_mat)
 # print('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
@@ -316,5 +333,15 @@ RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results
 #     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 # EMKF_F(sys_model_2,RTSNet_Pipeline,train_input, train_target, cv_input, cv_target,test_input, test_target,model_pathes,psmooth_pathes,3)
 
-d
+
+
+
+
+# RTSNet_Pipeline.train_mstep_net_with_new_enters(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+
+
+
+# RTSNet_Pipeline.test_mstep_net_with_new_enteries(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
 

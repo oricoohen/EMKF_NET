@@ -40,8 +40,8 @@ args.T_test = 30
 offset = 0
 chop = False
 sequential_training = False
-path_results = 'RTSNet/'
-RTSNetPass1_path = 'RTSNet/checkpoints/LorenzAttracotor/DT/HNL/rq3030_T20.pt'
+path_results = '../RTSNet/'
+RTSNetPass1_path = '../RTSNet/checkpoints/LorenzAttracotor/DT/HNL/rq3030_T20.pt'
 # r2 = torch.tensor([1e-3]) # [10, 1, 0.1, 0.01, 1e-3]
 # vdB = 0 # ratio v=q2/r2
 # v = 10**(vdB/10)

@@ -18,6 +18,7 @@ from RTSNet.RTSNet_nn import RTSNetNN
 
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
+
 import shutil
 print("Pipeline Start")
 
@@ -36,9 +37,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_3/r_0001/True_F/'  ###############################################################################################################################################
+path_results_True = '../RTSNet/paper/exp_3/r_10/True_F/'  ###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_3/r_0001/False_F/'  ###############################################################################################################################################
+path_results_False = '../RTSNet/paper/exp_3/r_10/False_F/'  ###############################################################################################################################################
 
 
 ####################
@@ -63,7 +64,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 0.001
+r2 = 10.
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -79,13 +80,14 @@ Q = (q2 * Q_structure).to(DEVICE, dtype=DTYPE)
 R = (r2 * R_structure).to(DEVICE, dtype=DTYPE)
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=DEVICE, dtype=DTYPE) # State transition matrix
 # F = torch.tensor([[0.999, 0.1],[0., 0.999]], device=DEVICE, dtype=DTYPE) # State transition matrix
-sys_model = SystemModel(F, Q, h_nonlinear, R, args.T, args.T_test,m,n)
+# h_nonlinear_rot = make_rotated_h_nonlinear(h_nonlinear,30)
+f = make_f(F)
+sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
 SystemModel.F_gen = False
 m1_0 = m1_0.to(DEVICE, dtype=DTYPE)
 m2_0 = m2_0.to(DEVICE, dtype=DTYPE)
 sys_model.InitSequence(m1_0, m2_0)
 print("State Evolution Matrix:",F)
-
 
 
 # Generate 5 different F matrices for datasets (same as original)
@@ -119,8 +121,9 @@ for dataset_id in range(1, cycles+1):
     print(F_current)
 
     # Create system model
-    SystemModel.F_gen = False
-    sys_model = SystemModel(F_matrices_for_datasets[dataset_id - 1][0], Q, h_nonlinear, R, args.T, args.T_test,m,n)
+    # SystemModel.F_gen = False
+
+    sys_model = SystemModel(f, Q, h_nonlinear, R, args.T, args.T_test,m,n)
     sys_model.InitSequence(m1_0, m2_0)
 
     # Create folder and file names
@@ -153,20 +156,16 @@ for dataset_id in range(1, cycles+1):
     all_F_matrices.append(F_test_mat_list)
 
 ##############################################################################################
-##estimate Q and R from data
-# if gauss:
-#     combined_target = torch.cat(all_targets_by_F, dim=2)
-#     combined_input = torch.cat(all_inputs_by_F, dim=2)
-#     print('Combined shapes for QR estimation:', combined_input.shape, combined_target.shape)  # sanity: [N_T, n, 5*T_test], [N_T, m, 5*T_test]
-#     Q_hat, R_hat = estimate_QR(combined_input, combined_target)
-#     Q = Q_hat
-#     R = R_hat
-#     sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
+
 
 #################################################################################################
 
 path_results_True_rts = path_results_True+'best-rts_true.pt'
+# path_results_True_rts2 = path_results_True+'best-modelwith_p2_q.pt'
+path_results_True_psmooth = path_results_True+'best-psmooth_true.pt'
 path_results_wrong_rts = path_results_False+'best-rts_false.pt'
+# path_results_2_rts2 = path_results_False+'best-rts_with_pJOINT_q.pt'
+path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -195,7 +194,7 @@ for dataset_id in range(cycles):
     true_F_for_this_dataset = F_matrices_for_datasets[dataset_id][0]
 
     # Set up system model with true F
-    sys_model_true = SystemModel(true_F_for_this_dataset, Q,h_nonlinear, R, args.T, args.T_test,m,n)
+    sys_model_true = SystemModel(true_F_for_this_dataset, Q, h_nonlinear, R, args.T, args.T_test,m,n)
     sys_model_true.InitSequence(m1_0, m2_0)
 
     # Set F_test for the model (needed by NNTest)
@@ -204,9 +203,11 @@ for dataset_id in range(cycles):
 
 
     if dataset_id == 0:# Use NNTest to get results with TRUE F
-        results = RTSNet_Pipeline.NNTest_no_p(sys_model_true, test_input, test_target, load_model_path=path_results_True_rts, generate_f=False,init_x_list=None, init_P_list=None,non_linear_h=True)
+        results = RTSNet_Pipeline.NNTest(sys_model_true, test_input, test_target, load_model_path=path_results_True_rts, load_p_smoothe_model_path=path_results_True_psmooth,
+            generate_f=False,init_x_list=None, init_P_list=None,non_linear_h=True)
     else:
-        results = RTSNet_Pipeline.NNTest_no_p(sys_model_true, test_input, test_target, load_model_path=path_results_True_rts,generate_f=False,init_x_list=xT0_last, init_P_list=pT0_last,non_linear_h=True)
+        results = RTSNet_Pipeline.NNTest(sys_model_true, test_input, test_target, load_model_path=path_results_True_rts, load_p_smoothe_model_path=path_results_True_psmooth,
+                                         generate_f=False,init_x_list=xT0_last, init_P_list=pT0_last,non_linear_h=True)
 
 
     #[self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t, torch.stack(P_smooth_list), V_list, self.model.K_T_list,
@@ -219,17 +220,27 @@ for dataset_id in range(cycles):
     true_mse_lin_sum += mse_lin
    # >>> propagate last smoothed x_T and P_T to next dataset <<<
     x_last = results[3][:, :, -1].clone()            # [N_T, m]
+    p_last = results[5][:, :, :, -1].clone()         # [N_T, m, m]
     xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
-    pT0_last = sys_model_true.m2x_0.clone().detach()
+    pT0_last = [p_last[j] for j in range(p_last.size(0))]
 
 average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
 
 
 ############################################################################# create the datadestination for the models
+model_pathes = []
+psmooth_pathes = []
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet//AI_M_step/exp_3/r_0001/EMKF/False/'###############################################################################################################################################
-destination_path_M = destination_folder + 'M_net_trained_3_datasets_no_mult.pt'
+destination_folder = 'RTSNet/paper/exp_3.13/r_10/EMKF/False/'###############################################################################################################################################
+for i in range(max_iter):
+    file_rtsnet = f"model_e_q{i}_rand_false_trained.pt"
+    file_psmooth = f"psmooth_e_q{i}_rand_false_trained.pt"
+    # Build the full destination path
+    destination_path_RTS = destination_folder + file_rtsnet
+    destination_path_PSMOOTH = destination_folder + file_psmooth
+    model_pathes.append(destination_path_RTS)
+    psmooth_pathes.append(destination_path_PSMOOTH)
 #############################################################################
 # AI EMKF Sequential Testing
 print('\n=== AI EMKF Sequential Learning and Testing ===')
@@ -272,19 +283,23 @@ for dataset_id in range(cycles):
     print(f"Running Test_Only_EMKF on dataset {dataset_id + 1}...")
 
     if dataset_id == 0:
-        test_losses, test_f_losses, final_F_list,  last_x_list,   = RTSNet_Pipeline.test_mstep_net(sys_model_ai, test_input, test_target,
-            destination_path_RTS=path_results_wrong_rts, destination_path_M=destination_path_M, num_em_iters=3,generate_f= False,non_linear_h=True)
+        test_losses, test_f_losses, final_F_list,  last_x_list, last_P_list,final_F_list2  = RTSNet_Pipeline.Test_Only_EMKF(sys_model_ai, test_input, test_target,
+            load_base_rtsnet=model_pathes, load_base_psmooth=psmooth_pathes,emkf_iterations=3,generate_f= False,non_linear_h=True)
+
     else:
-        test_losses, test_f_losses, final_F_list,  last_x_list,   = RTSNet_Pipeline.test_mstep_net(sys_model_ai, test_input, test_target,
-            destination_path_RTS=path_results_wrong_rts, destination_path_M=destination_path_M ,num_em_iters=3, generate_f= False, init_x_list=x0_em_last, init_P_list=p0_em_last,non_linear_h=True)
+        test_losses, test_f_losses, final_F_list,  last_x_list, last_P_list,final_F_list2  = RTSNet_Pipeline.Test_Only_EMKF(sys_model_ai, test_input, test_target,
+            load_base_rtsnet=model_pathes, load_base_psmooth=psmooth_pathes,emkf_iterations=3, generate_f= False, init_x_list=x0_em_last, init_P_list=p0_em_last,non_linear_h=True)
+
+
 
     emkf_mse_lin_sum += float(test_losses[-1])
-    current_F_estimate_prev = final_F_list
-    # current_F_estimate_prev = F_initial_guess
+    # current_F_estimate_prev = final_F_list
+    current_F_estimate_prev = F_initial_guess
     # Prepare initials for NEXT dataset
 
-    x0_em_last = last_x_list
-    p0_em_last = sys_model_ai.m2x_0.clone().detach()
+
+    x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
+    p0_em_last = [last_P_list[j].clone() for j in range(len(last_P_list))]
 ###############################delet
     # last_x_list = test_target[:,:,-1]
     # last_P_list = torch.eye(2, device="cuda")
@@ -308,7 +323,7 @@ for dataset_id in range(cycles):
     test_target = all_targets_by_F[dataset_id]
 
     # Set up system model with initial guess F
-    sys_model_init = SystemModel(F_initial_guess[0], Q,h_nonlinear , R, args.T, args.T_test,m,n)
+    sys_model_init = SystemModel(F_initial_guess[0], Q, h_nonlinear, R, args.T, args.T_test,m,n)
     sys_model_init.InitSequence(m1_0, m2_0)
 
     # Set F_test for the model - one F per sequence
@@ -319,11 +334,11 @@ for dataset_id in range(cycles):
     # Use NNTest to get results with initial guess F
 
     if dataset_id ==0:
-        results = RTSNet_Pipeline.NNTest_no_p(sys_model_init, test_input, test_target, load_model_path=path_results_wrong_rts,
-                                          generate_f=False,non_linear_h=True)
+        results = RTSNet_Pipeline.NNTest(sys_model_init, test_input, test_target, load_model_path=path_results_wrong_rts,
+                                         load_p_smoothe_model_path=path_results_wrong_psmooth, generate_f=False,non_linear_h=True)
     else:
-        results = RTSNet_Pipeline.NNTest_no_p(sys_model_init, test_input, test_target, load_model_path=path_results_wrong_rts,
-            generate_f=False,init_x_list =xF0_last,init_P_list = pF0_last,non_linear_h=True)
+        results = RTSNet_Pipeline.NNTest(sys_model_init, test_input, test_target, load_model_path=path_results_wrong_rts,
+            load_p_smoothe_model_path=path_results_wrong_psmooth, generate_f=False,init_x_list =xF0_last,init_P_list = pF0_last,non_linear_h=True)
 
     # Extract MSE in dB
     mse_db = results[2]  # MSE_test_dB_avg
@@ -331,8 +346,9 @@ for dataset_id in range(cycles):
 
     # >>> propagate last smoothed x_T and P_T to next dataset <<<
     x_last = results[3][:, :, -1].clone()  # [N_T, m]
+    p_last = results[5][:, :, :, -1].clone()  # [N_T, m, m]
     xF0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
-    pF0_last = sys_model_init.m2x_0.clone().detach()
+    pF0_last = [p_last[j] for j in range(p_last.size(0))]
 
 
 

@@ -38,7 +38,13 @@ class RTSNetNN(KalmanNetNN):
 
 
     def standardize(self, x, eps: float = 1e-5):
-        return (x - x.mean()) / (x.std() + eps)
+        # Handle edge cases: constant tensor or very small tensors
+        if x.numel() <= 1:
+            return torch.zeros_like(x)
+        std = x.std()
+        if std < eps:  # constant or near-constant
+            return torch.zeros_like(x)
+        return (x - x.mean()) / (std + eps)
 
     #################################################
     ### Initialize Backward Smoother Gain Network ###
@@ -283,4 +289,4 @@ class RTSNetNN(KalmanNetNN):
         self.h_Sigma_bw = hidden.data
         self.h_Sigma_bw[0, 0, :self.m ** 2] = self.prior_Sigma.flatten()
 
-        
+

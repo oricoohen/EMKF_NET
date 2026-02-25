@@ -43,8 +43,8 @@ dtype = torch.float32
 # SETTINGS
 # ======================================================
 ticker = "SPY"
-start_date = "2018-01-01"
-end_date   = "2019-01-01"
+start_date = "2019-01-01"
+end_date   = "2020-01-01"
 
 TAU = 20
 max_em_it = 30

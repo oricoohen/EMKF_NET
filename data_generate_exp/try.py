@@ -1,4 +1,6 @@
 ####the old one without the f
+
+####the old one without the f
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -18,24 +20,17 @@ from RTSNet.RTSNet_nn import RTSNetNN
 
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
-import random
+
 
 import shutil
-from emkf.main_emkf_func import EMKF_H_analitic
+
 print("Pipeline Start")
 print(torch.cuda.is_available())  # should be True
 print(torch.cuda.get_device_name(0))
 device = torch.device("cuda")
-# import torch.backends.cudnn as cudnn
-# cudnn.benchmark = True
-# SEED = 0
-#
-# random.seed(SEED)
-# torch.manual_seed(SEED)
-# torch.cuda.manual_seed_all(SEED)
-#
-# torch.backends.cudnn.benchmark = False
-# torch.backends.cudnn.deterministic = True
+import torch.backends.cudnn as cudnn
+cudnn.benchmark = True
+
 ################
 ### Get Time ###
 ################
@@ -45,9 +40,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/changed_H_v_0/exp_2/r_01/True_H/'  ######################################################################################################################################################################
+path_results_True = '../RTSNet/AI_M_step/exp_1/r_1/True_F/'  ######################################################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/changed_H_v_0/exp_2/r_01/False_H/'  ######################################################################################################################################################################
+path_results_False = '../RTSNet/AI_M_step/exp_1/r_1/False_F/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -58,7 +53,7 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 400  # Number of training examples (size of the training dataset).50
+args.N_E = 500  # Number of training examples (size of the training dataset).50
 args.N_CV = 100  # Number of cross-validation examples (size of the CV dataset used to tune hyperparameters).30
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
@@ -75,7 +70,7 @@ max_iter = 3
 
 
 # True model
-q2 = 1.
+q2 = 0.01
 r2 =1.
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
@@ -84,6 +79,7 @@ v_db = 0
 
 Q = q2 * Q_structure.to(device)
 R = r2 * R_structure.to(device)
+
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device) # State transition matrix
 H = torch.tensor([[1., 1.], [0.25, 1.]], device=device)
 sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
@@ -100,22 +96,17 @@ print("Observation Matrix:",H)
 ###################################
 dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
 dataFileName = '2x2_1.pt'
-dataFileName_F = '2x2_F_fixed'  # F is fixed (not diverse)
-dataFileName_H = '2x2_H_diverse'  # Only H is diverse
+dataFileName_F = '2x2_F_reg+5_deg'
 print("Start Data Gen")
-F_in = [F for _ in range(args.N_E)]  # F is fixed (not diverse)
-DataGen(args, sys_model, dataFolderName + dataFileName, dataFolderName + dataFileName_F, fileName_H=dataFolderName + dataFileName_H, delta=1, randomInit_train=InitIsRandom_train, randomInit_cv=InitIsRandom_cv,
-        randomInit_test=InitIsRandom_test, randomLength=LengthIsRandom, F_gen=F_in, H_gen=True)  # F_gen=False (boolean), only H diverse
+DataGen(args, sys_model, dataFolderName + dataFileName,dataFolderName + dataFileName_F,delta=1, randomInit_train=InitIsRandom_train,randomInit_cv=InitIsRandom_cv,randomInit_test=InitIsRandom_test,randomLength=LengthIsRandom)
 print("Data Load")
 
 
 [train_input, train_target, cv_input, cv_target, test_input, test_target] = DataLoader(dataFolderName + dataFileName)
 [F_train_mat, F_val_mat, F_test_mat] = torch.load(dataFolderName + dataFileName_F, map_location=device)
-[H_train_mat, H_val_mat, H_test_mat] = torch.load(dataFolderName + dataFileName_H, map_location=device)  # NEW: Load H matrices
 print("trainset size:",train_target.size())#(seq,m,T)
 print("cvset size:",cv_target.size())
 print("testset size:",test_target.size())
-print("H matrices loaded - train:", len(H_train_mat), "val:", len(H_val_mat), "test:", len(H_test_mat))  # NEW
 
 
 ###############################################################################################
@@ -138,25 +129,15 @@ cv_target = cv_target.to(device=device, dtype=ddtype)
 test_input = test_input.to(device=device, dtype=ddtype)
 test_target = test_target.to(device=device, dtype=ddtype)
 ############################
-# F is FIXED (not diverse) - use true F for all sequences
-sys_model.F_train = F_train_mat  # Will be same F repeated
+sys_model.F_train = F_train_mat
 sys_model.F_valid = F_val_mat
 sys_model.F_test = F_test_mat
 sys_model.F_train_TRUE = F_train_mat
 sys_model.F_valid_TRUE = F_val_mat
 sys_model.F_test_TRUE = F_test_mat
-
-# H is DIVERSE - different H matrices
-sys_model.H_train = H_train_mat
-sys_model.H_valid = H_val_mat
-sys_model.H_test = H_test_mat
-sys_model.H_train_TRUE = H_train_mat
-sys_model.H_valid_TRUE = H_val_mat
-sys_model.H_test_TRUE = H_test_mat
-
-print("F is FIXED (true model):", F)
-print("H is DIVERSE - Sample H_test[0]:\n", H_test_mat[0])
-print("H is DIVERSE - Sample H_test[1]:\n", H_test_mat[1])
+# print(F_train_mat,'111111111111111')
+# print(F_val_mat,'22222222222222222222')
+print(F_test_mat,'333333333333333')
 ########################################
 ### Evaluate Observation Noise Floor ###
 ########################################
@@ -182,17 +163,17 @@ print("Observation Noise Floor - STD:", obs_std_dB, "[dB]")
 
 
 
-##############################
-### Evaluate Kalman Filter ###
-##############################
-print("Evaluate Kalman Filter True (Fixed F, Diverse H)")
-KFTest(args, sys_model, test_input, test_target, F=F_test_mat, H=H_test_mat)  # F=None means use fixed sys_model.F
-#############################
+# ##############################
+# ### Evaluate Kalman Filter ###
+# ##############################
+print("Evaluate Kalman Filter True")
+KFTest(args, sys_model, test_input, test_target,F = F_test_mat)
+# #############################
 ### Evaluate RTS Smoother ###
 ############################
 
-print("Evaluate RTS Smoother True (Fixed F, Diverse H)")
-S_Test(sys_model, test_input, test_target, F=F_test_mat, H=H_test_mat,generate_f=None)  # F=None means use fixed sys_model.F
+print("Evaluate RTS Smoother True")
+S_Test(sys_model, test_input, test_target,F = F_test_mat)
 
 ######BAD F############################
 
@@ -207,41 +188,41 @@ sys_model_2.F_train_TRUE = F_train_mat
 sys_model_2.F_valid_TRUE = F_val_mat
 sys_model_2.F_test_TRUE = F_test_mat
 
-# NEW: Assign TRUE H matrices
-sys_model_2.H_train_TRUE = H_train_mat
-sys_model_2.H_valid_TRUE = H_val_mat
-sys_model_2.H_test_TRUE = H_test_mat
 
-#########F is FIXED (true model), only change H to wrong
 
-# Keep F fixed (TRUE model) - NO rotation
-sys_model_2.F_train = F_train_mat
-sys_model_2.F_valid = F_val_mat
-sys_model_2.F_test = F_test_mat
+#########change to wrong f option B
 
-# Copy H matrices (will be rotated to create WRONG H)
-sys_model_2.H_train = [H.clone() for H in H_train_mat]
-sys_model_2.H_valid = [H.clone() for H in H_val_mat]
-sys_model_2.H_test = [H.clone() for H in H_test_mat]
+# sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+# sys_model_2.F_valid = rotate_F(F_val_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+# sys_model_2.F_test= rotate_F(F_test_mat, i=0, j=1, theta=0.5,mult=1, many=True, randomit=True)
+sys_model_2.F_train = F_train_mat.copy()
+sys_model_2.F_valid = F_val_mat.copy()
+sys_model_2.F_test = F_test_mat.copy()
+for i in range(len(F_train_mat)):
+    sys_model_2.F_train[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+for i in range(len(F_val_mat)):
+    sys_model_2.F_valid[i] =torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+for i in range(len(F_test_mat)):
+    sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
+    # sys_model_2.F_test[i] = torch.tensor([[1.2237, -0.0927],[1.8518, 0.0819]], device=device, dtype=ddtype)
 
-# Create WRONG H matrices by rotating them (F stays correct)
-sys_model_2.H_train = rotate_F(sys_model_2.H_train, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
-sys_model_2.H_valid = rotate_F(sys_model_2.H_valid, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
-sys_model_2.H_test  = rotate_F(sys_model_2.H_test,  i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+
+# random WRONG F per sequence using your helper
+# sys_model_2.F_train = rotate_F(F_train_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+# sys_model_2.F_valid = rotate_F(F_val_mat,  i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+# sys_model_2.F_test  = rotate_F(F_test_mat, i=0, j=1, theta=1, mult=1, many=True, randomit=True)
+
 
 sys_model_2.args = args
-print("F is FIXED (true model):", F)
-print("H WRONGGGGGG (sample H_test[0]):\n", sys_model_2.H_test[0])
+print("F WRONGGGGGG:",sys_model_2.F_test)
 
 
 
-###################check the regular rts with wrong H only
-print('regular kalman and rts with FIXED F (true) and WRONG H')
-KFTest(args, sys_model_2, test_input, test_target, F=F_test_mat, H=sys_model_2.H_test)  # F=None uses fixed true F
+###################check the regu;ar rts
+print('regular kalman and rts with wrong F')
+KFTest(args, sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 
-S_Test(sys_model_2, test_input, test_target, F=F_test_mat, H=sys_model_2.H_test,generate_f=None)  # F=None uses fixed true F
-
-H_matrices, likelihoods, iterations_list, _, _, _ = EMKF_H_analitic(sys_model_2,sys_model_2.F_test,sys_model_2.H_test,Q, R,test_input,m1_0, m2_0,test_target,max_it=3,generate_h=True, init_x_list=None,init_P_list=None)
+S_Test(sys_model_2, test_input, test_target,F = sys_model_2.F_test)
 
 #######################
 ### RTSNet Pipeline ###
@@ -262,58 +243,82 @@ RTSNet_model.to(device)
 
 path_results_True_rts = path_results_True+'best-rts_true.pt'
 path_results_wrong_rts = path_results_False+'best-rts_false.pt'
-#####TRAIN with FIXED F, DIVERSE TRUE H#####
-print('RTSNet and Psmooth with FIXED F (true) and DIVERSE TRUE H')
-# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts,
-#                         generate_f=False, generate_h=True)  # F is fixed, only H diverse
+#####TRAIN GOOD F#####
+print('rtssnet and psmooth with trueeeeeeee F')
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 
 ### Test Neural Network
-RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target, load_model_path=path_results_True_rts,
-                            generate_f=False, generate_h=True,  # F is fixed, only H diverse
-                            init_x_list=None, init_P_list=None, non_linear_h=False)
+RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_True_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
 
 
 #RTSNet_Pipeline.setTrainingParams(args_big)
-print('RTSNet and Psmooth with FIXED F (true) and WRONG H')
-#######TRAIN with FIXED F, WRONG H########
-# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target,
-#                         path_results=path_results_wrong_rts, load_model_path=path_results_True_rts,
-#                         generate_f=False, generate_h=True)  # F is fixed, only H diverse
-#
+print('rtssnet and psmooth with WRONGGGGGGG F')
+#######TRAIN BAD F########
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+
 ## Test Neural Network
-RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,
-                            generate_f=False, generate_h=True,  # F is fixed, only H diverse
-                            init_x_list=None, init_P_list=None, non_linear_h=False)
+RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
 
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/'######################################################################################################################################################################
+destination_folder = 'RTSNet/AI_M_step/exp_1/r_1/EMKF/False/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
 # Build the full destination path
 # destination_path_RTS = destination_folder + file_rtsnet
 
-destination_path_M= destination_folder + f"M_rand_false_trained_12_20_f_rtsnet_new_net.pt"
-
+# destination_path_M= destination_folder +f"try_15_on_last_f_3_iter_mixed_f_NO_A_2.pt"
+destination_path_M= destination_folder +f"try_15_on_last_f_3_iter_mixed_f.pt"
 # destination_path_M = [destination_folder + "M_iter0.pt",destination_folder + "M_iter1.pt",destination_folder + "M_iter2.pt"]
 # load_m= destination_folder + f"M_rand_false_trained.pt"
 ######START THE EMKF TRAINING##########
 
 
+model_pathes = []
+m_step_pathes = []
+for i in range(max_iter):
+    # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.
+
+    file_rtsnet = f"model_e_q{i}_rand_false_trained_no_rts_10f_5fmid.pt"
+    file_m_step = f"m_step_e_q{i}M_rand_false_trained_no_rts_10f_5fmid.pt"
+    # Build the full destination path
+    destination_path_RTS = destination_folder + file_rtsnet
+    destination_path_m_step = destination_folder + file_m_step
+    model_pathes.append(destination_path_RTS)
+    m_step_pathes.append(destination_path_m_step)
+
 sys_model_2.args = args
 RTSNet_Pipeline.setTrainingParams(args)
 
 
-RTSNet_Pipeline.train_H_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
-                        destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_H=1e-4, generate_h=True)
+# RTSNet_Pipeline.end_To_end_m_net(sys_model_2,cv_input,cv_target,train_input,train_target,destination_path_M= m_step_pathes,destination_path_RTS=model_pathes,
+#                     load_base_m_mmodel=destination_path_M,load_rts = path_results_wrong_rts,num_em_iters=3,alpha=(0.05, 0.1, 0.85),lambda_F=0.001,generate_f=True,non_linear_h=False)
+
+RTSNet_Pipeline.end_to_end_test_mstep_net(sys_model_2, test_input, test_target,model_pathes,m_step_pathes,num_em_iters=3,
+                   alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, non_linear_h=False)
+
+# RTSNet_Pipeline.train_mstep_net(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+
+#
+#
+#
+# RTSNet_Pipeline.train_mstep_net_batch(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+#
+# print('check FFFFFFFFFFFF', sys_model_2.F_test)
+# RTSNet_Pipeline.test_mstep_net(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
 
 
+# RTSNet_Pipeline.one_train_m_step_net( sys_model_2, cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, destination_path_RTS = path_results_wrong_rts,  lambda_F=1e-3, generate_f=True, non_linear_h=False)
+#
+#
 
-# M-step testing with FIXED F, DIVERSE H
-RTSNet_Pipeline.test_H_mstep_net(sys_model_2, test_input, test_target, path_results_wrong_rts, destination_path_M,
-                                num_em_iters=3, alpha=(0.05, 0.1, 0.85), lambda_H=1e-4,generate_h=True, non_linear_f=False)  # F fixed, only H diverse
-
-
+# RTSNet_Pipeline.one_test_mstep_net(sys_model_2, test_input, test_target,
+#                        destination_path_RTS =path_results_wrong_rts ,destination_path_M=destination_path_M, lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False)
+#
 # sys_model_2.F_test = rotate_F(F_test_mat)
 # print('ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
 # sys_model_2.F_test = F_test_mat
@@ -323,4 +328,15 @@ RTSNet_Pipeline.test_H_mstep_net(sys_model_2, test_input, test_target, path_resu
 #     sys_model_2.F_test[i] = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device, dtype=ddtype)
 # EMKF_F(sys_model_2,RTSNet_Pipeline,train_input, train_target, cv_input, cv_target,test_input, test_target,model_pathes,psmooth_pathes,3)
 
+
+
+
+
+# RTSNet_Pipeline.train_mstep_net_with_new_enters(sys_model_2,cv_input, cv_target, train_input, train_target,
+#                         destination_path_M, path_results_wrong_rts, num_em_iters=3,alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True)
+
+
+
+# RTSNet_Pipeline.test_mstep_net_with_new_enteries(sys_model_2, test_input, test_target,path_results_wrong_rts,destination_path_M,num_em_iters=3,
+#                    alpha=(0.05, 0.1, 0.85), lambda_F=1e-4, generate_f=True, non_linear_h=False)
 

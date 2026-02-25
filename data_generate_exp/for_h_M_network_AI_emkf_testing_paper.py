@@ -47,9 +47,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/changed_H_v_0/exp_2/r_01/True_H/'
+path_results_True = '../RTSNet/changed_H_v_0/exp_2/r_01/True_H/'
 gauss = False
-path_results_False = 'RTSNet/changed_H_v_0/exp_2/r_01/False_H/'
+path_results_False = '../RTSNet/changed_H_v_0/exp_2/r_01/False_H/'
 
 
 ####################

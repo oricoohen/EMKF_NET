@@ -1,29 +1,29 @@
 """
-Corrected version of M_network_training_for_nirr.py
-This properly sets up data for train_mstep_net_3_datasets function
+Corrected version for H estimation (EMKF_H)
+This properly sets up data for train_H_mstep_net_3_datasets function
+F is FIXED (known), H is DIVERSE (unknown, to be estimated)
 """
 import torch
 import torch.nn as nn
 from datetime import datetime
 
+from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F, det
+from emkf.main_emkf_func_AI import EMKF_F
 
-from Simulations.Extended_sysmdl import SystemModel, rotate_F#, make_rotated_h_nonlinear   # your class posted above
-from Simulations.Lorenz_Atractor.parameters import ( m1x_0 as m1_0, m2x_0 as m2_0,    # keep your names consistent
-    m, n, F, make_f, h_nonlinear, Q_structure, R_structure
-)
-
-from Simulations.utils import DataLoader, DataGen
+from Simulations.utils import DataLoader, DataGen, estimate_QR
 
 import Simulations.config as config
+from Simulations.Linear_canonical.parameters import F, H, Q_structure, R_structure, m1_0, m2_0
 
+from Smoothers.KalmanFilter_test import KFTest
+from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
-
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
 import shutil
-print("Pipeline Start")
+print("Pipeline Start - EMKF H Estimation")
 
 # === ADD: global device/dtype ===
 DEVICE = torch.device("cuda")
@@ -41,8 +41,8 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_True = 'RTSNet/AI_M_step/exp_2/r_001/True_F/'
-path_results_False = 'RTSNet/AI_M_step/exp_2/r_001/False_F/'
+path_results_True = '../RTSNet/changed_H_v_0/exp_2/r_01/True_H/'
+path_results_False = '../RTSNet/changed_H_v_0/exp_2/r_01/False_H/'
 
 ####################
 ### Design Model ###
@@ -72,20 +72,28 @@ max_iter = 4
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 
 # True model parameters
-q2 = 0.01
-r2 = 0.01
+q2 = 0.1
+r2 = 0.1
 
 print('q2 is:', q2)
 print('r2 is:', r2)
 
 Q = (q2 * Q_structure).to(DEVICE, dtype=DTYPE)
 R = (r2 * R_structure).to(DEVICE, dtype=DTYPE)
+
+# F is now FIXED (known dynamics) - NO diversity
+F_fixed = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
+
+# H is TRUE but will be DIVERSE and unknown
+H_true = torch.tensor([[1., 1.], [0.25, 1.]], device=DEVICE, dtype=DTYPE)
+
 m1_0 = m1_0.to(DEVICE, dtype=DTYPE)
 m2_0 = m2_0.to(DEVICE, dtype=DTYPE)
 
 print("\n" + "="*80)
-print("GENERATING 3 DATASETS WITH DIFFERENT F MATRICES")
+print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
+
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
@@ -94,54 +102,66 @@ all_cv_inputs = []
 all_cv_targets = []
 all_test_inputs = []
 all_test_targets = []
-all_F_matrices_train = []
-all_F_matrices_cv = []
-all_F_matrices_test = []
+all_H_matrices_train = []
+all_H_matrices_cv = []
+all_H_matrices_test = []
 
 x0_last = None
-F_init = None  # Initialize for first dataset (DataGen expects this parameter)
 
-# Generate datasets
+# Generate datasets with FIXED F and DIVERSE H
+H_init = None  # No specific H_init for first dataset
 for dataset_id in range(cycles):
     print(f"\n{'='*80}")
     print(f"Generating Dataset {dataset_id}")
     print(f"{'='*80}")
 
-    # Create system model with this F
-    F_current = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
-    f_current = make_f(F_current)  # F is linear, just wrapped as function f(x)=F@x
-    sys_model = SystemModel(f_current, Q, h_nonlinear, R, args.T, args.T_test, m, n)
+    # Create system model with FIXED F and this H
+    H_current = torch.tensor([[1, 1], [0.25, 1]], device=DEVICE, dtype=DTYPE)
+    sys_model = SystemModel(F_fixed, Q, H_current, R, args.T, args.T_test)
     sys_model.InitSequence(m1_0, m2_0)
 
-    print(f"F matrix for dataset {dataset_id}:")
-    print(F_current)
+    print(f"F matrix (FIXED for all datasets):")
+    print(F_fixed)
+    print(f"H matrix for dataset {dataset_id}:")
+    print(H_current)
 
     # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp_3_datasets/'
+    dataFolderName = f'Simulations/Linear_canonical/paper/exp_3_datasets_H/'
     dataFileName = f'dataset_{dataset_id}_data.pt'
-    dataFileName_F = f'dataset_{dataset_id}_F.pt'
+    dataFileName_H = f'dataset_{dataset_id}_H.pt'
 
-    # Generate data for this F matrix
+    # Generate data for this H matrix (F is FIXED)
     print(f"\nGenerating data for dataset {dataset_id}...")
+
+    # Create F_fixed_list (same F for all sequences)
+    F_fixed_list = [F_fixed.clone() for _ in range(args.N_E)]
+
+    # Create H_list for this dataset (same H for all sequences in this dataset)
+    H_current_list = [H_current.clone() for _ in range(args.N_E)]
 
     # IMPORTANT: We need to generate TRAINING and CV data, not just test
     # So we call DataGen with Test=False to generate all splits
     DataGen(args, sys_model,
             dataFolderName + dataFileName,
-            dataFolderName + dataFileName_F,
+            dataFolderName + dataFileName_H,
+            fileName_H=dataFolderName + dataFileName_H,
             delta=1,
             randomInit_train=InitIsRandom_train,
             randomInit_cv=InitIsRandom_cv,
             randomInit_test=InitIsRandom_test,
             randomLength=LengthIsRandom,
             Test=False,
-            x0_list=x0_last, F_init=F_init)  # Use x0_last for continuity in test set
+            F_gen=F_fixed_list,
+            H_gen=True,
+            x0_list=x0_last,
+            H_init=H_init)  # Use x0_last for continuity in test set
 
     # Load the generated data
-    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
-    [F_train_mat, F_val_mat, F_test_mat_list] = torch.load(dataFolderName + dataFileName_F, map_location=DEVICE)
+    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
+        dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+    [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    F_init = [F_train_mat, F_val_mat, F_test_mat_list]  # For next dataset
+    H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
     # Prepare x0_last for next dataset (for continuity in test sequences)
     X_0_train = train_target[:, :, -1].clone()
@@ -167,9 +187,9 @@ for dataset_id in range(cycles):
     all_cv_targets.append(cv_target)
     all_test_inputs.append(test_input)
     all_test_targets.append(test_target)
-    all_F_matrices_train.append(F_train_mat)
-    all_F_matrices_cv.append(F_val_mat)
-    all_F_matrices_test.append(F_test_mat_list)
+    all_H_matrices_train.append(H_train_mat)
+    all_H_matrices_cv.append(H_val_mat)
+    all_H_matrices_test.append(H_test_mat_list)
 
 print("\n" + "="*80)
 print("DATA GENERATION COMPLETE")
@@ -194,30 +214,30 @@ print("\n" + "="*80)
 print("SETTING UP SYSTEM MODEL AND PIPELINE")
 print("="*80)
 
-# Create system model (F will be updated during training)
-F_initial = F_matrices_for_datasets[0]
-f_initial = make_f(F_initial)  # F is linear, just wrapped as function f(x)=F@x
-sys_model = SystemModel(f_initial, Q, h_nonlinear, R, args.T, args.T_test, m, n)
+# Create system model with FIXED F and initial H
+H_initial = torch.tensor([[1., 1.], [0.25, 1.]], device=DEVICE, dtype=DTYPE)
+sys_model = SystemModel(F_fixed, Q, H_initial, R, args.T, args.T_test)
 sys_model.InitSequence(m1_0, m2_0)
 
-# CRITICAL: Set F lists as 3-dataset structure
-sys_model.F_train = all_F_matrices_train     # List of 3 F lists
-sys_model.F_valid = all_F_matrices_cv        # List of 3 F lists
-sys_model.F_test = all_F_matrices_test       # List of 3 F lists
+# CRITICAL: Set H lists as 3-dataset structure
+sys_model.H_train = all_H_matrices_train     # List of 3 H lists
+sys_model.H_valid = all_H_matrices_cv        # List of 3 H lists
+sys_model.H_test = all_H_matrices_test       # List of 3 H lists
 
 # These _TRUE versions are what the loss is computed against
-sys_model.F_train_TRUE = all_F_matrices_train
-sys_model.F_valid_TRUE = all_F_matrices_cv
-sys_model.F_test_TRUE = all_F_matrices_test
+sys_model.H_train_TRUE = all_H_matrices_train
+sys_model.H_valid_TRUE = all_H_matrices_cv
+sys_model.H_test_TRUE = all_H_matrices_test
 
-print("✓ System model configured with 3-dataset F structure")
+print("✓ System model configured with 3-dataset H structure")
 
 # Paths for models
 path_results_True_rts = path_results_True + 'best-rts_true.pt'
 path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
-destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
-destination_path_M = destination_folder + 'M_net_trained_3_datasets_no_mult.pt'
-destination_path_M_laod = destination_folder + 'try_20_on_last_f_3_iter_mixed_f.pt'
+destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/'
+destination_path_M = destination_folder + 'M_net_H_trained_3_datasets2.pt'
+destination_path_M_load = destination_folder + 'M_rand_false_trained_12_20_f_rtsnet_new_net.pt'
+
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -229,11 +249,11 @@ RTSNet_Pipeline.setTrainingParams(args)
 print("✓ Pipeline configured")
 
 #########################################################################################################
-# TRAIN M-STEP NETWORK ON 3 DATASETS
+# TRAIN M-STEP NETWORK ON 3 DATASETS FOR H ESTIMATION
 #########################################################################################################
 
 print("\n" + "="*80)
-print("TRAINING M-STEP NETWORK ON 3 DATASETS")
+print("TRAINING M-STEP NETWORK ON 3 DATASETS FOR H ESTIMATION")
 print("="*80)
 
 print("\nTraining configuration:")
@@ -248,12 +268,13 @@ print(f"  Batch size: {args.n_batch}")
 print(f"  Learning rate: {args.lr}")
 print(f"  Weight decay: {args.wd}")
 print(f"  EM iteration weights (alpha): (0.05, 0.1, 0.85)")
-print(f"  F regularization (lambda_F): 1e-3")
+print(f"  H regularization (lambda_H): 1e-3")
+print(f"  F is FIXED (not estimated)")
 
 print("\nStarting training...")
 
-# Call the training function - CORRECTED: Pass train and cv data, not test data
-RTSNet_Pipeline.train_mstep_net_3_datasets(
+# Call the H training function - CORRECTED: Pass train and cv data, not test data
+RTSNet_Pipeline.train_H_mstep_net_3_datasets(
     SysModel=sys_model,
     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
@@ -263,10 +284,10 @@ RTSNet_Pipeline.train_mstep_net_3_datasets(
     destination_path_RTS=path_results_wrong_rts,
     num_em_iters=3,
     alpha=(0.05, 0.1, 0.85),          # Weights for EM iterations
-    lambda_F=1e-3,                    # Regularization on ΔF
-    generate_f=True,                  # Use grouped F (f_index = n_e // 10)
-    non_linear_h=True,                # Non-linear observation model (h_nonlinear)
-    load=destination_path_M_laod,
+    lambda_H=1e-3,                    # Regularization on ΔH
+    generate_h=True,                  # Use grouped H (h_index = n_e // 10)
+    non_linear_f=False,               # Linear observation model
+    load=destination_path_M_load,
     datasets=3                        # Number of datasets
 )
 
@@ -282,90 +303,4 @@ print(f"Best M-network model saved to: {destination_path_M}")
 print("\n" + "="*80)
 print("TESTING ON 3 DATASETS (OPTIONAL)")
 print("="*80)
-
-# After training, you can test on each dataset separately
-# Or implement a test function that handles the 3-dataset structure
-
-results = None  # Initialize for first iteration
-for dataset_id in range(cycles):
-    print(f"\n--- Testing Dataset {dataset_id} ---")
-
-    test_input = all_test_inputs[dataset_id]
-    test_target = all_test_targets[dataset_id]
-    true_F = F_matrices_for_datasets[dataset_id]
-
-    # Set up system model with true F for this dataset (use non-linear h)
-    f_test = make_f(true_F)
-    sys_model_test = SystemModel(f_test, Q, h_nonlinear, R, args.T, args.T_test, m, n)
-    sys_model_test.InitSequence(m1_0, m2_0)
-    sys_model_test.F_test = all_F_matrices_test[dataset_id]
-    sys_model_test.F_test_TRUE = all_F_matrices_test[dataset_id]
-
-    # You can use one of these test functions:
-    # 1. Test with true F (baseline)
-    if dataset_id == 0:
-        results = RTSNet_Pipeline.NNTest_no_p(
-            sys_model_test,
-            test_input,
-            test_target,
-            load_model_path=path_results_True_rts,
-            generate_f=False,
-            init_x_list=None,
-            init_P_list=None
-        )
-    else:
-        # Use last state from previous dataset for continuity
-        x_last = results[3][:, :, -1].clone()
-        xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]
-        pT0_last = sys_model_test.m2x_0.clone().detach()
-
-        results = RTSNet_Pipeline.NNTest_no_p(
-            sys_model_test,
-            test_input,
-            test_target,
-            load_model_path=path_results_True_rts,
-            generate_f=False,
-            init_x_list=xT0_last,
-            init_P_list=pT0_last
-        )
-
-    mse_db = results[2]
-    print(f"Dataset {dataset_id} - MSE: {mse_db:.3f} dB")
-
-print("\n" + "="*80)
-print("ALL DONE!")
-print("="*80)
-
-"""
-KEY DIFFERENCES FROM YOUR ORIGINAL CODE:
-
-1. CORRECTED: Now storing train, cv, AND test data
-   - all_train_inputs, all_train_targets (for training)
-   - all_cv_inputs, all_cv_targets (for validation)
-   - all_test_inputs, all_test_targets (for testing)
-
-2. CORRECTED: Calling train_mstep_net_3_datasets with proper data
-   - train_input=all_train_inputs (not all_inputs_by_F which was test data)
-   - cv_input=all_cv_inputs (not test data)
-
-3. CORRECTED: F structure setup
-   - sys_model.F_train_TRUE = all_F_matrices_train (list of 3 lists)
-   - sys_model.F_valid_TRUE = all_F_matrices_cv (list of 3 lists)
-
-4. ADDED: Data structure verification
-   - Asserts to check correct shapes
-   - Clear logging of data dimensions
-
-5. ADDED: 3 different F matrices
-   - F_matrices_for_datasets list with 3 distinct F values
-   - Models F changing every 30 timesteps
-
-YOUR ORIGINAL CODE ISSUES:
-- Only stored test data (all_inputs_by_F, all_targets_by_F)
-- Tried to train on test data (which has N_T sequences, not N_E)
-- Used same F for all 3 datasets (all datasets had [[0.83, 0.2], [0.2, 0.83]])
-- Missing the train/cv data split needed for training
-
-NOW IT WILL WORK CORRECTLY!
-"""
 

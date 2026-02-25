@@ -39,7 +39,7 @@ class RTSNetNN(KalmanNetNN):
 
 
     def standardize(self, x, eps: float = 1e-5):
-        return (x - x.mean()) / (x.std() + eps)
+        return (x - x.mean()) / (x.std(unbiased=False) + eps)
 
     #################################################
     ### Initialize Backward Smoother Gain Network ###

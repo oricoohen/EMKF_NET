@@ -41,8 +41,8 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_True = 'RTSNet/changed_H_v_0/exp_2/r_01/True_H/'
-path_results_False = 'RTSNet/changed_H_v_0/exp_2/r_01/False_H/'
+path_results_True = '../RTSNet/changed_H_v_0/exp_1/r_001/True_H/'
+path_results_False = '../RTSNet/changed_H_v_0/exp_1/r_001/False_H/'
 
 ####################
 ### Design Model ###
@@ -72,8 +72,8 @@ max_iter = 4
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 
 # True model parameters
-q2 = 0.1
-r2 = 0.1
+q2 = 0.01
+r2 = 0.01
 
 print('q2 is:', q2)
 print('r2 is:', r2)
@@ -234,8 +234,8 @@ print("✓ System model configured with 3-dataset H structure")
 # Paths for models
 path_results_True_rts = path_results_True + 'best-rts_true.pt'
 path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
-destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/'
-destination_path_M = destination_folder + 'M_net_H_trained_3_datasets2.pt'
+destination_folder = 'RTSNet/changed_H_v_0/exp_1/r_001/EMKF/False/'
+destination_path_M = destination_folder + 'M_net_H_trained_3_datasets.pt'
 destination_path_M_load = destination_folder + 'M_rand_false_trained_12_20_f_rtsnet_new_net.pt'
 
 # Create RTSNet
