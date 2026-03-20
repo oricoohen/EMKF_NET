@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import os
 import random
 import collections
@@ -20,6 +21,7 @@ import Simulations.config as config
 
 from RTSNet.RTSNet_nn import RTSNetNN
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
+from Pipelines.Pipeline_ERTS import train_joint_rtsnet_and_mnet_em2_batch5
 
 
 # ======================================================
@@ -53,30 +55,45 @@ strNow = now.strftime("%H-%M-%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_rts = "RTSNet/poland_stock/tau_20/rtsnet_model_x0.pth"
-path_results_m = "RTSNet/poland_stock/tau_20/m_network_x0.pth"
+path_results_rts = "RTSNet/poland_stock/tau_5/rtsnet_model_n2_price_logret.pth"
+path_results_m = "RTSNet/poland_stock/tau_5/m_network_n2_price_logret.pth"
 
 # ======================================================
 # SETTINGS (same as your EMKF script)
 # ======================================================
 ticker = "SPY"
-start_date = "2017-01-01"  # IMPROVED: Use 3 years of training data (was 2018-01-01)
+start_date = "2017-01-01"
 end_date   = "2019-09-01"
 
-TAU = 15
-max_em_it = 2  # not used here (RTSNet training)
+TAU = 5
+max_em_it = 2
 
 k_pct = 0.05
 k = k_pct / 100.0
 
-m = 2
-n = 1
+# -------------------------------------------------------
+# Choose observation dimension:
+#   n=1  →  y_t = [price_t]                   (original)
+#   n=2  →  y_t = [price_t, trend_t]          (new)
+# -------------------------------------------------------
+n = 2   # set to 1 for original, 2 for 2D observations
 
-H_fixed = torch.tensor([[1.0, 0.0]], device=device, dtype=dtype)
-F0 = torch.tensor([[1.0, 1.0],
+m = 2
+
+if n == 1:
+    # ORIGINAL: scalar price observation
+    H_fixed = torch.tensor([[1.0, 0.0]], device=device, dtype=dtype)  # [1, 2]
+    path_results_rts = "RTSNet/poland_stock/tau_5/rtsnet_model_x0_f_I.pth"
+    path_results_m   = "RTSNet/poland_stock/tau_5/m_network_x0_f_I_final_loss.pth"
+elif n == 2:
+    # NEW: [price, trend] observation — H=I so state=[price,trend] is observed directly
+    H_fixed = torch.eye(m, device=device, dtype=dtype)                 # [2, 2]
+    path_results_rts = "RTSNet/poland_stock/tau_5/rtsnet_model_n2_price_trend.pth"
+    path_results_m   = "RTSNet/poland_stock/tau_5/m_network_n2_price_trend.pth"
+
+F0 = torch.tensor([[1.0, 0.0],
                    [0.0, 1.0]], device=device, dtype=dtype)
 
-# Q/R are not important for RTSNet loss, but SystemModel requires them
 Q = 0.1 * torch.eye(m, device=device, dtype=dtype)
 R = 0.1 * torch.eye(n, device=device, dtype=dtype)
 
@@ -89,7 +106,7 @@ args = config.general_settings()
 
 # you can tune these (match your pipeline style)
 args.n_steps = 200         # epochs
-args.n_batch = 10          # batch size
+args.n_batch = 5          # batch size
 args.lr = 1e-4
 args.wd = 1e-3
 
@@ -120,10 +137,7 @@ if len(z) < TAU + 2:
     raise ValueError(f"Need at least TAU+2={TAU+2} points, got {len(z)}")
 
 # ======================================================
-# BUILD DATASET FOR YOUR NNTrain (LISTS, NOT TENSORS)
-# train_input[i]  = [y(t0) ... y(t0+TAU-1)]      shape [1, TAU]
-# train_target[i] = [y(t0+1) ... y(t0+TAU)]      shape [1, TAU]  (NEXT-DAY aligned -> loss runs t=0..TAU-1)
-# train_x0[i]     = [price_before_window, trend_0]  shape [2] tensor
+# BUILD DATASET
 # ======================================================
 all_input = []
 all_target = []
@@ -131,30 +145,54 @@ all_x0 = []
 
 K = 5  # lookback for trend computation
 
-for t0 in range(K, len(z) - TAU):  # Start from K to have enough history
-    y_win = z[t0 : t0 + TAU]                 # length TAU
-    y_next = z[t0 + 1 : t0 + TAU + 1]        # length TAU (next day aligned)
+for t0 in range(K, len(z) - TAU):
+    win_prices  = z[t0 : t0 + TAU]           # length TAU
+    next_prices = z[t0 + 1 : t0 + TAU + 1]   # length TAU (next-day aligned)
 
-    # x0 = [price_before_window, trend_0]
-    price_before = float(z[t0 - 1])          # price BEFORE window
+    # x0: price before window + linear trend (no leakage, ends at t0-1)
+    price_before = float(z[t0 - 1])
+    past  = z[t0 - K : t0]                   # length K, ends at z[t0-1]
+    trend0 = float((past[-1] - past[0]) / (K - 1))
+    x0_vector = torch.tensor([price_before, trend0], device=device, dtype=dtype)  # [2]
 
-    # Compute trend_0: mean of past K price differences
-    past = z[t0 - K : t0 + 1]                # length K+1 (includes t0)
-    diffs = past[1:] - past[:-1]             # length K (numpy array)
-    trend_0 = float(diffs.mean())            # mean of differences (use numpy's mean on numpy array)
+    if n == 1:
+        # ---- ORIGINAL: scalar price observation [1, TAU] ----
+        y_win_t  = torch.tensor(win_prices,  device=device, dtype=dtype).view(1, TAU)
+        y_next_t = torch.tensor(next_prices, device=device, dtype=dtype).view(1, TAU)
 
-    x0_vector = torch.tensor([price_before, trend_0], device=device, dtype=dtype)  # [2]
+    elif n == 2:
+        # ---- NEW: [price, trend] observation [2, TAU] ----
+        # trend at each step t = (z[t0+t] - z[t0+t-K]) / (K-1)   (no leakage: uses only past)
+        win_trend  = []
+        next_trend = []
+        for ti in range(TAU):
+            # trend for window step ti:  past K prices ending at z[t0+ti-1]
+            t_start = t0 + ti - K
+            t_end   = t0 + ti          # slice [t_start : t_end], length K
+            p_past  = z[t_start : t_end]
+            win_trend.append((p_past[-1] - p_past[0]) / (K - 1))
+            # trend for next step ti:   past K prices ending at z[t0+ti]
+            p_past_n = z[t_start + 1 : t_end + 1]
+            next_trend.append((p_past_n[-1] - p_past_n[0]) / (K - 1))
 
-    y_win_t = torch.tensor(y_win, device=device, dtype=dtype).view(1, TAU)    # [1, TAU]
-    y_next_t = torch.tensor(y_next, device=device, dtype=dtype).view(1, TAU)  # [1, TAU]
+        win_trend_arr  = np.array(win_trend,  dtype=float)
+        next_trend_arr = np.array(next_trend, dtype=float)
+
+        y_win_t  = torch.zeros(2, TAU, device=device, dtype=dtype)
+        y_win_t[0, :]  = torch.tensor(win_prices,     device=device, dtype=dtype)
+        y_win_t[1, :]  = torch.tensor(win_trend_arr,  device=device, dtype=dtype)
+
+        y_next_t = torch.zeros(2, TAU, device=device, dtype=dtype)
+        y_next_t[0, :] = torch.tensor(next_prices,    device=device, dtype=dtype)
+        y_next_t[1, :] = torch.tensor(next_trend_arr, device=device, dtype=dtype)
 
     all_input.append(y_win_t)
     all_target.append(y_next_t)
     all_x0.append(x0_vector)
 
-# chronological split (time-series)
+# chronological split
 split_ratio = 0.8
-N_all = len(all_input)
+N_all   = len(all_input)
 N_train = int(split_ratio * N_all)
 
 train_input  = all_input[:N_train]
@@ -165,20 +203,20 @@ cv_input  = all_input[N_train:]
 cv_target = all_target[N_train:]
 cv_x0     = all_x0[N_train:]
 
-print("Dataset sizes:",
-      "train =", len(train_input),
-      "cv =", len(cv_input),
-      "TAU =", TAU)
+print("Dataset sizes:", "train =", len(train_input), "cv =", len(cv_input), "TAU =", TAU)
+print(f"Observation dimension: n={n}  ({'price only' if n==1 else 'price + trend'})")
+print(f"State dimension: m={m} (price + trend)")
 
 # ======================================================
-# SYSTEM MODEL (fixed H, initial F0)
+# SYSTEM MODEL (fixed H=I, initial F=I)
 # ======================================================
 sys_model = SystemModel(F0, Q, H_fixed, R, TAU, TAU)
 
 # dummy init (your NNTrain overwrites per-sample x0 anyway)
-# x0 = [price, trend] where trend is computed from past differences
-dummy_price = z[TAU - 1]
-dummy_trend = 0.0  # placeholder
+# x0 = [price, trend] where trend is computed from past K differences (no leakage)
+dummy_price = z[K + TAU - 1]
+dummy_past = z[K - 1 : K + TAU - 1]  # K prices ending just before the first window
+dummy_trend = float((dummy_past[-1] - dummy_past[0]) / (K - 1))
 x0_dummy = torch.tensor([[dummy_price], [dummy_trend]], device=device, dtype=dtype)
 sys_model.InitSequence(x0_dummy, P0_default)
 
@@ -207,19 +245,19 @@ print("\n==============================")
 print("TRAIN RTSNet on stock windows (initial)")
 print("==============================")
 
-# RTSNet_Pipeline.NNTrain_stocks(
-#     sys_model,
-#     cv_input,
-#     cv_target,
-#     train_input,
-#     train_target,
-#     path_results=path_results_rts,
-#     load_model_path=None,
-#     generate_f=False,
-#     generate_h=False,
-#     train_x0=train_x0,
-#     cv_x0=cv_x0
-# )
+RTSNet_Pipeline.NNTrain_stocks(
+    sys_model,
+    cv_input,
+    cv_target,
+    train_input,
+    train_target,
+    path_results=path_results_rts,
+    load_model_path=None,
+    generate_f=False,
+    generate_h=False,
+    train_x0=train_x0,
+    cv_x0=cv_x0
+)
 
 print("\nSaved initial RTSNet model to:", path_results_rts)
 
@@ -230,24 +268,24 @@ print("\n==============================")
 print("TRAIN M-Network for F estimation (initial)")
 print("==============================")
 
-# RTSNet_Pipeline.train_emkalmannet_F_from_price(
-#     SysModel=sys_model,
-#     cv_input=cv_input,
-#     cv_target=cv_target,
-#     cv_x0=cv_x0,
-#     train_input=train_input,
-#     train_target=train_target,
-#     train_x0=train_x0,
-#     destination_path_M=path_results_m,
-#     destination_path_RTS=path_results_rts,
-#     num_em_iters=2,
-#     alpha=(0.05, 0.15, 0.85),
-#     lambda_F=1e-2,
-#     generate_f=False,
-#     generate_h=False,
-#     use_smoothed=True,
-#     clip_grad=1.0
-# )
+RTSNet_Pipeline.train_emkalmannet_F_from_price(
+    SysModel=sys_model,
+    cv_input=cv_input,
+    cv_target=cv_target,
+    cv_x0=cv_x0,
+    train_input=train_input,
+    train_target=train_target,
+    train_x0=train_x0,
+    destination_path_M=path_results_m,
+    destination_path_RTS=path_results_rts,
+    num_em_iters=2,
+    alpha=(0.05, 0.15, 0.85),
+    lambda_F=1e-2,
+    generate_f=False,
+    generate_h=False,
+    use_smoothed=True,
+    clip_grad=1.0
+)
 
 print("\nSaved initial M-Network model to:", path_results_m)
 
@@ -259,28 +297,28 @@ print("JOINT TRAINING: RTSNet + M-Network (EM2, Batch5)")
 print("==============================")
 
 # Create output paths for jointly trained models
-path_results_rts_joint = "RTSNet/poland_stock/tau_20/rtsnet_joint_model_x0.pth"
-path_results_m_joint = "RTSNet/poland_stock/tau_20/m_network_joint_mode_x0.pth"
+path_results_rts_joint = f"RTSNet/poland_stock/tau_5/rtsnet_joint_model_n{n}.pth"
+path_results_m_joint   = f"RTSNet/poland_stock/tau_5/m_network_joint_n{n}.pth"
 
 
-# train_joint_rtsnet_and_mnet_em2_batch5(
-#     RTSNet_Pipeline,
-#     sys_model,
-#     train_input, train_target, train_x0,
-#     cv_input, cv_target, cv_x0,
-#     path_results_rts,      # Load initial RTSNet
-#     path_results_m,        # Load initial M-Network
-#     path_results_rts_joint,  # Save joint RTSNet
-#     path_results_m_joint,    # Save joint M-Network
-#     batch_size=5,
-#     num_em_iters=2,
-#     lambda_F=1e-3,
-#     clip_grad=1.0,
-#     lr_rts=1e-4,
-#     lr_m=1e-4,
-#     wd_rts=1e-5,
-#     wd_m=1e-5
-# )
+train_joint_rtsnet_and_mnet_em2_batch5(
+    RTSNet_Pipeline,
+    sys_model,
+    train_input, train_target, train_x0,
+    cv_input, cv_target, cv_x0,
+    path_results_rts,      # Load initial RTSNet
+    path_results_m,        # Load initial M-Network
+    path_results_rts_joint,  # Save joint RTSNet
+    path_results_m_joint,    # Save joint M-Network
+    batch_size=5,
+    num_em_iters=2,
+    lambda_F=1e-3,
+    clip_grad=1.0,
+    lr_rts=1e-4,
+    lr_m=1e-4,
+    wd_rts=1e-5,
+    wd_m=1e-5
+)
 
 print("\nSaved jointly trained RTSNet model to:", path_results_rts_joint)
 print("Saved jointly trained M-Network model to:", path_results_m_joint)
@@ -300,8 +338,8 @@ print("\n==============================")
 print("TEST RTSNet on NEW data (2019-2020)")
 print("==============================")
 
-test_start_date = "2019-09-01"
-test_end_date   = "2020-01-01"
+test_start_date = "2018-07-01"
+test_end_date   = "2019-01-01"
 
 test_data = yf.download(
     ticker,
@@ -325,25 +363,45 @@ test_target = []
 test_x0 = []
 test_dates_list = []
 
-K = 5  # lookback for trend computation
+K = 5  # same as training
 
-# Start from max(TAU, K) to ensure consistency with EMKF and M-Network
-for t0 in range(max(TAU, K), len(test_z) - TAU):  # Consistent with EMKF/MNet
-    y_win = test_z[t0 : t0 + TAU]           # window
-    y_next = test_z[t0 + TAU]                # next price (target)
+for t0 in range(K, len(test_z) - TAU):
+    win_prices  = test_z[t0 : t0 + TAU]
+    next_prices = test_z[t0 + 1 : t0 + TAU + 1]
 
-    # x0 = [price_before_window, trend_0]
-    price_before = float(test_z[t0 - 1])    # price before window
+    # x0: price before window + linear trend (no leakage)
+    price_before = float(test_z[t0 - 1])
+    past  = test_z[t0 - K : t0]
+    trend0 = float((past[-1] - past[0]) / (K - 1))
+    x0_vector = torch.tensor([price_before, trend0], device=device, dtype=dtype)
 
-    # Compute trend_0: mean of past K price differences
-    past = test_z[t0 - K : t0 + 1]          # length K+1
-    diffs = past[1:] - past[:-1]            # length K (numpy array)
-    trend_0 = float(diffs.mean())           # mean of differences (use numpy's mean on numpy array)
+    if n == 1:
+        # ---- ORIGINAL: scalar price observation ----
+        y_win_t  = torch.tensor(win_prices,  device=device, dtype=dtype).view(1, TAU)
+        y_next_t = torch.tensor(next_prices, device=device, dtype=dtype).view(1, TAU)
 
-    x0_vector = torch.tensor([price_before, trend_0], device=device, dtype=dtype)  # [2]
+    elif n == 2:
+        # ---- NEW: [price, trend] observation ----
+        win_trend  = []
+        next_trend = []
+        for ti in range(TAU):
+            t_start = t0 + ti - K
+            t_end   = t0 + ti
+            p_past  = test_z[t_start : t_end]
+            win_trend.append((p_past[-1] - p_past[0]) / (K - 1))
+            p_past_n = test_z[t_start + 1 : t_end + 1]
+            next_trend.append((p_past_n[-1] - p_past_n[0]) / (K - 1))
 
-    y_win_t = torch.tensor(y_win, device=device, dtype=dtype).view(1, TAU)
-    y_next_t = torch.tensor([y_next], device=device, dtype=dtype)
+        win_trend_arr  = np.array(win_trend,  dtype=float)
+        next_trend_arr = np.array(next_trend, dtype=float)
+
+        y_win_t  = torch.zeros(2, TAU, device=device, dtype=dtype)
+        y_win_t[0, :]  = torch.tensor(win_prices,     device=device, dtype=dtype)
+        y_win_t[1, :]  = torch.tensor(win_trend_arr,  device=device, dtype=dtype)
+
+        y_next_t = torch.zeros(2, TAU, device=device, dtype=dtype)
+        y_next_t[0, :] = torch.tensor(next_prices,    device=device, dtype=dtype)
+        y_next_t[1, :] = torch.tensor(next_trend_arr, device=device, dtype=dtype)
 
     test_input.append(y_win_t)
     test_target.append(y_next_t)
@@ -384,31 +442,49 @@ from emkf.main_emkf_func import EMKF_FH_analytic
 emkf_pred_prices = []
 emkf_dates = []
 
-# Warm-starts for EM
+# Warm-starts for EM – reset at start of test period, then carry over between windows
 F_prev_emkf = F0.clone()
 P0_prev_emkf = P0_default.clone()
+# x0 for the first window comes from test_x0[0] (price + trend, no leakage)
+x0_prev_emkf = test_x0[0].view(m, 1).detach().clone()
 
-K = 5  # lookback for trend computation
+# test_z is the raw price array for the test period (built above the test loop)
+# test_input[idx] = test_z[t0 : t0+TAU],  true next price = test_z[t0+TAU]
+# The loop starts at t0=K so test_input[idx] maps to test_z[idx+K : idx+K+TAU]
+# and the true next-day price is test_z[idx+K+TAU]
 
-# Use same loop range as RTSNet and M-Network for consistency
-for idx in range(len(test_input)):  # Process same windows as RTSNet
-    # Get the corresponding window data
-    y_win = test_input[idx].squeeze()  # [TAU]
+for idx in range(len(test_input)):
+    t0 = idx + K
+    win_prices = test_z[t0 : t0 + TAU]
+    true_next_price = float(test_z[t0 + TAU])
 
-    # Get x0 (same as used for RTSNet/MNet)
-    x0_vec = test_x0[idx]  # [2] tensor: [price, trend]
-    x0_prev_emkf = x0_vec.view(m, 1).to(device)
+    if n == 1:
+        # ---- ORIGINAL: 1D observation ----
+        Y = torch.tensor(win_prices, device=device, dtype=dtype).view(1, 1, TAU)
 
-    # No normalization (same as real_exp_poland_ori_stocks.py)
-    y_win_norm = y_win.cpu().numpy()
+    elif n == 2:
+        # ---- NEW: [price, trend] 2D observation ----
+        win_trend = []
+        for ti in range(TAU):
+            t_start = t0 + ti - K
+            t_end   = t0 + ti
+            p_past  = test_z[t_start : t_end]
+            win_trend.append((p_past[-1] - p_past[0]) / (K - 1))
+        win_trend_arr = np.array(win_trend, dtype=float)
+        Y = torch.zeros(1, 2, TAU, device=device, dtype=dtype)
+        Y[0, 0, :] = torch.tensor(win_prices,    device=device, dtype=dtype)
+        Y[0, 1, :] = torch.tensor(win_trend_arr, device=device, dtype=dtype)
 
-    Y = torch.tensor(y_win_norm, device=device, dtype=dtype).view(1, 1, TAU)
     X_dummy = torch.zeros((1, m, TAU), device=device, dtype=dtype)
+
+    if idx == 0:
+        print(f"[EMKF SANITY] y_T price: {win_prices[-1]:.4f}  "
+              f"true y_Tp1: {test_target[idx][0, -1].item():.4f}  "
+              f"x0: {x0_prev_emkf.squeeze().tolist()}")
 
     sys_model_emkf = SystemModel(F_prev_emkf, Q, H_fixed, R, TAU, TAU)
     sys_model_emkf.InitSequence(x0_prev_emkf, P0_prev_emkf)
 
-    # Run EM to estimate F (update_F=True, update_H=False)
     F_matrices, _, last_x_list, last_P_list = EMKF_FH_analytic(
         sys_model_emkf, [F_prev_emkf], [H_fixed], Q, R, Y, x0_prev_emkf, P0_prev_emkf, X_dummy,
         max_it=max_em_it,
@@ -421,23 +497,34 @@ for idx in range(len(test_input)):  # Process same windows as RTSNet
     )
 
     F_hat_emkf = F_matrices[0][-1].detach().clone()
-    xT_s_emkf = last_x_list[0].detach().clone()
+    xT_s_emkf  = last_x_list[0].detach().clone()
 
-    # 1-step forecast
-    x_next_emkf = F_hat_emkf @ xT_s_emkf
-    pred_price_emkf = (H_fixed @ x_next_emkf)[0, 0].item()
+    # Price prediction: always use first row of H*F*x_T
+    x_next_emkf     = F_hat_emkf @ xT_s_emkf
+    pred_price_emkf = (H_fixed[0:1, :] @ x_next_emkf)[0, 0].item()
+
+    if idx < 3:
+        print(f"\n[EMKF DEBUG] Window {idx}  t0={t0}")
+        print(f"  win_prices first 3: {win_prices[:3].tolist()}  last 3: {win_prices[-3:].tolist()}")
+        print(f"  x0_prev_emkf: {x0_prev_emkf.squeeze().tolist()}")
+        print(f"  F_hat diagonal: [{F_hat_emkf[0,0].item():.4f}, {F_hat_emkf[1,1].item():.4f}]")
+        print(f"  xT_s_emkf: {xT_s_emkf.squeeze().tolist()}")
+        print(f"  pred_price_emkf: {pred_price_emkf:.4f}")
+        print(f"  true_next_price:  {true_next_price:.4f}")
+        print(f"  error: {abs(pred_price_emkf - true_next_price):.4f}")
 
     emkf_pred_prices.append(pred_price_emkf)
     emkf_dates.append(test_dates_list[idx])
 
-    # Warm-start for next window
-    F_prev_emkf = F_hat_emkf
+    # Warm-start: carry F and P to next window; x0 from test_x0 for alignment
+    F_prev_emkf  = F_hat_emkf
     P0_prev_emkf = last_P_list[0].detach().clone()
+    # Use smoothed state as warm-start x0 for next window
+    x0_prev_emkf = xT_s_emkf.detach().clone()  # [m, 1]
 
     if idx % 50 == 0:
         print(f"  EMKF: Processed {idx + 1}/{len(test_input)} windows")
-        print(f"  EMKF Final F matrix at window {idx + 1}:")
-        print(f"    {F_hat_emkf.cpu().numpy()}")
+        print(f"  F_hat:\n    {F_hat_emkf.cpu().numpy()}")
 
 print(f"EMKF Analytic: {len(emkf_pred_prices)} predictions")
 
@@ -469,8 +556,7 @@ mean_price_mse_per_iter, mean_price_mse_db_per_iter, final_F_list,pred = RTSNet_
     destination_path_M=path_results_m,
     num_em_iters=2,
     generate_f=False,
-    generate_h=False,
-    use_smoothed=True
+    generate_h=False
 )
 
 # Extract M-Network predictions from test_mstep_net_price results
@@ -625,7 +711,7 @@ for i in range(len(pred_prices)):
     true_price = real_prices[i].item()
 
     # Current price is test_z[i+TAU] (last day of window + 1)
-    today_price = float(test_z[i + TAU])
+    today_price = test_input[i][0, -1].item()
     tomorrow_price = true_price
 
     pred_ret = (pred_price - today_price) / (today_price + 1e-12)
@@ -1103,7 +1189,7 @@ print(f"\nDataset: {ticker}")
 print(f"Training Period: {start_date} to {end_date}")
 print(f"Test Period: {test_start_date} to {test_end_date}")
 print(f"Window Size (TAU): {TAU}")
-print(f"M-Network EM Iterations: 5")  # Updated from 3
+print(f"M-Network EM Iterations: 2")  # Updated from 3
 print(f"EMKF Analytic EM Iterations: {max_em_it}")
 print("\n" + "="*80)
 

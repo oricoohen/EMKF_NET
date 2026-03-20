@@ -499,8 +499,8 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
 
             # ---------- M-step (F) ----------
             if update_F:
-                A_1 = compute_A1(x_0, X_s, V_s, m, T)  # (m,m )
-                A_2 = compute_A2(x_0, P_0, X_s, P_s, m, T)  # (m,m)
+                A_1 = compute_A1(x0_j, X_s, V_s, m, T)  # (m,m )
+                A_2 = compute_A2(x0_j, P0_j, X_s, P_s, m, T)  # (m,m)
                 # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
                 eps = 1e-7 * torch.eye(n, device=A_2.device)
                 A_2 = A_2 + eps

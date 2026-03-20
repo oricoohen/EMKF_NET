@@ -10130,12 +10130,17 @@ class Pipeline_ERTS:
                 SysModel.T = y_training_norm.size()[-1]
 
                 # =========================================================
-                # PER-SEQUENCE x0 (also normalized)
-                # x0 is [2] tensor: [price_before_window, trend_0]
-                # Normalize both components using window statistics
+                # PER-SEQUENCE x0:
+                # x0[0] = price_before_window  → normalize by window stats
+                # x0[1] = trend0               → keep as-is (already a price-difference scale)
                 # =========================================================
                 x0_raw = train_x0[n_e]  # [2] tensor: [price, trend]
-                x0_norm = (x0_raw - y_mean) / y_std  # Normalize both components
+                # Normalize both components by y_std so x0 lives in same space as RTSNet states
+                # price: subtract mean AND divide by std; trend: divide by std only (it's a difference)
+                x0_norm = torch.stack([
+                    (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                    x0_raw[1] / y_std               # trend: scale only (no mean shift, same units as price)
+                ])
                 SysModel.m1x_0 = x0_norm.view(SysModel.m, 1)  # [m, 1] = [2, 1]
 
                 # Init Hidden State
@@ -10284,9 +10289,12 @@ class Pipeline_ERTS:
                         else:
                             SysModel.H = SysModel.H_valid
 
-                    # x0 (CV): [2] tensor [price, trend], normalize both components
+                    # x0 (CV): normalize both components by y_std
                     x0_raw = cv_x0[j]  # [2] tensor
-                    x0_norm_cv = (x0_raw - y_mean) / y_std  # Normalize both components
+                    x0_norm_cv = torch.stack([
+                        (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                        x0_raw[1] / y_std               # trend: scale only (same units as price)
+                    ])
                     SysModel.m1x_0 = x0_norm_cv.view(SysModel.m, 1)  # [m, 1] = [2, 1]
                     self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
                     self.model.init_hidden()
@@ -10394,7 +10402,7 @@ class Pipeline_ERTS:
                 SysModel.T_test = T
 
                 # --------------------------------------------------
-                # Per-window normalization
+                # Per-window normalization (per feature row if n>1)
                 # --------------------------------------------------
                 y_mean = y_win.mean()
                 y_std = y_win.std()
@@ -10424,10 +10432,13 @@ class Pipeline_ERTS:
                     self.model.update_H(SysModel.H)
 
                 # --------------------------------------------------
-                # x0 (normalized): [2] tensor [price, trend], normalize both components
+                # x0: x0[0]=price normalized, x0[1]=trend scale-only (no mean shift)
                 # --------------------------------------------------
                 x0_raw = test_x0[j]  # [2] tensor
-                x0_norm = (x0_raw - y_mean) / y_std  # Normalize both components
+                x0_norm = torch.stack([
+                    (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                    x0_raw[1] / y_std               # trend: scale only (same units as price)
+                ])
                 SysModel.m1x_0 = x0_norm.view(SysModel.m, 1)  # [m, 1] = [2, 1]
 
                 # --------------------------------------------------
@@ -10462,15 +10473,16 @@ class Pipeline_ERTS:
                 # --------------------------------------------------
                 x_last = x_smooth[:, T - 1].view(SysModel.m, 1)  # x_T
 
+                # H[0:1,:] extracts the price row; denorm with price-row stats
                 y_pred_norm = (SysModel.H @ (SysModel.F @ x_last))[0, 0]
                 y_pred = y_pred_norm * y_std + y_mean
 
                 # --------------------------------------------------
                 # Metrics
                 # --------------------------------------------------
-                # make y_true scalar
+                # make y_true scalar: take LAST element = z[t0+TAU] = next-day price after the window
                 if y_true.numel() > 1:
-                    y_true_s = y_true.view(-1)[0]
+                    y_true_s = y_true.view(-1)[-1]
                 else:
                     y_true_s = y_true.view(())
 
@@ -10568,14 +10580,13 @@ class Pipeline_ERTS:
                     else:
                         H = SysModel.H_train[0].to(device) if isinstance(SysModel.H_train, list) else SysModel.H.to(device)
 
-                    # x0 from pre-window price, normalized
-                    x0_raw = train_x0[idx]
-                    # FIXED: Use .item() to extract scalar value safely
-                    x0_norm = (x0_raw - y_mean.item()) / y_std.item()
-                    # x0 = torch.empty(m, device=device, dtype=dtype)
-                    # x0[0] = torch.tensor(x0_norm, device=device, dtype=dtype)
-                    # x0[1] = torch.tensor(0.5, device=device, dtype=dtype)
-                    SysModel.m1x_0 = x0_norm.view(m, 1)
+                    # x0: x0[0]=price normalized, x0[1]=trend scale-only
+                    x0_raw = train_x0[idx]  # [2] tensor: [price, trend]
+                    x0_norm = torch.stack([
+                        (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                        x0_raw[1] / y_std               # trend: scale only (same units as price)
+                    ])
+                    SysModel.m1x_0 = x0_norm.view(m, 1).to(device)  # [2, 1]
 
                     # init covariance prior for RTSNet (as in your code)
                     if hasattr(SysModel, "m2x_0"):
@@ -10598,8 +10609,7 @@ class Pipeline_ERTS:
                         self.model.update_F(F_current)
                         self.model.InitSequence(SysModel.m1x_0, T)
                         self.model.init_hidden()
-                        if hasattr(self.model, "prior_Sigma"):
-                            self.model.prior_Sigma = prior_Sigma
+                        self.model.prior_Sigma = prior_Sigma
 
                         # Forward pass
                         x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
@@ -10614,8 +10624,8 @@ class Pipeline_ERTS:
                             x_sm_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_sm_list[t + 2])
                         x_state = torch.stack(x_sm_list, dim=1)  # [m, T]
 
-                        # IMPORTANT: detach RTS output so only M-net learns
-                        x_state = x_state.detach()
+                        # DO NOT DETACH - need gradients to flow through F to M-network!
+                        # x_state stays with gradients so M-network can learn
 
                         nu = y_win_n - (H @ x_state)  # [n, T]
 
@@ -10656,8 +10666,9 @@ class Pipeline_ERTS:
                         dF = model_mstep(feat).view(m, m)
                         F_next = F_current + dF
 
-                        # ===== Compute y_pred loss IN THIS EM iteration (with detached x_state) =====
-                        HF_iter = H @ F_current  # [n, m]
+                        # ===== Compute y_pred loss using F_NEXT (the updated F) =====
+                        # CRITICAL: Must use F_next so gradient flows through dF to M-network!
+                        HF_iter = H @ F_current  # [n, m]  ← Use UPDATED F, not old F_current!
 
                         # Predict all y_{t+1} with increasing weights
                         y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
@@ -10666,15 +10677,15 @@ class Pipeline_ERTS:
                         # Weighted MSE: sum(w[t] * mse_y_t)
                         mse_t_iter = (y_pred_iter - y_next_n) ** 2  # [n, T]
                         mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T] average over n
-                        loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar
+                        # loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar return_it
 
                         # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
                         x_last_iter = x_state[:, -1].view(m, 1)
                         y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
                         y_true_Tp1 = y_next_n[:, -1]
                         loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-                        loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
-
+                        # loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  return_it
+                        loss_y_iter =   2.0 * loss_y_Tp1_iter
                         # Regularize ΔF
                         reg = lambda_F * torch.mean(dF ** 2)
 
@@ -10682,15 +10693,14 @@ class Pipeline_ERTS:
                         weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
                         total_loss = total_loss + weight * (loss_y_iter + reg)
 
-                        # advance F (NO detach - keep gradient flow to M-net)
+                        # advance F for next EM iteration
                         F_current = F_next
 
                     # --- ONE FINAL RTS with final F for y_pred loss (HIGHEST ALPHA WEIGHT) ---
                     self.model.update_F(F_current)
                     self.model.InitSequence(SysModel.m1x_0, T)
                     self.model.init_hidden()
-                    if hasattr(self.model, "prior_Sigma"):
-                        self.model.prior_Sigma = prior_Sigma
+
 
                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
@@ -10719,8 +10729,8 @@ class Pipeline_ERTS:
                     y_pred_Tp1 = (HF_final @ x_last).view(-1)
                     y_true_Tp1 = y_next_n[:, -1]
                     loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-                    loss_y = loss_y + 2.0 * loss_y_Tp1
-
+                    # loss_y = loss_y + 2.0 * loss_y_Tp1 return_it
+                    loss_y =  2.0 * loss_y_Tp1
                     # Add y_pred loss with HIGHEST alpha weight (alpha[num_em_iters])
                     final_weight = alpha[-1]
                     total_loss = total_loss + final_weight * loss_y
@@ -10774,13 +10784,12 @@ class Pipeline_ERTS:
                     else:
                         H = SysModel.H_valid[0].to(device) if isinstance(SysModel.H_valid, list) else SysModel.H.to(device)
 
-                    x0_raw = cv_x0[j]
-                    # FIXED: Safe scalar conversion
-                    x0_norm_cv = (x0_raw - y_mean.item()) / y_std.item()
-                    # x0 = torch.empty(m, device=device, dtype=dtype)
-                    # x0[0] = torch.tensor(x0_norm, device=device, dtype=dtype)
-                    # x0[1] = torch.tensor(0.5, device=device, dtype=dtype)
-                    SysModel.m1x_0 = x0_norm_cv.view(m, 1)
+                    x0_raw = cv_x0[j]  # [2] tensor: [price, trend]
+                    x0_norm_cv = torch.stack([
+                        (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                        x0_raw[1] / y_std               # trend: scale only (same units as price)
+                    ])
+                    SysModel.m1x_0 = x0_norm_cv.view(m, 1).to(device)  # [2, 1]
 
                     if hasattr(SysModel, "m2x_0"):
                         prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
@@ -10799,8 +10808,7 @@ class Pipeline_ERTS:
                         self.model.update_F(F_current)
                         self.model.InitSequence(SysModel.m1x_0, T)
                         self.model.init_hidden()
-                        if hasattr(self.model, "prior_Sigma"):
-                            self.model.prior_Sigma = prior_Sigma
+                        self.model.prior_Sigma = prior_Sigma
 
                         # Forward pass
                         x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
@@ -10852,8 +10860,8 @@ class Pipeline_ERTS:
                         dF = model_mstep(feat).view(m, m)
                         F_next = F_current + dF
 
-                        # ===== Compute y_pred loss IN THIS EM iteration (same as training) =====
-                        HF_iter = H @ F_current
+                        # ===== Compute y_pred loss using F_NEXT (same fix as training) =====
+                        HF_iter = H @ F_current  # Use UPDATED F!
                         y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
                         y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
 
@@ -10867,8 +10875,8 @@ class Pipeline_ERTS:
                         y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
                         y_true_Tp1 = y_next_n[:, -1]
                         loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-                        loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
-
+                        # loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter return_it
+                        loss_y_iter =2.0 * loss_y_Tp1_iter
                         # Regularize ΔF
                         reg = lambda_F * torch.mean(dF ** 2)
 
@@ -10882,8 +10890,7 @@ class Pipeline_ERTS:
                     self.model.update_F(F_current)
                     self.model.InitSequence(SysModel.m1x_0, T)
                     self.model.init_hidden()
-                    if hasattr(self.model, "prior_Sigma"):
-                        self.model.prior_Sigma = prior_Sigma
+                    self.model.prior_Sigma = prior_Sigma
 
                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
@@ -10911,7 +10918,8 @@ class Pipeline_ERTS:
                     y_pred_Tp1 = (HF_final @ x_last).view(-1)
                     y_true_Tp1 = y_next_n[:, -1]
                     loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-                    loss_y_final = loss_y_final + 2.0 * loss_y_Tp1
+                    # loss_y_final = loss_y_final + 2.0 * loss_y_Tp1 return_it
+                    loss_y_final = 2.0 * loss_y_Tp1
 
                     # Add with HIGHEST alpha weight (same as training)
                     final_weight = alpha[-1]
@@ -10939,8 +10947,7 @@ class Pipeline_ERTS:
             destination_path_M,
             num_em_iters=3,
             generate_f=False,
-            generate_h=False,
-            use_smoothed=True  # True: use RTS smoothing; False: forward only
+            generate_h=False
     ):
         """
         Test M-step network for STOCK PRICE prediction.
@@ -11014,16 +11021,27 @@ class Pipeline_ERTS:
                 y_win_n = (y_win - y_mean) / y_std
                 y_next_n = (y_next - y_mean) / y_std
 
-                # ---- Build x0 from [price, trend] - normalize both components ----
-                x0_raw = test_x0[j]  # [2] tensor: [price_before_window, trend_0]
-                x0_norm = (x0_raw - y_mean) / y_std  # Normalize both components
+                # # OLD: split normalization (price normalized, trend kept as 0.5)
+                # # x0_raw = test_x0[j]  # [2] tensor: [price_before_window, 0.5]
+                # # x0_norm = torch.zeros_like(x0_raw)
+                # # x0_norm[0] = (x0_raw[0] - y_mean) / y_std
+                # # x0_norm[1] = x0_raw[1]  # Keep 0.5 as-is
+                # # x0 = x0_norm.view(m, 1)
+                # # OLD: normalize both components
+                # # x0_norm = (x0_raw - y_mean) / y_std
+                # # x0 = x0_norm.view(m, 1)
+
+                # NEW: x0[0]=price normalized, x0[1]=trend scale-only (no mean shift)
+                x0_raw = test_x0[j]  # [2] tensor: [price_before_window, trend0]
+                x0_norm = torch.stack([
+                    (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                    x0_raw[1] / y_std               # trend: scale only (same units as price)
+                ])
                 x0 = x0_norm.view(m, 1)  # [m, 1] = [2, 1]
+
 
                 # prior covariance (same style as your code)
                 P0 = SysModel.m2x_0.clone().detach()
-
-                # We also record per-iter price MSE for this sequence
-                seq_price_mse_per_iter = torch.zeros(num_em_iters, device=device)
 
                 # ========= M-step K times (num_em_iters iterations) =========
                 # ASSUMPTION: T >= 2 always
@@ -11116,9 +11134,8 @@ class Pipeline_ERTS:
                 mse_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
 
                 # Store this as the final MSE for this sequence
-                # (For backward compatibility, store in last iter slot)
-                seq_price_mse_per_iter = torch.zeros(num_em_iters, device=device)
-                seq_price_mse_per_iter[-1] = mse_Tp1  # Only last slot matters
+
+                seq_price_mse_per_iter = mse_Tp1  # Only last slot matters
 
                 # accumulate mean over sequences
                 price_mse_sum_per_iter += seq_price_mse_per_iter
@@ -11249,9 +11266,12 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                 F_base = SysModel.F.clone().detach()
                 H = SysModel.H
 
-                # ---- x0 = [2] tensor [price, trend], normalize both components ----
+                # x0: normalize both components so x0 lives in same space as RTSNet states
                 x0_raw  = train_x0[idx]  # [2] tensor
-                x0_norm = (x0_raw - y_mean) / y_std  # Normalize both components
+                x0_norm = torch.stack([
+                    (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                    x0_raw[1] / y_std               # trend: scale only (same units as price)
+                ])
                 x0 = x0_norm.view(m, 1)  # [m, 1] = [2, 1]
 
                 P0 = SysModel.m2x_0.clone().detach()
@@ -11290,6 +11310,7 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
 
                     # ---- build stats for M-net input ----
                     x_curr = x_state
+                    # x0 fully normalized (trend/y_std) so same space as x_curr — correct x_{-1}
                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
 
                     A1 = (x_curr @ x_prev.T) / T
@@ -11319,31 +11340,31 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                     dF = model_mstep(z_in).view(m, m)
                     F_next = F_current + dF
 
-                    # ===== Compute y_pred loss IN THIS EM iteration (NO detach on x_state!) =====
+                    # Use F_current for prediction (x_state was smoothed under F_current)
                     HF_iter = H @ F_current  # [n, m]
 
                     # Predict all y_{t+1} with increasing weights
                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
 
-                    # Weighted MSE: sum(w[t] * mse_y_t)
+                    # Weighted MSE over full sequence
                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2  # [n, T]
-                    mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T] average over n
+                    mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T]
                     loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar
 
-                    # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
+                    # y_{T+1} prediction from x_T with DOUBLE weight
                     x_last_iter = x_state[:, -1].view(m, 1)
                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
                     y_true_Tp1 = y_tgt_n[:, -1]
                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-                    loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
+                    loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  # full sequence + double last
 
                     # Regularize ΔF
                     reg_iter = lambda_F * torch.mean(dF ** 2)
 
-                    # alpha weighting: BOTH y_pred loss and reg for this EM iteration
+                    # alpha weighting
                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-                    total_loss = total_loss + weight * (loss_y_iter + 4*reg_iter)
+                    total_loss = total_loss + weight * (loss_y_iter + reg_iter)
 
                     # advance F (NO detach - gradient flows to both RTSNet and M-net!)
                     F_current = F_next
@@ -11381,12 +11402,12 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                 mse_time = mse_t.mean(dim=0, keepdim=True)  # [1,T]
                 loss_y = (w.view(1, T) * mse_time).sum()
 
-                # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
+                # EXTRA: y_{T+1} from x_T with DOUBLE weight
                 x_last = x_state_last[:, -1].view(m, 1)  # x_T
-                y_pred_Tp1 = (HF @ x_last).view(-1)  # predict y_{T+1}
-                y_true_Tp1 = y_tgt_n[:, -1]  # y_{T+1}
+                y_pred_Tp1 = (HF @ x_last).view(-1)
+                y_true_Tp1 = y_tgt_n[:, -1]
                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-                loss_y = loss_y + 2.0 * loss_y_Tp1
+                loss_y = loss_y + 2.0 * loss_y_Tp1  # full sequence + double last
                 final_weight = alpha[-1]
                 total_loss = total_loss + final_weight * loss_y
 
@@ -11434,7 +11455,10 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                 H = SysModel.H
 
                 x0_raw  = cv_x0[j]  # [2] tensor
-                x0_norm_cv = (x0_raw - y_mean) / y_std  # Normalize both components
+                x0_norm_cv = torch.stack([
+                    (x0_raw[0] - y_mean) / y_std,   # price: full normalization
+                    x0_raw[1] / y_std               # trend: scale only (same units as price)
+                ])
                 x0 = x0_norm_cv.view(m, 1)  # [m, 1] = [2, 1]
                 P0 = SysModel.m2x_0.clone().detach()
 
@@ -11466,6 +11490,7 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
 
                     x_curr = x_state
+                    # x0 fully normalized (trend/y_std) so same space as x_curr — correct x_{-1}
                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
 
                     A1 = (x_curr @ x_prev.T) / T
@@ -11492,12 +11517,12 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                     dF = model_mstep(z_in).view(m, m)
                     F_next = F_current + dF
 
-                    # ===== Compute y_pred loss IN THIS EM iteration (same as training) =====
+                    # Use F_current for prediction (x_state was smoothed under F_current)
                     HF_iter = H @ F_current
                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
 
-                    # Weighted MSE: sum(w[t] * mse_y_t)
+                    # Weighted MSE over full sequence
                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2
                     mse_time = mse_t_iter.mean(dim=0, keepdim=True)
                     loss_y_iter = (w_cv.view(1, T) * mse_time).sum()
@@ -11506,15 +11531,14 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
                     y_true_Tp1 = y_tgt_n[:, -1]
                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-                    loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
-
+                    loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  # full sequence + double last
 
                     # Regularize ΔF
                     reg_iter = lambda_F * torch.mean(dF ** 2)
 
                     # alpha weighting (same as training)
                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-                    total_loss_cv = total_loss_cv + weight * (loss_y_iter + 4*reg_iter)
+                    total_loss_cv = total_loss_cv + weight * (loss_y_iter + reg_iter)
 
                     F_current = F_next
 
@@ -11547,14 +11571,12 @@ def train_joint_rtsnet_and_mnet_em2_batch5(
                 mse_time = mse_t.mean(dim=0, keepdim=True)
                 loss_y_final = (w_cv.view(1, T) * mse_time).sum()
 
-                # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
+                # EXTRA: y_{T+1} from x_T with DOUBLE weight
                 x_last = x_state_last[:, -1].view(m, 1)
                 y_pred_Tp1 = (HF @ x_last).view(-1)
                 y_true_Tp1 = y_tgt_n[:, -1]
                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-                loss_y_final = loss_y_final + 2.0 * loss_y_Tp1
-
-
+                loss_y_final = loss_y_final + 2.0 * loss_y_Tp1  # full sequence + double last
 
                 # Add with HIGHEST alpha weight (same as training)
                 final_weight = alpha[-1]
@@ -11721,6 +11743,7 @@ def y_train_joint_rtsnet_and_mnet_em2_batch5(
 
                     # ---- build stats for M-net input ----
                     x_curr = x_state
+                    # x0 fully normalized (trend/y_std) — correct x_{-1} for EM statistics
                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
 
                     A1 = (x_curr @ x_prev.T) / T
@@ -11898,6 +11921,7 @@ def y_train_joint_rtsnet_and_mnet_em2_batch5(
                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
 
                     x_curr = x_state
+                    # x0 fully normalized (trend/y_std) — correct x_{-1} for EM statistics
                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
 
                     A1 = (x_curr @ x_prev.T) / T

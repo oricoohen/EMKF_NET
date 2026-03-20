@@ -44,7 +44,11 @@ class KalmanFilter:
     def KGain(self):
         self.KG = torch.matmul(self.m2x_prior, self.H_T)
 
-        self.KG = torch.matmul(self.KG, torch.inverse(self.m2y))
+        # Add small regularization to prevent singular matrix
+        reg_term = 1e-6 * torch.eye(self.m2y.shape[0], device=self.m2y.device, dtype=self.m2y.dtype)
+        m2y_reg = self.m2y + reg_term
+
+        self.KG = torch.matmul(self.KG, torch.inverse(m2y_reg))
 
     # Innovation
     def Innovation(self, y):
