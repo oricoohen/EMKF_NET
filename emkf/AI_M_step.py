@@ -19,10 +19,11 @@ class DeltaF_MStepNet(nn.Module):
     Output:
       - ΔF:  [B, m, m]
     """
-    def __init__(self, m, n, d_hidden=256):
+    def __init__(self, m, n, d_hidden=256, dF_scale=0.1):
         super().__init__()
         self.m = m
         self.n = n
+        self.dF_scale = dF_scale
         self.d_z = 5 * (m * m) + (n * n)
         self.block_dims = [
             m * m,  # A1
@@ -33,7 +34,20 @@ class DeltaF_MStepNet(nn.Module):
             m * m   # F_current
         ]
 
-        self.ln = nn.LayerNorm(self.d_z)
+        # ============================================================
+        # OPTION 1: NEW ARCHITECTURE (Robust)
+        # Per-block LayerNorms + Tanh Bound
+        # ============================================================
+        self.block_lns = nn.ModuleList([
+            nn.LayerNorm(dim) for dim in self.block_dims
+        ])
+
+        # ============================================================
+        # OPTION 2: OLD ARCHITECTURE (Original)
+        # Global LayerNorm + Unbounded Output
+        # ============================================================
+        # self.ln = nn.LayerNorm(self.d_z)
+
         self.mlp = nn.Sequential(
             nn.Linear(self.d_z, d_hidden),
             nn.GELU(),
@@ -52,31 +66,34 @@ class DeltaF_MStepNet(nn.Module):
         z_in: [B, d_z] on CUDA
         returns ΔF: [B, m, m] on CUDA
         """
-        m = self.m
-        n=self.n
-        B, dz = z_in.shape
-        # blocks = []
-        # start = 0
-        # for dim in self.block_dims:
-        #     end = start + dim
-        #     b = z_in[:, start:end]  # [B, dim]
-        #     b = self._norm_block(b)  # normalize this block
-        #     blocks.append(b)
-        #     start = end
-        #
-        # z_in = torch.cat(blocks, dim=1)
-        # z_in[:, 0: (m * m)] = 0          # no A1
-        # z_in[:, (m * m): (2 * m * m)] = 0#no A_2
-        # z_in[:, 2 * (self.m * self.m): 2 * (self.m * self.m) + (self.n * self.n)] = 0 #no S_delta_x
-        # # z_in[:, 3 * (m * m): 3 * (m * m) + (n * n)] = 0 #no S_nu
-        # z_in[:, 3 * (m * m) + (n * n): 4 * (m * m) + (n * n)] = 0# no C_delta_x_xminus
-        # z_in[:, 4 * (m * m) + (n * n): 5 * (m * m) + (n * n)] = 0 #NO F_current
+        B, _ = z_in.shape
 
-        z = self.ln(z_in)
+        # ------------------------------------------------------------
+        # Run-time Logic: Supports BOTH architectures
+        # ------------------------------------------------------------
 
-        deltaF_vec = self.mlp(z)           # [B, m^2]
-        deltaF = deltaF_vec.view(B, self.m, self.m)
-        return deltaF
+        # 1. If we have the new per-block LayerNorms, use them (New Arch)
+        if hasattr(self, "block_lns"):
+            blocks = []
+            start = 0
+            for ln, dim in zip(self.block_lns, self.block_dims):
+                end = start + dim
+                blocks.append(ln(z_in[:, start:end]))
+                start = end
+            z = torch.cat(blocks, dim=1)
+
+            raw = self.mlp(z)
+            # Apply tanh bound for stability
+            deltaF_vec = self.dF_scale * torch.tanh(raw)
+            return deltaF_vec.view(B, self.m, self.m)
+
+        # ============================================================
+        # OPTION 2: OLD ARCHITECTURE (Original)
+        # Use this if loading old checkpoints without retraining.
+        # ============================================================
+        # z = self.ln(z_in)
+        # deltaF_vec = self.mlp(z)
+        # return deltaF_vec.view(B, self.m, self.m)
 
 
 # ============================================================

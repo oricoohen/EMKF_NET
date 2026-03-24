@@ -29,7 +29,7 @@ import requests
 from Simulations.Linear_sysmdl import SystemModel
 import Simulations.config as config
 from RTSNet.RTSNet_nn import RTSNetNN
-from Pipelines.pipeline_weather import PipelineWeather
+from Pipelines.pipeline_weather import PipelineWeather, _win_norm_4d
 
 
 # ======================================================
@@ -61,7 +61,7 @@ print("Current Time =", strTime)
 # ======================================================
 # SETTINGS
 # ======================================================
-TAU        = 15     # window length
+TAU        = 10     # window length
 max_em_it  = 5
 m          = 4      # state dim  = observation dim
 n          = 4      # obs dim
@@ -75,16 +75,16 @@ P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
 os.makedirs("RTSNet/weather/tau_15", exist_ok=True)
-path_results_rts        = "RTSNet/weather/tau_15/rtsnet_model.pth"
-path_results_m          = "RTSNet/weather/tau_15/m_network_cv_lastonly.pth"
+path_results_rts        = "RTSNet/weather/tau_10/rtsnet_model.pth"
+path_results_m          = "RTSNet/weather/tau_10_with_detaouch/m_network_cv_lastonly.pth"
 path_results_rts_joint  = "RTSNet/weather/tau_15/rtsnet_joint_cv_lastonly.pth"
 path_results_m_joint    = "RTSNet/weather/tau_15/m_network_cv_lastonly_joint.pth"
 
 # ======================================================
 # ARGS
-# ======================================================
+# =============================================claude login --browser/login=========
 args          = config.general_settings()
-args.n_steps  = 300      # Increased from 150: more epochs for M-Network training
+args.n_steps  = 250      # Increased from 150: more epochs for M-Network training
 args.n_batch  = 15       # Increased from 5: more batches per epoch
 args.lr       = 1e-4
 args.wd       = 1e-3
@@ -267,19 +267,19 @@ print("\n" + "=" * 60)
 print("STEP 2: TRAIN M-Network for F estimation")
 print("=" * 60)
 
-RTSNet_Pipeline.train_emkalmannet_weather(
-    SysModel=sys_model,
-    cv_input=cv_input, cv_target=cv_target, cv_x0=cv_x0,
-    train_input=train_input, train_target=train_target, train_x0=train_x0,
-    destination_path_M=path_results_m,
-    destination_path_RTS=path_results_rts,
-    num_em_iters=2,
-    alpha=(0.05, 0.15, 0.85),
-    lambda_F=1e-2,
-    generate_f=False,
-    generate_h=False,
-    clip_grad=1.0,
-)
+# RTSNet_Pipeline.train_emkalmannet_weather(
+#     SysModel=sys_model,
+#     cv_input=cv_input, cv_target=cv_target, cv_x0=cv_x0,
+#     train_input=train_input, train_target=train_target, train_x0=train_x0,
+#     destination_path_M=path_results_m,
+#     destination_path_RTS=path_results_rts,
+#     num_em_iters=2,
+#     alpha=(0.05, 0.15, 0.85),
+#     lambda_F=1.0,
+#     generate_f=False,
+#     generate_h=False,
+#     clip_grad=1.0,
+# )
 print("Saved M-Network model to:", path_results_m)
 
 # ======================================================
@@ -298,7 +298,7 @@ RTSNet_Pipeline.train_joint_weather(
     path_m_in=path_results_m,
     path_rts_out=path_results_rts_joint,
     path_m_out=path_results_m_joint,
-    batch_size=5,
+    batch_size=10,
     num_em_iters=2,
     lambda_F=1e-3,
     clip_grad=1.0,
@@ -309,8 +309,8 @@ print("Saved joint RTSNet  to:", path_results_rts_joint)
 print("Saved joint M-Network to:", path_results_m_joint)
 
 # Use jointly trained models for testing
-path_results_rts = path_results_rts_joint
-path_results_m   = path_results_m_joint
+# path_results_rts = path_results_rts_joint
+# path_results_m   = path_results_m_joint
 print("\n✓ Using jointly trained models for testing.")
 
 # ======================================================
@@ -362,7 +362,19 @@ mse_per_iter, mse_db_per_iter, final_F_list, pred_dicts = RTSNet_Pipeline.test_m
     generate_f=False,
     generate_h=False,
 )
-
+# path_results_rts1        = "RTSNet/weather/tau_15/rtsnet_model.pth"
+# path_results_m1          = "RTSNet/weather/tau_10/m_network_cv_lastonly.pth"
+# mse_per_iter, mse_db_per_iter, final_F_list, pred_dicts = RTSNet_Pipeline.test_mstep_weather(
+#     SysModel=sys_model_mnet,
+#     test_input=test_input,
+#     test_target=test_target,
+#     test_x0=test_x0,
+#     destination_path_RTS=path_results_rts,
+#     destination_path_M=path_results_m,
+#     num_em_iters=2,
+#     generate_f=False,
+#     generate_h=False,
+# )
 # Extract next-day tavg predictions from pred_dicts
 mnet_pred_temps = []
 for d in pred_dicts:
@@ -378,6 +390,60 @@ mnet_rmse   = torch.sqrt(mnet_mse)
 
 print(f"\n  M-Net   MSE(tavg):  {mnet_mse.item():.4f} °C²")
 print(f"  M-Net   RMSE(tavg): {mnet_rmse.item():.4f} °C")
+
+# ======================================================
+# STEP 5.5 – ORACLE F (F_mean per sequence)
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 5.5: Oracle F-Mean (Per-Sequence Optimization)")
+print("=" * 60)
+
+# We compute F_mean optimally for each sequence based on OBSERVATIONS (y)
+oracle_preds = []
+
+# Ensure no gradients
+with torch.no_grad():
+    for i in range(len(test_input)):
+        # 1. Prepare data
+        y_win = test_input[i].to(device)    # [4, TAU]
+        y_tgt = test_target[i].to(device)   # [4, TAU]
+
+        # Normalize
+        y_mean, y_std, mean_scalar, std_scalar = _win_norm_4d(y_win, device, dtype)
+        y_win_n = (y_win - y_mean) / y_std
+        y_tgt_n = (y_tgt - y_mean) / y_std
+
+        # 2. Compute F_opt for feature 0 (tavg) - Ridge Regression
+        # Minimize sum_t ( (f_row @ y_win_n[:, t]) - y_tgt_n[0, t] )^2
+        # Inputs: y_win_n [4, TAU]
+        # Targets: y_tgt_n[0, :] [TAU] -> Target is row 0 (tavg) of next step
+
+        Y_mat = y_win_n
+        z_vec = y_tgt_n[0, :]
+
+        # Ridge regression: f = z Y^T (Y Y^T + lambda I)^-1
+        reg = 1e-5
+        YYt = Y_mat @ Y_mat.T + reg * torch.eye(m, device=device)
+        Yz  = Y_mat @ z_vec
+        f_row = torch.linalg.solve(YYt, Yz) # [4]
+
+        # 3. Predict next step using last observation
+        # y_last is the observation at time T-1.
+        # We predict y at time T (which corresponds to y_tgt column -1).
+        y_last = y_win_n[:, -1]
+        pred_norm = torch.dot(f_row, y_last)
+
+        # Denormalize
+        pred_val = (pred_norm.item() * std_scalar + mean_scalar).item()
+        oracle_preds.append(pred_val)
+
+oracle_tensor = torch.tensor(oracle_preds, device=device, dtype=dtype)
+N_oracle = len(oracle_tensor)
+oracle_mse  = torch.mean((oracle_tensor - real_temps[:N_oracle])**2)
+oracle_rmse = torch.sqrt(oracle_mse)
+
+print(f"  Oracle F MSE:  {oracle_mse.item():.4f} °C²")
+print(f"  Oracle F RMSE: {oracle_rmse.item():.4f} °C")
 
 # ======================================================
 # STEP 6 – EMKF ANALYTIC BASELINE
@@ -523,7 +589,7 @@ naive_rmse  = torch.sqrt(naive_mse)
 print("\n" + "=" * 70)
 print("FINAL SUMMARY – Next-day average temperature prediction (NYC)")
 print("=" * 70)
-N_common = min(len(mnet_pred_temps), len(emkf_pred_temps), N_test)
+N_common = min(len(mnet_pred_temps), len(emkf_pred_temps), N_test, len(oracle_tensor))
 hdr  = f"{'Method':<18} {'MSE (°C²)':>12} {'RMSE (°C)':>12} {'MAE (°C)':>12}"
 sep  = "-" * len(hdr)
 print(hdr); print(sep)
@@ -537,6 +603,7 @@ def row(name, pred_t, true_t):
 print(row("RTSNet",   pred_temps_rts,          real_temps))
 print(row("M-Network", mnet_pred_t[:N_common], real_temps[:N_common]))
 print(row("EMKF Analytic", emkf_pred_t[:N_common], real_temps[:N_common]))
+print(row("Oracle F-Mean", oracle_tensor[:N_common], real_temps[:N_common]))
 print(row("Naive (persist.)", naive_pred, real_temps))
 print(sep)
 
@@ -545,6 +612,7 @@ methods = {
     "RTSNet":        torch.mean((pred_temps_rts - real_temps)**2).item(),
     "M-Network":     torch.mean((mnet_pred_t[:N_common] - real_temps[:N_common])**2).item(),
     "EMKF Analytic": torch.mean((emkf_pred_t[:N_common] - real_temps[:N_common])**2).item(),
+    "Oracle F-Mean": torch.mean((oracle_tensor[:N_common] - real_temps[:N_common])**2).item(),
 }
 winner = min(methods, key=methods.get)
 print(f"✓ BEST prediction: {winner}  (MSE={methods[winner]:.4f})")
@@ -561,6 +629,7 @@ ax.plot(dates_p, real_temps[:n_plot].cpu(),              'k-',  lw=1.5, label="T
 ax.plot(dates_p, pred_temps_rts[:n_plot].cpu(),          'b-',  lw=1.2, label="RTSNet", alpha=0.8)
 ax.plot(dates_p, mnet_pred_t[:n_plot].cpu(),             'g--', lw=1.2, label="M-Network", alpha=0.8)
 ax.plot(dates_p, emkf_pred_t[:n_plot].cpu(),             'r:',  lw=1.2, label="EMKF", alpha=0.8)
+ax.plot(dates_p, oracle_tensor[:n_plot].cpu(),           'c-.', lw=1.2, label="Oracle F", alpha=0.9)
 ax.plot(dates_p, naive_pred[:n_plot].cpu(),              'm-.', lw=1.0, label="Naive", alpha=0.6)
 ax.set_ylabel("Temperature (°C)")
 ax.set_title(f"Next-day avg temperature prediction – NYC  (TAU={TAU})")
@@ -571,6 +640,7 @@ ax2 = axes[1]
 ax2.plot(dates_p, (pred_temps_rts[:n_plot] - real_temps[:n_plot]).cpu().abs(), 'b-',  lw=1,   label="RTSNet |err|")
 ax2.plot(dates_p, (mnet_pred_t[:n_plot]    - real_temps[:n_plot]).cpu().abs(), 'g--', lw=1,   label="M-Net  |err|")
 ax2.plot(dates_p, (emkf_pred_t[:n_plot]    - real_temps[:n_plot]).cpu().abs(), 'r:',  lw=1,   label="EMKF   |err|")
+ax2.plot(dates_p, (oracle_tensor[:n_plot]  - real_temps[:n_plot]).cpu().abs(), 'c-.', lw=1,   label="Oracle |err|")
 ax2.set_ylabel("|Error| (°C)")
 ax2.set_xlabel("Date")
 ax2.legend(fontsize=9)
@@ -591,9 +661,10 @@ N_rts   = len(pred_temps_rts)
 N_mnet  = len(mnet_pred_t)
 N_emkf  = len(emkf_pred_t)
 N_naive = len(naive_pred)
+N_oracle= len(oracle_tensor)
 N_real  = len(real_temps)
 
-N_common = min(N_rts, N_mnet, N_emkf, N_naive, N_real, len(test_dates))
+N_common = min(N_rts, N_mnet, N_emkf, N_naive, N_oracle, N_real, len(test_dates))
 
 dates_all = test_dates[:N_common]
 
@@ -601,6 +672,7 @@ real_all  = real_temps[:N_common].detach().cpu()
 rts_all   = pred_temps_rts[:N_common].detach().cpu()
 mnet_all  = mnet_pred_t[:N_common].detach().cpu()
 emkf_all  = emkf_pred_t[:N_common].detach().cpu()
+oracle_all= oracle_tensor[:N_common].detach().cpu()
 naive_all = naive_pred[:N_common].detach().cpu()
 
 # ---------- Plot 1: all models vs real ----------
@@ -609,6 +681,7 @@ plt.plot(dates_all, real_all,  label="Real tavg", linewidth=2.0)
 plt.plot(dates_all, rts_all,   label="RTSNet", linewidth=1.2)
 plt.plot(dates_all, mnet_all,  label="M-Network", linewidth=1.2)
 plt.plot(dates_all, emkf_all,  label="EMKF Analytic", linewidth=1.2)
+plt.plot(dates_all, oracle_all,label="Oracle F", linewidth=1.2, linestyle='-.', color='cyan')
 plt.plot(dates_all, naive_all, label="Naive", linewidth=1.0, alpha=0.8)
 
 plt.title("Average Temperature: Real vs Estimated (All Models)")
@@ -687,6 +760,7 @@ plt.figure(figsize=(16, 7))
 plt.plot(dates_all, (rts_all   - real_all).abs(),   label="RTSNet |err|", linewidth=1.2)
 plt.plot(dates_all, (mnet_all  - real_all).abs(),   label="M-Net |err|", linewidth=1.2)
 plt.plot(dates_all, (emkf_all  - real_all).abs(),   label="EMKF |err|", linewidth=1.2)
+plt.plot(dates_all, (oracle_all- real_all).abs(),   label="Oracle |err|", linewidth=1.2)
 plt.plot(dates_all, (naive_all - real_all).abs(),   label="Naive |err|", linewidth=1.0, alpha=0.8)
 
 plt.title("Absolute Error of Next-Day Average Temperature Prediction")
@@ -699,3 +773,4 @@ plt.savefig("RTSNet/weather/tau_15/plots/absolute_errors_full.png", dpi=140)
 plt.close()
 
 print("Saved: RTSNet/weather/tau_15/plots/absolute_errors_full.png")
+

@@ -466,6 +466,7 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
 
     F_hist, H_hist = [], []
     last_x_list, last_P_list = [], []
+    smooth_x_list = []  # NEW: Store full smoothed trajectories
 
     for j in range(N):
         f_idx = j // 10 if generate_f else j
@@ -502,7 +503,7 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
                 A_1 = compute_A1(x0_j, X_s, V_s, m, T)  # (m,m )
                 A_2 = compute_A2(x0_j, P0_j, X_s, P_s, m, T)  # (m,m)
                 # Update equation for F: F^(i+1) = A_1^(i) @ inv(A_2^(i))
-                eps = 1e-7 * torch.eye(n, device=A_2.device)
+                eps = 1e-7 * torch.eye(m, device=A_2.device)
                 A_2 = A_2 + eps
                 F_new = torch.linalg.solve(A_2.T, A_1.T).T
             else:
@@ -534,5 +535,6 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
         P_T = P_s[:, :, -1].clone()
         last_x_list.append(x_T)
         last_P_list.append(P_T)
+        smooth_x_list.append(X_s.clone())  # NEW: Append full smoothed trajectory [m, T]
 
-    return F_hist, H_hist, last_x_list, last_P_list
+    return F_hist, H_hist, last_x_list, last_P_list, smooth_x_list

@@ -128,7 +128,9 @@ class SystemModel:
             self.prior_Sigma = prior_Sigma
 
         if prior_S is None:
-            self.prior_S = torch.eye(self.n, device=self.device)
+            # prior_S should be m×m (state covariance), not n×n
+            # RTSNet uses this for hidden state estimation
+            self.prior_S = torch.eye(self.m, device=self.device)
         else:
             self.prior_S = prior_S
 
