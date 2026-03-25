@@ -174,6 +174,7 @@ class KalmanNetNN(torch.nn.Module):
     def step_prior(self):
         # Predict the 1-st moment of x
         self.m1x_prior = torch.squeeze(self.f(self.m1x_posterior))
+        # print('forst',self.m1x_prior,'second,',self.m1x_posterior)
         # print('kalmannnnnnnnnnnnnnnnnnnnnnnnnnnnnnn',self.m1x_prior)
         # Predict the 1-st moment of y
         self.m1y = torch.squeeze(self.h(self.m1x_prior))
@@ -199,7 +200,7 @@ class KalmanNetNN(torch.nn.Module):
         fw_update_diff = self.standardize(fw_update_diff)
         # Kalman Gain Network Step
         KG = self.KGain_step(obs_diff, obs_innov_diff, fw_evol_diff, fw_update_diff)
-
+        # print(KG.mean(), KG.std())
         # Reshape Kalman Gain to a Matrix
         self.KGain = torch.reshape(KG, (self.m, self.n))
 
@@ -264,7 +265,7 @@ class KalmanNetNN(torch.nn.Module):
         in_FC8 = self.standardize(in_FC8)  # NEW ← match FC5/6
         out_FC8 = self.FC8(in_FC8)  # [1,1,h]
 
-
+        # print('F', self.F)
         # FC 5
         in_FC5 = fw_evol_diff
         out_FC5 = self.FC5(in_FC5)

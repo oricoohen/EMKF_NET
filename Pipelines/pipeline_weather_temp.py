@@ -295,9 +295,18 @@ class PipelineWeather:
         - compare the smoothed hidden temperature component x[0, t]
           against the true hidden temperature over the full window,
         - compute one per-window MSE and one per-window relative error.
+        - compute BOTH normalized and denormalized (real °C) MSE.
 
         The final reported metrics are the averages over all test windows.
 
+        Returns:
+            mse: normalized MSE (average over windows)
+            rel_err_mean: normalized relative error (average over windows)
+            sq_err: per-window normalized squared errors [N_T]
+            rel_err: per-window normalized relative errors [N_T]
+            mse_denorm: denormalized MSE in (°C)² (average over windows)
+            sq_err_denorm: per-window denormalized squared errors [N_T]
+            rts_preds: list of denormalized x_pred predictions [m, T] per window (NEW)
         """
         device = self.device
         dtype  = torch.float32
@@ -309,11 +318,13 @@ class PipelineWeather:
 
         sq_err     = torch.empty(N_T, device=device, dtype=dtype)
         rel_err    = torch.empty(N_T, device=device, dtype=dtype)
+        sq_err_denorm = torch.empty(N_T, device=device, dtype=dtype)  # denormalized MSE
+        rts_preds = []  # NEW: store denormalized x_pred per window
 
         with torch.no_grad():
             for j in range(N_T):
                 y_win  = test_input[j].to(device)    # [3, TAU] observations y
-                x_true = test_target[j].to(device)   # [4, TAU] true state x: x[0]=tavg(hidden), x[1:]=y(obs)
+                x_true = test_target[j].to(device)   # [4, TAU] true state x
                 T      = y_win.size(-1)
 
                 # Compute normalization stats from TRUE STATE x [4, TAU]
@@ -343,25 +354,42 @@ class PipelineWeather:
                     xs[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], xs[t + 2])
                 x_sm = torch.stack(xs, dim=1)   # [m, T]
 
+                # Normalized values
                 true_tavg_norm = ((x_true - x_mean) / x_std)[0, :]  # [T]
                 pred_tavg_norm = x_sm[0, :]  # [T]
 
-                # per-window loss over the whole window
+                # per-window loss over the whole window (normalized)
                 sq_err[j] = torch.mean((pred_tavg_norm - true_tavg_norm) ** 2)
 
                 # relative error over the whole window
                 rel_err[j] = torch.mean(
                     torch.abs(pred_tavg_norm - true_tavg_norm) / (torch.abs(true_tavg_norm) + 1e-8)
                 )
+
+                # NEW: Denormalized (real °C) values
+                true_tavg_denorm = x_true[0, :]  # Real °C (already raw)
+                pred_tavg_denorm = pred_tavg_norm * x_std[0] + x_mean[0]  # Denormalize
+
+                # per-window denormalized loss (real °C)
+                sq_err_denorm[j] = torch.mean((pred_tavg_denorm - true_tavg_denorm) ** 2)
+
+                # NEW: Denormalize full x_sm trajectory and store
+                x_sm_denorm = x_sm.clone()
+                for i in range(m):
+                    x_sm_denorm[i, :] = x_sm[i, :] * x_std[i] + x_mean[i]
+                rts_preds.append(x_sm_denorm.detach().cpu())
+
         mse = sq_err.mean()
         mse_db = 10 * torch.log10(mse)
         rel_err_mean = rel_err.mean()
+        mse_denorm = sq_err_denorm.mean()
 
-        print(f"  RTSNet MSE(tavg): {mse.item():.4f}")
+        print(f"  RTSNet MSE(tavg): {mse.item():.4f} (normalized)")
         print(f"  RTSNet MSE(tavg) [dB]: {mse_db.item():.4f}")
+        print(f"  RTSNet MSE(tavg): {mse_denorm.item():.4f} °C² (denormalized)")
         print(f"  RTSNet RelErr: {rel_err_mean.item():.4f}")
 
-        return mse, rel_err_mean, sq_err, rel_err
+        return mse, rel_err_mean, sq_err, rel_err, mse_denorm, sq_err_denorm, rts_preds
 
     # ------------------------------------------------------------------
     # M-step training  (train_emkalmannet_weather)
@@ -692,10 +720,10 @@ class PipelineWeather:
         # Track MSE per iteration across ALL sequences
         mse_per_iter = torch.zeros(num_em_iters+1, device=device)
         count_per_iter = torch.zeros(num_em_iters+1, device=device)
+        mse_per_iter_denorm = torch.zeros(num_em_iters+1, device=device)  # NEW: denormalized MSE
 
         final_F_list = []
         preds_out = []
-
 
         with torch.no_grad():
             for j in range(N_T):
@@ -726,6 +754,7 @@ class PipelineWeather:
                 # Track F evolution and MSE per iteration for this sequence
                 F_evolution = [F_current.clone()]
                 mse_evolution = []
+                mse_evolution_denorm = []  # NEW: track denormalized MSE
 
                 for em_iter in range(num_em_iters):
                     self.model.update_F(F_current)
@@ -767,15 +796,22 @@ class PipelineWeather:
                     F_current = F_current + dF
                     F_evolution.append(F_current.clone())
 
-                    # Compute MSE for this iteration on state x, feature 0
+                    # Compute MSE for this iteration on state x, feature 0 (normalized)
                     x_pred_iter = x_sm[0, :]
                     true_tavg_norm = x_true_n[0, :]
                     mse_iter = ((x_pred_iter - true_tavg_norm) ** 2).mean()
 
+                    # NEW: Compute denormalized MSE
+                    x_pred_iter_denorm = x_pred_iter * x_std[0] + x_mean[0]
+                    true_tavg_denorm = x_true[0, :]
+                    mse_iter_denorm = ((x_pred_iter_denorm - true_tavg_denorm) ** 2).mean()
+
                     mse_evolution.append(mse_iter.item())
+                    mse_evolution_denorm.append(mse_iter_denorm.item())
 
                     # Accumulate for global statistics
                     mse_per_iter[em_iter] += mse_iter.item()
+                    mse_per_iter_denorm[em_iter] += mse_iter_denorm.item()
                     count_per_iter[em_iter] += 1
 
                 # Final RTS pass with last F_current (to match train/CV final prediction)
@@ -795,50 +831,65 @@ class PipelineWeather:
                 for t in range(T - 3, -1, -1):
                     xs2[t] = self.model(None, x_fwd2[:, t], x_fwd2[:, t + 1], xs2[t + 2])
                 x_sm2 = torch.stack(xs2, dim=1)
+
+                # Denormalize full x prediction [m, T]
+                x_sm2_denorm = x_sm2.clone()
+                for i in range(m):
+                    x_sm2_denorm[i, :] = x_sm2[i, :] * x_std[i] + x_mean[i]
+
                 preds_out.append({
                     "seq_index": j,
                     "x_pred_norm": x_sm2.detach().cpu(),
                     "x_true_norm": x_true_n.detach().cpu(),
+                    "x_pred_denorm": x_sm2_denorm.detach().cpu(),  # NEW: full [m, T]
+                    "x_true_denorm": x_true[0, :].detach().cpu(),  # tavg only
                 })
 
-                # Final test MSE on state x, feature 0
+                # Final test MSE on state x, feature 0 (normalized)
                 pred_tavg_norm = x_sm2[0, :]
                 true_tavg_norm = x_true_n[0, :]
                 mse_final = ((pred_tavg_norm - true_tavg_norm) ** 2).mean()
 
+                # NEW: Final denormalized MSE
+                pred_tavg_denorm = x_sm2_denorm[0, :]
+                true_tavg_denorm = x_true[0, :]
+                mse_final_denorm = ((pred_tavg_denorm - true_tavg_denorm) ** 2).mean()
+
                 mse_per_iter[num_em_iters] += mse_final.item()
+                mse_per_iter_denorm[num_em_iters] += mse_final_denorm.item()
                 count_per_iter[num_em_iters] += 1
 
-
                 final_F_list.append(F_current.detach().clone())
-
 
                 # Print F evolution every print_F_every windows
                 if j % print_F_every == 0:
                     print(f"  [test window {j:04d}/{N_T}]")
                     for it in range(num_em_iters):
                         print(
-                            f"    After EM iter {it + 1}: MSE={mse_evolution[it]:.6e} "
+                            f"    After EM iter {it + 1}: MSE={mse_evolution[it]:.6e} (norm) "
+                            f"/ {mse_evolution_denorm[it]:.6e} (denorm) "
                             f"({10 * torch.log10(torch.tensor(mse_evolution[it]) + 1e-12):.2f} dB)"
                         )
                         print(f"      Updated F matrix:\n{F_evolution[it + 1].cpu().numpy()}")
 
-                    # --- NEW COMPARISONS removed ---
-
-
         # Average MSE per iteration (only where computed)
         mean_mse = torch.zeros(num_em_iters+1, device=device)
+        mean_mse_denorm = torch.zeros(num_em_iters+1, device=device)  # NEW
         for k in range(num_em_iters+1):
             if count_per_iter[k] > 0:
                 mean_mse[k] = mse_per_iter[k] / count_per_iter[k]
+                mean_mse_denorm[k] = mse_per_iter_denorm[k] / count_per_iter[k]  # NEW
 
         mean_mse_db = 10 * torch.log10(mean_mse + 1e-12)
+        mean_mse_db_denorm = 10 * torch.log10(mean_mse_denorm + 1e-12)  # NEW
 
         print("\n[M-Network TEST] Mean MSE per EM iteration (across all test windows):")
         for k in range(num_em_iters+1):
-            print(f"  After EM iter {k+1}: MSE={mean_mse[k].item():.6e}  ({mean_mse_db[k].item():.2f} dB)")
+            print(f"  After EM iter {k+1}: MSE={mean_mse[k].item():.6e} (norm) / "
+                  f"{mean_mse_denorm[k].item():.6e} °C² (denorm)  "
+                  f"({mean_mse_db[k].item():.2f} dB / {mean_mse_db_denorm[k].item():.2f} dB)")
 
-        return mean_mse, mean_mse_db, final_F_list, preds_out
+        return mean_mse, mean_mse_db, final_F_list, preds_out, mean_mse_denorm, mean_mse_db_denorm
 
     # -----------------------------------------------------------------------
     # Joint training

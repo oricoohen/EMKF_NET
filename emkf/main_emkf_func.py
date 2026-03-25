@@ -466,7 +466,11 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
 
     F_hist, H_hist = [], []
     last_x_list, last_P_list = [], []
-    smooth_x_list = []  # NEW: Store full smoothed trajectories
+    smooth_x_list = []  # Store full smoothed trajectories
+
+    # NEW: Track MSE per iteration across all sequences
+    mse_per_iter = torch.zeros(max_it, device=Y.device)
+    iter_count = torch.zeros(max_it, device=Y.device)
 
     for j in range(N):
         f_idx = j // 10 if generate_f else j
@@ -498,6 +502,10 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
             P_s = P_smooth.squeeze(0)    # [m,m,T]
             V_s = V_smooth.squeeze(0)    # [m,m,T]
 
+            # NEW: Accumulate MSE for this iteration
+            mse_per_iter[q] += _mse_avg
+            iter_count[q] += 1
+
             # ---------- M-step (F) ----------
             if update_F:
                 A_1 = compute_A1(x0_j, X_s, V_s, m, T)  # (m,m )
@@ -527,7 +535,7 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
             H_est = H_new
             F_all_j.append(F_est.clone())
             H_all_j.append(H_est.clone())
-
+            # print(f"Seq {j+1}/{N}, Iter {q+1}/{max_it}, MSE: {_mse_avg:.6f} ({_mse_db:.2f} dB),F_est={F_new}")
         F_hist.append(F_all_j)
         H_hist.append(H_all_j)
 
@@ -535,6 +543,9 @@ def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_t
         P_T = P_s[:, :, -1].clone()
         last_x_list.append(x_T)
         last_P_list.append(P_T)
-        smooth_x_list.append(X_s.clone())  # NEW: Append full smoothed trajectory [m, T]
+        smooth_x_list.append(X_s.clone())  # Append full smoothed trajectory [m, T]
 
-    return F_hist, H_hist, last_x_list, last_P_list, smooth_x_list
+    # NEW: Compute mean MSE per iteration
+    mean_mse_per_iter = mse_per_iter / iter_count
+
+    return F_hist, H_hist, last_x_list, last_P_list, smooth_x_list, mean_mse_per_iter

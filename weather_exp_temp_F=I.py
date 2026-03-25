@@ -636,195 +636,7 @@ else:
     emkf_mse_denorm = torch.tensor(float('nan'))
     emkf_rmse_denorm = torch.tensor(float('nan'))
     use_emkf = False
-#################################################################
-# ======================================================
-# STEP 5C – F_OPT ROLLING DIAGNOSTIC
-# For each sequence i:
-#   1) compute F_opt_i from the TRUE hidden states of seq i
-#      by minimizing:
-#         sum_t ((F @ x_true[:, t])[0] - x_true[0, t+1])^2
-#   2) test seq i+1 using F_opt_i as the fixed transition matrix
-#
-# IMPORTANT:
-# - This is a diagnostic / oracle-style rolling experiment,
-#   because F_opt_i is computed from true hidden states of seq i.
-# - Everything below is done in RAW coordinates to avoid the bug
-#   of fitting F in raw space and using it in normalized space.
-# ======================================================
-print("\n" + "=" * 60)
-print("STEP 5C: Rolling F_opt diagnostic (RAW coordinates)")
-print("  F_opt_i is learned from seq i and used on seq i+1")
-print("=" * 60)
 
-F_opt_list = []
-
-def compute_F_opt(x_true_seq, ridge=1e-6):
-    """
-    x_true_seq: [m, T] in RAW coordinates
-
-    Returns:
-        F_opt: [m, m]
-
-    Solves the full least-squares problem:
-        F_opt = argmin_F sum_{t=0}^{T-2} ||F x_t - x_{t+1}||_2^2.
-    """
-    m_local, T_local = x_true_seq.shape
-
-    X_prev = x_true_seq[:, :-1]   # [m, T-1]
-    X_next = x_true_seq[:, 1:]    # [m, T-1]
-
-    # Solve min ||A f - b||^2
-    F_opt = torch.linalg.lstsq(X_prev.T, X_next.T).solution.T  # [m, m]
-    return F_opt
-
-# ------------------------------------------------------
-# Phase 1: compute one F_opt per sequence
-# ------------------------------------------------------
-print("  Computing F_opt for each sequence...")
-
-for idx in range(len(test_input)):
-    x_true = test_target[idx].to(device).to(dtype)   # [m, T] RAW
-    F_opt = compute_F_opt(x_true)
-
-    F_opt_list.append(F_opt.detach().cpu())
-
-print(f"  ✓ Computed F_opt for {len(F_opt_list)} sequences")
-# ======================================================
-# STEP 5D – DIRECT / NAIVE BASELINE WITH PREVIOUS F_opt
-# Uses F_opt from seq i-1 directly on seq i, without RTS / EMKF
-# ======================================================
-print("\n" + "=" * 60)
-print("STEP 5D: Direct baseline with previous F_opt")
-print("=" * 60)
-
-rolling_naive_f_sq_err_denorm = []
-all_rolling_naive_f_x = [None]   # index 0 has no previous F_opt
-
-for idx in range(1, len(test_input)):
-    F_use = F_opt_list[idx - 1].to(device).to(dtype)   # [m, m]
-    x_true = test_target[idx].to(device).to(dtype)     # [m, T]
-    x0_raw = test_x0[idx].to(device).to(dtype).view(-1)
-
-    T = x_true.size(1)
-
-    # Direct rollout with fixed F_use
-    x_pred = torch.empty_like(x_true)
-    x_prev = x0_raw.clone()
-
-    for t in range(T):
-        x_curr = F_use @ x_prev
-        x_pred[:, t] = x_curr
-        x_prev = x_curr
-
-    mse_i = torch.mean((x_pred[0, :] - x_true[0, :]) ** 2).item()
-    rolling_naive_f_sq_err_denorm.append(mse_i)
-    all_rolling_naive_f_x.append(x_pred.detach().cpu())
-
-if rolling_naive_f_sq_err_denorm:
-    rolling_naive_f_mse = torch.tensor(rolling_naive_f_sq_err_denorm, dtype=dtype).mean()
-    rolling_naive_f_rmse = torch.sqrt(rolling_naive_f_mse)
-
-    print(f"  Naive(prev F_opt) MSE(tavg):  {rolling_naive_f_mse.item():.4f} °C²")
-    print(f"  Naive(prev F_opt) RMSE(tavg): {rolling_naive_f_rmse.item():.4f} °C")
-else:
-    rolling_naive_f_mse = torch.tensor(float("nan"), device=device, dtype=dtype)
-    rolling_naive_f_rmse = torch.tensor(float("nan"), device=device, dtype=dtype)
-# ------------------------------------------------------
-# Phase 2: test seq i using F_opt from seq i-1
-# ------------------------------------------------------
-print("\n  Testing RTS and EMKF with previous sequence F_opt...")
-
-rolling_rts_sq_err_denorm = []
-rolling_emkf_sq_err_denorm = []
-all_rolling_rts_smooth_x = []
-all_rolling_emkf_smooth_x = []
-
-for idx in range(1, len(test_input)):
-    F_use = F_opt_list[idx - 1].to(device).to(dtype)   # [m, m], RAW
-
-    y_win = test_input[idx].to(device).to(dtype)       # RAW observation window
-    x_true = test_target[idx].to(device).to(dtype)     # RAW hidden-state window
-    x0_raw = test_x0[idx].to(device).to(dtype).view(-1)
-
-    # --------------------------------------------------
-    # RTS(classic) with fixed F_use in RAW coordinates
-    # --------------------------------------------------
-    [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test(
-        sys_model,
-        [y_win],
-        [x_true],
-        F=[F_use],
-        H=[H_fixed],
-        generate_f=False,
-        generate_h=False,
-        init_x_list=[x0_raw],
-        init_P_list=[P0_default],
-    )
-
-    x_rts_smooth = X_smooth[0]   # [m, T], RAW
-    all_rolling_rts_smooth_x.append(x_rts_smooth.detach().cpu())
-
-    rts_mse_i = torch.mean((x_rts_smooth[0, :] - x_true[0, :]) ** 2).item()
-    rolling_rts_sq_err_denorm.append(rts_mse_i)
-
-    # --------------------------------------------------
-    # EMKF with  F_use in RAW coordinates
-    # IMPORTANT:
-
-    # --------------------------------------------------
-    Y = y_win.unsqueeze(0)          # [1, n, T]
-    X_true_input = x_true.unsqueeze(0)
-
-    F_matrices, H_matrices, last_x_list, last_P_list, smooth_x_list, mean_mse_per_iter = EMKF_FH_analytic(
-        sys_model,
-        [F_use],
-        [H_fixed],
-        Q,
-        R,
-        Y,
-        x0_raw,
-        P0_default,
-        X_true_input,
-        max_it=3,
-        generate_f=True,
-        generate_h=False,
-        update_F=True,
-        update_H=False,
-        init_x_list=[x0_raw],
-        init_P_list=[P0_default],
-    )
-
-    x_emkf_smooth = smooth_x_list[0]   # [m, T], RAW
-    all_rolling_emkf_smooth_x.append(x_emkf_smooth.detach().cpu())
-
-    emkf_mse_i = torch.mean((x_emkf_smooth[0, :] - x_true[0, :]) ** 2).item()
-    rolling_emkf_sq_err_denorm.append(emkf_mse_i)
-
-    if idx < 4:
-        print(f"  Test seq {idx} uses F_opt from seq {idx-1}")
-        print(f"    RTS  mse = {rts_mse_i:.6f}")
-        print(f"    EMKF mse = {emkf_mse_i:.6f}")
-
-# ------------------------------------------------------
-# Summary
-# ------------------------------------------------------
-if rolling_rts_sq_err_denorm:
-    rolling_rts_mse = torch.tensor(rolling_rts_sq_err_denorm, dtype=dtype).mean()
-    rolling_rts_rmse = torch.sqrt(rolling_rts_mse)
-    print(f"\n  RTS(F_opt_prev)   MSE(tavg):  {rolling_rts_mse.item():.4f} °C²")
-    print(f"  RTS(F_opt_prev)   RMSE(tavg): {rolling_rts_rmse.item():.4f} °C")
-else:
-    rolling_rts_mse = torch.tensor(float("nan"), device=device, dtype=dtype)
-    rolling_rts_rmse = torch.tensor(float("nan"), device=device, dtype=dtype)
-
-if rolling_emkf_sq_err_denorm:
-    rolling_emkf_mse = torch.tensor(rolling_emkf_sq_err_denorm, dtype=dtype).mean()
-    rolling_emkf_rmse = torch.sqrt(rolling_emkf_mse)
-    print(f"  EMKF(F_opt_prev)  MSE(tavg):  {rolling_emkf_mse.item():.4f} °C²")
-    print(f"  EMKF(F_opt_prev)  RMSE(tavg): {rolling_emkf_rmse.item():.4f} °C")
-else:
-    rolling_emkf_mse = torch.tensor(float("nan"), device=device, dtype=dtype)
-    rolling_emkf_rmse = torch.tensor(float("nan"), device=device, dtype=dtype)
 # ======================================================
 # PLOTTING UTILITY: Glued Predictions
 # ======================================================
@@ -833,10 +645,9 @@ def plot_glued_temperature_predictions(
     start_idx,
     num_windows,
     rts_preds,
-    rts_opt_preds,
+    rts_classic_preds,
     mnet_preds,
-    emkf_opt_preds,
-    naive_opt_preds,
+    emkf_preds,
     test_target,
     test_x0,
     save_path="glued_predictions.png",
@@ -852,10 +663,9 @@ def plot_glued_temperature_predictions(
         start_idx: Starting window index (0-based)
         num_windows: Number of windows to glue together
         rts_preds: RTSNet predictions list [m, T] per window (denormalized)
-        rts_opt_preds: RTS (F_opt) predictions list [m, T] per window (denormalized)
+        rts_classic_preds: Classical RTS predictions list [m, T] per window (denormalized)
         mnet_preds: M-Network predictions list of dicts (from test_mstep_weather)
-        emkf_opt_preds: EMKF (F_opt) smoothed trajectories list [m, T] per window (denormalized)
-        naive_opt_preds: Naive (F_opt) trajectories list [m, T] per window (denormalized)
+        emkf_preds: EMKF smoothed trajectories list [m, T] per window (denormalized)
         test_target: List of test state windows [m, TAU]
         test_x0: List of initial states [m]
         save_path: Path to save the figure
@@ -871,10 +681,9 @@ def plot_glued_temperature_predictions(
     # Initialize lists for gluing
     glued_true = []
     glued_rtsnet = []
-    glued_rts_opt = []
+    glued_rts_classic = []
     glued_mnet = []
-    glued_emkf_opt = []
-    glued_naive_opt = []
+    glued_emkf = []
     glued_naive = []
 
     # Glue each window
@@ -898,23 +707,11 @@ def plot_glued_temperature_predictions(
             rts_tavg_real = rts_pred_denorm[0, :]
             glued_rtsnet.append(rts_tavg_real.numpy())
 
-        # RTS (F_opt) prediction
-        # Note: rolling lists are padded with [None] at index 0 because they start from window 1
-        # But here w_idx iterates 0...num_windows.
-        # If w_idx < len(rts_opt_preds) and rts_opt_preds[w_idx] is not None:
-        if w_idx < len(rts_opt_preds) and rts_opt_preds[w_idx] is not None:
-            rts_opt_denorm = rts_opt_preds[w_idx]
-            rts_opt_tavg_real = rts_opt_denorm[0, :]
-            glued_rts_opt.append(rts_opt_tavg_real.numpy())
-        else:
-            # Handle missing start if needed, or just append nothing (gap in plot)
-            # For w_idx=0, we have None. We can append NaNs or skip.
-            # Appending NaNs maintains length for correct x-axis alignment relative to start.
-            # But the glue logic just concatenates. Concatenating requires valid arrays.
-            # If we skip, the concatenated array is shorter.
-            # Since we only plot valid segments, we might just stick NaNs.
-            # Let's create an array of NaNs for plotting gaps.
-            glued_rts_opt.append(np.full(tau, np.nan))
+        # Classical RTS prediction (denormalized)
+        if w_idx < len(rts_classic_preds):
+            rts_classic_denorm = rts_classic_preds[w_idx]
+            rts_classic_tavg_real = rts_classic_denorm[0, :]
+            glued_rts_classic.append(rts_classic_tavg_real.numpy())
 
         # M-Network prediction
         if w_idx < len(mnet_preds):
@@ -924,21 +721,11 @@ def plot_glued_temperature_predictions(
                 mnet_tavg_real = mnet_pred_denorm[0, :]
                 glued_mnet.append(mnet_tavg_real.numpy())
 
-        # EMKF (F_opt) prediction
-        if w_idx < len(emkf_opt_preds) and emkf_opt_preds[w_idx] is not None:
-            emkf_smooth = emkf_opt_preds[w_idx]
+        # EMKF prediction (denormalized)
+        if w_idx < len(emkf_preds):
+            emkf_smooth = emkf_preds[w_idx]
             emkf_tavg_real = emkf_smooth[0, :]
-            glued_emkf_opt.append(emkf_tavg_real.numpy())
-        else:
-            glued_emkf_opt.append(np.full(tau, np.nan))
-
-        # Naive (F_opt) prediction
-        if w_idx < len(naive_opt_preds) and naive_opt_preds[w_idx] is not None:
-            naive_f_traj = naive_opt_preds[w_idx]
-            naive_f_tavg_real = naive_f_traj[0, :]
-            glued_naive_opt.append(naive_f_tavg_real.numpy())
-        else:
-            glued_naive_opt.append(np.full(tau, np.nan))
+            glued_emkf.append(emkf_tavg_real.numpy())
 
         # Naive prediction (constant x0[0] over the window)
         x0_tavg_raw = x0_raw[0].item()
@@ -948,10 +735,9 @@ def plot_glued_temperature_predictions(
     # Concatenate all windows
     true_curve = np.concatenate(glued_true) if glued_true else None
     rtsnet_curve = np.concatenate(glued_rtsnet) if glued_rtsnet else None
-    rts_opt_curve = np.concatenate(glued_rts_opt) if glued_rts_opt else None
+    rts_classic_curve = np.concatenate(glued_rts_classic) if glued_rts_classic else None
     mnet_curve = np.concatenate(glued_mnet) if glued_mnet else None
-    emkf_opt_curve = np.concatenate(glued_emkf_opt) if glued_emkf_opt else None
-    naive_opt_curve = np.concatenate(glued_naive_opt) if glued_naive_opt else None
+    emkf_curve = np.concatenate(glued_emkf) if glued_emkf else None
     naive_curve = np.concatenate(glued_naive) if glued_naive else None
 
     if true_curve is None:
@@ -967,10 +753,8 @@ def plot_glued_temperature_predictions(
     ax.plot(x_axis, true_curve, 'k-', linewidth=2, label='True', marker='o', markersize=3, alpha=0.7)
     ax.plot(x_axis, naive_curve, 'gray', linewidth=1.5, label='Naive (x0)', linestyle='--', alpha=0.7)
 
-    if rts_opt_curve is not None:
-        # Filter out full-NaN segments if any
-        # Matplotlib handles NaNs by breaking the line, which is what we want.
-        ax.plot(x_axis, rts_opt_curve, 'purple', linewidth=1.5, label='RTS (F_opt)', linestyle=':', alpha=0.8)
+    if rts_classic_curve is not None:
+        ax.plot(x_axis, rts_classic_curve, 'purple', linewidth=1.5, label='RTS (classic)', linestyle=':', alpha=0.7)
 
     if rtsnet_curve is not None:
         ax.plot(x_axis, rtsnet_curve, 'b-', linewidth=1.5, label='RTSNet', alpha=0.7)
@@ -978,11 +762,8 @@ def plot_glued_temperature_predictions(
     if mnet_curve is not None:
         ax.plot(x_axis, mnet_curve, 'r-', linewidth=1.5, label='M-Network', alpha=0.7)
 
-    if emkf_opt_curve is not None:
-        ax.plot(x_axis, emkf_opt_curve, 'g-', linewidth=1.5, label='EMKF (F_opt)', alpha=0.7)
-
-    if naive_opt_curve is not None:
-        ax.plot(x_axis, naive_opt_curve, 'c--', linewidth=1.5, label='Naive (F_opt)', alpha=0.8)
+    if emkf_curve is not None:
+        ax.plot(x_axis, emkf_curve, 'g-', linewidth=1.5, label='EMKF', alpha=0.7)
 
     ax.set_xlabel('Day', fontsize=11)
     ax.set_ylabel('Average Temperature (°C)', fontsize=11)
@@ -1009,10 +790,9 @@ def plot_glued_temperature_predictions(
     return {
         'true': true_curve,
         'rtsnet': rtsnet_curve,
-        'rts_opt': rts_opt_curve,
+        'rts_classic': rts_classic_curve,
         'mnet': mnet_curve,
-        'emkf_opt': emkf_opt_curve,
-        'naive_opt': naive_opt_curve,
+        'emkf': emkf_curve,
         'naive': naive_curve,
     }
 
@@ -1033,10 +813,9 @@ glued_results = plot_glued_temperature_predictions(
     start_idx=0,
     num_windows=num_plot_windows,
     rts_preds=rts_preds,
-    rts_opt_preds=all_rolling_rts_smooth_x,
+    rts_classic_preds=all_rts_classic_smooth_x,
     mnet_preds=pred_dicts,
-    emkf_opt_preds=all_rolling_emkf_smooth_x,
-    naive_opt_preds=all_rolling_naive_f_x,
+    emkf_preds=all_emkf_smooth_x,
     test_target=test_target,
     test_x0=test_x0,
     save_path="glued_predictions_120days.png",  # Changed filename
@@ -1071,15 +850,11 @@ print("=" * 60)
 print(f"{'Method':<25} {'MSE (°C²)':<18} {'RMSE (°C)':<18}")
 print("-" * 61)
 print(f"{'RTSNet':<25} {mse_rts_denorm.item():<18.4f} {rmse_rts_denorm.item():<18.4f}")
-print(f"{'RTS (classic, F=I)':<25} {rts_classic_mse_denorm.item():<18.4f} {rts_classic_rmse_denorm.item():<18.4f}")
-print(f"{'RTS (F_opt)':<25} {rolling_rts_mse.item():<18.4f} {rolling_rts_rmse.item():<18.4f}")
+print(f"{'RTS (classic)':<25} {rts_classic_mse_denorm.item():<18.4f} {rts_classic_rmse_denorm.item():<18.4f}")
 if not torch.isnan(mnet_mse_denorm):
     print(f"{'M-Network':<25} {mnet_mse_denorm.item():<18.4f} {mnet_rmse_denorm.item():<18.4f}")
 if use_emkf:
-    print(f"{'EMKF (F=I fixed)':<25} {emkf_mse_denorm.item():<18.4f} {emkf_rmse_denorm.item():<18.4f}")
-    if 'rolling_emkf_mse' in locals() and not torch.isnan(rolling_emkf_mse):
-        print(f"{'EMKF (F_opt)':<25} {rolling_emkf_mse.item():<18.4f} {rolling_emkf_rmse.item():<18.4f}")
+    print(f"{'EMKF':<25} {emkf_mse_denorm.item():<18.4f} {emkf_rmse_denorm.item():<18.4f}")
 print(f"{'Naive (x0)':<25} {naive_mse_denorm.item():<18.4f} {naive_rmse_denorm.item():<18.4f}")
-if 'rolling_naive_f_mse' in locals() and not torch.isnan(rolling_naive_f_mse):
-    print(f"{'Naive (F_opt)':<25} {rolling_naive_f_mse.item():<18.4f} {rolling_naive_f_rmse.item():<18.4f}")
+print("-" * 61)
 
