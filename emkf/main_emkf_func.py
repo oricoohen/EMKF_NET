@@ -44,8 +44,8 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelih
     # --- SAFETY CLAMP: spectral radius --delet if not needed-
     eig = torch.linalg.eigvals(F_fin)  # complex tensor (2,)
     rho = eig.abs().max().real  # scalar
-    if torch.isfinite(rho) and rho > 1.05:
-        F_fin = F_fin * (1.05 / (rho + 1e-8))  # scale down uniformly
+    # if torch.isfinite(rho) and rho > 1.05:
+    #     F_fin = F_fin * (1.05 / (rho + 1e-8))  # scale down uniformly
 
 
     # print('f_i shape',F_i.shape)

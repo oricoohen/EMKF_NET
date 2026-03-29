@@ -34,6 +34,8 @@ from Pipelines.pipeline_weather_temp import PipelineWeather, _win_norm_4d, _win_
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 from emkf.main_emkf_func import EMKF_FH_analytic, compute_A1, compute_A2
+from Models.bigru_baseline import BiGRUBaseline
+from Pipelines.pipeline_bigru import train_bigru, test_bigru
 
 # ======================================================
 # DETERMINISM
@@ -80,11 +82,11 @@ R          = 0.05 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("RTSNet/weather/temptau_10", exist_ok=True)
-path_results_rts        = "RTSNet/weather_temp/tau_10/rtsnet_model.pth"
-path_results_m          = "RTSNet/weather_temp/tau_10_/m_network.pth"
-path_results_rts_joint  = "RTSNet/weather_temp/tau_10/rtsnet_joint.pth"
-path_results_m_joint    = "RTSNet/weather_temp/tau_10/m_network_joint.pth"
+os.makedirs("RTSNet/weather/Tel Avivtemptau_10", exist_ok=True)
+path_results_rts        = "RTSNet/weather_temp/tau_10/Tel Avivrtsnet_model.pth"
+path_results_m          = "RTSNet/weather_temp/tau_10_/Tel Avivm_network.pth"
+path_results_rts_joint  = "RTSNet/weather_temp/tau_10/Tel Avivrtsnet_joint.pth"
+path_results_m_joint    = "RTSNet/weather_temp/tau_10/Tel Avivm_network_joint.pth"
 
 # ======================================================
 # ARGS
@@ -114,14 +116,55 @@ def fetch_open_meteo(start_date: str, end_date: str, cache_path: str) -> pd.Data
         print(f"  Loading cached data from {cache_path}")
         return pd.read_csv(cache_path, parse_dates=["date"], index_col="date")
 
+    # url = (
+    #     "https://archive-api.open-meteo.com/v1/archive"
+    #     "?latitude=40.71&longitude=-74.01"
+    #     f"&start_date={start_date}&end_date={end_date}"
+    #     "&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min"
+    #     ",wind_speed_10m_mean,surface_pressure_mean"
+    #     "&timezone=America%2FNew_York"
+    # )
     url = (
         "https://archive-api.open-meteo.com/v1/archive"
-        "?latitude=40.71&longitude=-74.01"
+        f"?latitude=32.0853&longitude=34.7818"
         f"&start_date={start_date}&end_date={end_date}"
         "&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min"
         ",wind_speed_10m_mean,surface_pressure_mean"
-        "&timezone=America%2FNew_York"
+        f"&timezone=Asia%2FJerusalem"
     )
+    # url = (
+    #     "https://archive-api.open-meteo.com/v1/archive"
+    #     "?latitude=34.05&longitude=-118.24"
+    #     f"&start_date={start_date}&end_date={end_date}"
+    #     "&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min"
+    #     ",wind_speed_10m_mean,surface_pressure_mean"
+    #     "&timezone=America%2FLos_Angeles"
+    # )
+
+    # url = (
+    #     "https://archive-api.open-meteo.com/v1/archive"
+    #     "?latitude=41.88&longitude=-87.63"
+    #     f"&start_date={start_date}&end_date={end_date}"
+    #     "&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min"
+    #     ",wind_speed_10m_mean,surface_pressure_mean"
+    #     "&timezone=America%2FChicago"
+    # )
+    # url = (
+    #     "https://archive-api.open-meteo.com/v1/archive"
+    #     "?latitude=51.51&longitude=-0.13"
+    #     f"&start_date={start_date}&end_date={end_date}"
+    #     "&daily=temperature_2m_mean,temperature_2m_max,temperature_2m_min"
+    #     ",wind_speed_10m_mean,surface_pressure_mean"
+    #     "&timezone=Europe%2FLondon"
+    # )
+
+
+
+
+
+
+
+
     print(f"  Fetching Open-Meteo data: {start_date} → {end_date} …")
     try:
         r = requests.get(url, timeout=30)
@@ -235,6 +278,37 @@ def build_dataset(df: pd.DataFrame, TAU: int, device, dtype):
     return inputs, targets, x0_list
 
 
+# ======================================================
+# OBSERVATION NOISE INJECTION
+# ======================================================
+def add_observation_noise(observations, noise_std=0.1, device=None, dtype=None):
+    """
+    Add Gaussian noise to observation data (simulates measurement noise).
+
+    Args:
+        observations : list of [n, TAU] observation tensors
+        noise_std    : standard deviation of Gaussian noise
+        device       : torch device
+        dtype        : torch dtype
+
+    Returns:
+        noisy_observations : list of [n, TAU] tensors with added noise
+    """
+    if device is None:
+        device = torch.device("cpu")
+    if dtype is None:
+        dtype = torch.float32
+
+    noisy_obs = []
+    for obs in observations:
+        # Generate Gaussian noise with same shape as observation
+        noise = torch.normal(0.0, noise_std, size=obs.shape, device=device, dtype=dtype)
+        noisy_observation = obs + noise
+        noisy_obs.append(noisy_observation)
+
+    return noisy_obs
+
+
 print("\nBuilding training dataset …")
 (all_input, all_target, all_x0) = build_dataset(df_train_raw, TAU, device, dtype)
 
@@ -242,11 +316,29 @@ split = int(0.8 * len(all_input))
 train_input,    train_target,    train_x0    = all_input[:split],  all_target[:split],  all_x0[:split]
 cv_input,       cv_target,       cv_x0       = all_input[split:],  all_target[split:],  all_x0[split:]
 
+# ======================================================
+# ADD OBSERVATION NOISE (Optional)
+# ======================================================
+NOISE_ENABLED = False  # Set to True to add noise to observations
+NOISE_STD = 10       # Standard deviation of observation noise
+
+if NOISE_ENABLED:
+    print(f"\nAdding observation noise (std={NOISE_STD}) …")
+    train_input = add_observation_noise(train_input, noise_std=NOISE_STD, device=device, dtype=dtype)
+    cv_input = add_observation_noise(cv_input, noise_std=NOISE_STD, device=device, dtype=dtype)
+    print("  ✓ Noise added to training and CV observation data")
 
 print(f"  train={len(train_input)}  cv={len(cv_input)}  TAU={TAU}")
 
 print("\nBuilding test dataset …")
 (test_input, test_target, test_x0) = build_dataset(df_test_raw, TAU, device, dtype)
+
+# Apply noise to test data if enabled
+if NOISE_ENABLED:
+    print(f"Adding observation noise to test data (std={NOISE_STD}) …")
+    test_input = add_observation_noise(test_input, noise_std=NOISE_STD, device=device, dtype=dtype)
+    print("  ✓ Noise added to test observation data")
+
 print(f"  test={len(test_input)}")
 
 # ======================================================
@@ -338,6 +430,35 @@ print("=" * 60)
 print("Saved joint RTSNet  to:", path_results_rts_joint)
 print("Saved joint M-Network to:", path_results_m_joint)
 
+# ======================================================
+# STEP 3B – TRAIN BiGRU BASELINE
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 3B: TRAIN BiGRU Baseline")
+print("=" * 60)
+
+path_results_bigru = "RTSNet/weather_temp/tau_10/bigru_model.pth"
+
+bigru_model = BiGRUBaseline(input_size=7, hidden_size=64, num_layers=2, dropout=0.1)
+
+# train_bigru(
+#     model=bigru_model,
+#     train_input=train_input,
+#     train_target=train_target,
+#     train_x0=train_x0,
+#     cv_input=cv_input,
+#     cv_target=cv_target,
+#     cv_x0=cv_x0,
+#     save_path=path_results_bigru,
+#     n_epochs=200,
+#     batch_size=32,
+#     lr=1e-3,
+#     wd=1e-4,
+#     device=device,
+# )
+
+print("Saved BiGRU model to:", path_results_bigru)
+
 # Use jointly trained models for testing
 # path_results_rts = path_results_rts_joint
 # path_results_m   = path_results_m_joint
@@ -366,6 +487,25 @@ print(f"\n  RTSNet  MSE(tavg):  {mse_rts.item():.4f} (normalized)")
 print(f"  RTSNet  MSE(tavg):  {mse_rts_denorm.item():.4f} °C² (denormalized)")
 print(f"  RTSNet  RMSE(tavg): {rmse_rts_denorm.item():.4f} °C")
 print(f"  RTSNet  MRE:        {rel_err_rts.item():.4f}")
+
+
+# ======================================================
+# STEP 4 – TEST BiGRU BASELINE
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 4: TEST BiGRU Baseline")
+print("=" * 60)
+
+bigru_mse_denorm, bigru_rmse_denorm, bigru_preds = test_bigru(
+    save_path=path_results_bigru,
+    test_input=test_input,
+    test_target=test_target,
+    test_x0=test_x0,
+    device=device,
+)
+
+print(f"\n  BiGRU   MSE(tavg):  {bigru_mse_denorm.item():.4f} °C²")
+print(f"  BiGRU   RMSE(tavg): {bigru_rmse_denorm.item():.4f} °C")
 
 
 # ======================================================
@@ -526,6 +666,44 @@ else:
     print("\n  M-Net: No predictions generated")
     mnet_mse_denorm = torch.tensor(float('nan'))
     mnet_rmse_denorm = torch.tensor(float('nan'))
+
+# ======================================================
+# STEP 6A – TEST M-NETWORK (JOINTLY TRAINED)
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 6A: TEST M-Network (Jointly Trained)")
+print("=" * 60)
+
+mse_per_iter_joint, mse_db_per_iter_joint, final_F_list_joint, pred_dicts_joint, mse_per_iter_denorm_joint, mse_db_per_iter_denorm_joint = RTSNet_Pipeline.test_mstep_weather(
+    SysModel=sys_model,
+    test_input=test_input,
+    test_target=test_target,
+    test_x0=test_x0,
+    destination_path_RTS=path_results_rts_joint,
+    destination_path_M=path_results_m_joint,
+    num_em_iters=2,
+    print_F_every=50,
+)
+
+# Compute denormalized M-Net (jointly trained) MSE
+mnet_joint_sq_err_denorm = []
+
+for idx, d in enumerate(pred_dicts_joint):
+    x_pred_denorm = d["x_pred_denorm"]  # [m, T]
+    x_true_denorm = d["x_true_denorm"]  # [T] (tavg only)
+    pred_tavg_denorm = x_pred_denorm[0, :]
+    mse_i_denorm = torch.mean((pred_tavg_denorm - x_true_denorm) ** 2)
+    mnet_joint_sq_err_denorm.append(mse_i_denorm.item())
+
+if mnet_joint_sq_err_denorm:
+    mnet_joint_mse_denorm = torch.tensor(mnet_joint_sq_err_denorm).mean()
+    mnet_joint_rmse_denorm = torch.sqrt(mnet_joint_mse_denorm)
+    print(f"\n  M-Net (Joint)   MSE(tavg):  {mnet_joint_mse_denorm.item():.4f} °C²")
+    print(f"  M-Net (Joint)   RMSE(tavg): {mnet_joint_rmse_denorm.item():.4f} °C")
+else:
+    print("\n  M-Net (Joint): No predictions generated")
+    mnet_joint_mse_denorm = torch.tensor(float('nan'))
+    mnet_joint_rmse_denorm = torch.tensor(float('nan'))
 
 # ======================================================
 # STEP 6B – TEST EMKF (Existing EMKF_FH_analytic)
@@ -1075,11 +1253,208 @@ print(f"{'RTS (classic, F=I)':<25} {rts_classic_mse_denorm.item():<18.4f} {rts_c
 print(f"{'RTS (F_opt)':<25} {rolling_rts_mse.item():<18.4f} {rolling_rts_rmse.item():<18.4f}")
 if not torch.isnan(mnet_mse_denorm):
     print(f"{'M-Network':<25} {mnet_mse_denorm.item():<18.4f} {mnet_rmse_denorm.item():<18.4f}")
+if not torch.isnan(mnet_joint_mse_denorm):
+    print(f"{'M-Network (Joint)':<25} {mnet_joint_mse_denorm.item():<18.4f} {mnet_joint_rmse_denorm.item():<18.4f}")
 if use_emkf:
     print(f"{'EMKF (F=I fixed)':<25} {emkf_mse_denorm.item():<18.4f} {emkf_rmse_denorm.item():<18.4f}")
     if 'rolling_emkf_mse' in locals() and not torch.isnan(rolling_emkf_mse):
         print(f"{'EMKF (F_opt)':<25} {rolling_emkf_mse.item():<18.4f} {rolling_emkf_rmse.item():<18.4f}")
+print(f"{'BiGRU (baseline)':<25} {bigru_mse_denorm.item():<18.4f} {bigru_rmse_denorm.item():<18.4f}")
 print(f"{'Naive (x0)':<25} {naive_mse_denorm.item():<18.4f} {naive_rmse_denorm.item():<18.4f}")
 if 'rolling_naive_f_mse' in locals() and not torch.isnan(rolling_naive_f_mse):
     print(f"{'Naive (F_opt)':<25} {rolling_naive_f_mse.item():<18.4f} {rolling_naive_f_rmse.item():<18.4f}")
+
+# ======================================================
+# ORACLE F COMPUTATION
+# Theoretical best performance of a linear model fitted to the test sequence itself.
+# ======================================================
+
+def compute_F_oracle_full(x_true_seq, ridge=1e-6):
+    """
+    Computes best linear transition F for a single sequence x_true_seq [m, T].
+    """
+    m_local = x_true_seq.shape[0]
+    X_prev = x_true_seq[:, :-1]
+    X_next = x_true_seq[:, 1:]
+
+    try:
+        F_oracle = torch.linalg.lstsq(X_prev.T, X_next.T).solution.T
+    except RuntimeError:
+        XXt = X_prev @ X_prev.T
+        reg = ridge * torch.eye(m_local, device=x_true_seq.device, dtype=x_true_seq.dtype)
+        F_oracle = (X_next @ X_prev.T) @ torch.linalg.inv(XXt + reg)
+    return F_oracle
+
+# ======================================================
+# STEP 5E – ORACLE SAME-SEQUENCE F (Without x0, RAW)
+# F minimizes sum_{t>=1} ||F x_{t-1} - x_t||^2
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 5E: Oracle (F same-seq, NO x0) - RAW Data")
+print("=" * 60)
+
+oracle_no_x0_tavg_sq = []
+
+for idx in range(len(test_input)):
+    x_true = test_target[idx].to(device).to(dtype)
+    x0_raw = test_x0[idx].to(device).to(dtype).view(-1, 1)
+
+    # Compute F WITHOUT x0 on RAW data
+    F_oracle = compute_F_oracle_full(x_true)
+
+    # Rollout on RAW data
+    x_pred = torch.empty_like(x_true)
+    x_curr = x0_raw.clone().view(-1)
+    for t in range(x_true.size(1)):
+        x_curr = F_oracle @ x_curr
+        x_pred[:, t] = x_curr
+
+    mse_i = torch.mean((x_pred[0, :] - x_true[0, :]) ** 2).item()
+    oracle_no_x0_tavg_sq.append(mse_i)
+
+if oracle_no_x0_tavg_sq:
+    mse_oracle_no_x0 = torch.tensor(oracle_no_x0_tavg_sq).mean()
+    rmse_oracle_no_x0 = torch.sqrt(mse_oracle_no_x0)
+    print(f"  Oracle(no x0) MSE:  {mse_oracle_no_x0.item():.4f}")
+    print(f"  Oracle(no x0) RMSE: {rmse_oracle_no_x0.item():.4f}")
+else:
+    mse_oracle_no_x0 = torch.tensor(float('nan'))
+    rmse_oracle_no_x0 = torch.tensor(float('nan'))
+
+# ======================================================
+# STEP 5F – ORACLE SAME-SEQUENCE F (With x0, RAW)
+# F minimizes sum_{t>=0} ||F x_{t-1} - x_t||^2 (includes x0->x1)
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 5F: Oracle (F same-seq, WITH x0) - RAW Data")
+print("=" * 60)
+
+oracle_with_x0_tavg_sq = []
+
+for idx in range(len(test_input)):
+    x_true = test_target[idx].to(device).to(dtype)
+    x0_raw = test_x0[idx].to(device).to(dtype).view(-1, 1)
+
+    # Concatenate [x0, x_true] RAW
+    x_seq = torch.cat([x0_raw, x_true], dim=1)
+
+    # Compute F WITH x0 on RAW data
+    F_oracle = compute_F_oracle_full(x_seq)
+
+    # Rollout on RAW data
+    x_pred = torch.empty_like(x_true)
+    x_curr = x0_raw.clone().view(-1)
+    for t in range(x_true.size(1)):
+        x_curr = F_oracle @ x_curr
+        x_pred[:, t] = x_curr
+
+    mse_i = torch.mean((x_pred[0, :] - x_true[0, :]) ** 2).item()
+    oracle_with_x0_tavg_sq.append(mse_i)
+
+if oracle_with_x0_tavg_sq:
+    mse_oracle_with_x0 = torch.tensor(oracle_with_x0_tavg_sq).mean()
+    rmse_oracle_with_x0 = torch.sqrt(mse_oracle_with_x0)
+    print(f"  Oracle(with x0) MSE:  {mse_oracle_with_x0.item():.4f}")
+    print(f"  Oracle(with x0) RMSE: {rmse_oracle_with_x0.item():.4f}")
+else:
+    mse_oracle_with_x0 = torch.tensor(float('nan'))
+    rmse_oracle_with_x0 = torch.tensor(float('nan'))
+
+# Add to table
+if not torch.isnan(mse_oracle_no_x0):
+    print(f"{'Oracle (no x0)':<25} {mse_oracle_no_x0.item():<18.4f} {rmse_oracle_no_x0.item():<18.4f}")
+if not torch.isnan(mse_oracle_with_x0):
+    print(f"{'Oracle (with x0)':<25} {mse_oracle_with_x0.item():<18.4f} {rmse_oracle_with_x0.item():<18.4f}")
+print("-" * 61)
+# ======================================================
+# STEP 9 – COMPARISON PLOT: M-Net (Joint) vs BiGRU vs True Data
+# ======================================================
+print("\n" + "=" * 60)
+print("STEP 9: Generate Comparison Plot")
+print("=" * 60)
+
+# Create figure with subplots for multiple test sequences
+num_sequences_to_plot = min(3, len(test_input))  # Plot first 3 sequences
+fig, axes = plt.subplots(num_sequences_to_plot, 1, figsize=(14, 4*num_sequences_to_plot))
+
+if num_sequences_to_plot == 1:
+    axes = [axes]
+
+for seq_idx in range(num_sequences_to_plot):
+    ax = axes[seq_idx]
+
+    # Get true data
+    x_true = test_target[seq_idx].to(device).to(dtype)
+    true_tavg = x_true[0, :].detach().cpu().numpy()
+    days = np.arange(len(true_tavg))
+
+    # Get M-Network (Joint) predictions
+    if seq_idx < len(pred_dicts_joint):
+        mnet_pred_dict = pred_dicts_joint[seq_idx]
+        mnet_tavg = mnet_pred_dict["x_pred_denorm"][0, :].detach().cpu().numpy()
+    else:
+        mnet_tavg = None
+
+    # Get BiGRU predictions
+    if seq_idx < len(bigru_preds):
+        bigru_tavg = bigru_preds[seq_idx][0, :].detach().cpu().numpy()
+    else:
+        bigru_tavg = None
+
+    # Plot true data
+    ax.plot(days, true_tavg, 'k-', linewidth=2.5, label='True Data', marker='o', markersize=5)
+
+    # Plot M-Network (Joint)
+    if mnet_tavg is not None:
+        ax.plot(days, mnet_tavg, 'b--', linewidth=2, label='M-Network (Joint)', marker='s', markersize=4, alpha=0.8)
+
+    # Plot BiGRU
+    if bigru_tavg is not None:
+        ax.plot(days, bigru_tavg, 'r--', linewidth=2, label='BiGRU', marker='^', markersize=4, alpha=0.8)
+
+    # Formatting
+    ax.set_xlabel('Day', fontsize=11)
+    ax.set_ylabel('Temperature (°C)', fontsize=11)
+    ax.set_title(f'Test Sequence {seq_idx} - Temperature Predictions', fontsize=12, fontweight='bold')
+    ax.legend(loc='best', fontsize=10)
+    ax.grid(True, alpha=0.3)
+
+    # Calculate and display metrics for this sequence
+    if mnet_tavg is not None:
+        mnet_mse_seq = np.mean((mnet_tavg - true_tavg) ** 2)
+        mnet_rmse_seq = np.sqrt(mnet_mse_seq)
+        ax.text(0.02, 0.98, f'M-Net MSE: {mnet_mse_seq:.4f} °C² | RMSE: {mnet_rmse_seq:.4f} °C',
+                transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.7))
+
+    if bigru_tavg is not None:
+        bigru_mse_seq = np.mean((bigru_tavg - true_tavg) ** 2)
+        bigru_rmse_seq = np.sqrt(bigru_mse_seq)
+        ax.text(0.02, 0.88, f'BiGRU MSE: {bigru_mse_seq:.4f} °C² | RMSE: {bigru_rmse_seq:.4f} °C',
+                transform=ax.transAxes, fontsize=9, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7))
+
+plt.tight_layout()
+comparison_plot_path = "mnet_bigru_comparison.png"
+plt.savefig(comparison_plot_path, dpi=150, bbox_inches='tight')
+print(f"✓ Comparison plot saved to: {os.path.abspath(comparison_plot_path)}")
+
+# Try to open the plot
+try:
+    if sys.platform == 'win32':
+        os.startfile(comparison_plot_path)
+    elif sys.platform == 'darwin':
+        subprocess.Popen(['open', comparison_plot_path])
+    else:
+        subprocess.Popen(['xdg-open', comparison_plot_path])
+    print(f"✓ Opening plot: {comparison_plot_path}")
+except Exception as e:
+    print(f"Note: Could not auto-open plot ({e})")
+    print(f"Plot saved at: {os.path.abspath(comparison_plot_path)}")
+
+plt.close()
+
+print("\n" + "=" * 60)
+print("✓ ALL ANALYSIS COMPLETE!")
+print("=" * 60)
 
