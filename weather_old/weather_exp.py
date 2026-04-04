@@ -74,11 +74,11 @@ R       = 0.1 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("RTSNet/weather/tau_15", exist_ok=True)
-path_results_rts        = "RTSNet/weather/tau_10/rtsnet_model.pth"
-path_results_m          = "RTSNet/weather/tau_10_with_detaouch/m_network_cv_lastonly.pth"
-path_results_rts_joint  = "RTSNet/weather/tau_15/rtsnet_joint_cv_lastonly.pth"
-path_results_m_joint    = "RTSNet/weather/tau_15/m_network_cv_lastonly_joint.pth"
+os.makedirs("../RTSNet/weather/tau_15", exist_ok=True)
+path_results_rts        = "../RTSNet/weather/tau_10/rtsnet_model.pth"
+path_results_m          = "../RTSNet/weather/tau_10_with_detaouch/m_network_cv_lastonly.pth"
+path_results_rts_joint  = "../RTSNet/weather/tau_15/rtsnet_joint_cv_lastonly.pth"
+path_results_m_joint    = "../RTSNet/weather/tau_15/m_network_cv_lastonly_joint.pth"
 
 # ======================================================
 # ARGS
@@ -654,7 +654,7 @@ print("\nSaved plot: weather_prediction_comparison.png")
 # FULL PLOTS – REAL vs ESTIMATED TEMPERATURE
 # ======================================================
 import os
-os.makedirs("RTSNet/weather/tau_15/plots", exist_ok=True)
+os.makedirs("../RTSNet/weather/tau_15/plots", exist_ok=True)
 
 # Common length across all methods
 N_rts   = len(pred_temps_rts)

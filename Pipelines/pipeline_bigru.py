@@ -6,19 +6,19 @@ from Pipelines.pipeline_weather_temp import _win_norm_4d
 
 
 def train_bigru(
-    model,
-    train_input,
-    train_target,
-    train_x0,
-    cv_input,
-    cv_target,
-    cv_x0,
-    save_path,
-    n_epochs=150,
-    batch_size=32,
-    lr=1e-3,
-    wd=1e-4,
-    device=None,
+        model,
+        train_input,
+        train_target,
+        train_x0,
+        cv_input,
+        cv_target,
+        cv_x0,
+        save_path,
+        n_epochs=150,
+        batch_size=32,
+        lr=1e-3,
+        wd=1e-4,
+        device=None,
 ):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -39,12 +39,18 @@ def train_bigru(
         y_batch, x0_batch, true_tavg_batch = [], [], []
 
         for idx in indices:
+            if idx == 0:
+                continue  # Skip the first sample since it has no previous target for normalization del
             y_win = train_input[idx].to(device)
             x_true = train_target[idx].to(device)
             x0_raw = train_x0[idx].to(device)
 
             x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
-
+            prev_x_mean, prev_x_std,_,_ = _win_norm_4d(train_target[idx-1], device, dtype)#del
+            # x_mean[0] = x0_raw[0].squeeze()
+            # x_std[0] = 4
+            x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+            x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
             y_win_n = (y_win - x_mean[1:]) / x_std[1:]
             x0_norm = (x0_raw - x_mean.squeeze()) / x_std.squeeze()
             true_tavg_n = ((x_true - x_mean) / x_std)[0, :]
@@ -68,12 +74,18 @@ def train_bigru(
         with torch.no_grad():
             cv_losses = []
             for j in range(N_cv):
+                if j == 0:
+                    continue  # Skip the first sample since it has no previous target for normalization del
                 y_win = cv_input[j].to(device)
                 x_true = cv_target[j].to(device)
                 x0_raw = cv_x0[j].to(device)
 
                 x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
-
+                prev_x_mean, prev_x_std,_,_ = _win_norm_4d(cv_target[j-1], device, dtype)#del
+                x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+                x_std[0] =  prev_x_std[0]  # Use the std
+                # x_mean[0] = x0_raw[0].squeeze()
+                # x_std[0] = 4
                 y_win_n = (y_win - x_mean[1:]) / x_std[1:]
                 x0_norm = (x0_raw - x_mean.squeeze()) / x_std.squeeze()
                 true_tavg_n = ((x_true - x_mean) / x_std)[0, :]
@@ -94,11 +106,11 @@ def train_bigru(
 
 
 def test_bigru(
-    save_path,
-    test_input,
-    test_target,
-    test_x0,
-    device=None,
+        save_path,
+        test_input,
+        test_target,
+        test_x0,
+        device=None,
 ):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -111,12 +123,18 @@ def test_bigru(
 
     with torch.no_grad():
         for j in range(len(test_input)):
+            if j == 0:
+                continue  # Skip the first sample since it has no previous target for normalization del
             y_win = test_input[j].to(device)
             x_true = test_target[j].to(device)
             x0_raw = test_x0[j].to(device)
 
             x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
-
+            prev_x_mean, prev_x_std,_,_ = _win_norm_4d(test_target[j-1], device, dtype)#del
+            x_mean[0] = prev_x_mean[0]  # Use the mean of
+            x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+            # x_mean[0] = x0_raw[0].squeeze()
+            # x_std[0] = 4
             y_win_n = (y_win - x_mean[1:]) / x_std[1:]
             x0_norm = (x0_raw - x_mean.squeeze()) / x_std.squeeze()
 
@@ -124,7 +142,6 @@ def test_bigru(
 
             pred_tavg_denorm = pred_tavg_norm * x_std[0] + x_mean[0]
             true_tavg_denorm = x_true[0, :]
-
             mse_j = torch.mean((pred_tavg_denorm - true_tavg_denorm) ** 2).item()
             sq_err_denorm.append(mse_j)
 

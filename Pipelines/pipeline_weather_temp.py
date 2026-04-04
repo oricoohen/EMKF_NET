@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 
 from emkf.AI_M_step import DeltaF_MStepNet
+from Smoothers.RTS_Smoother_test import S_Test
 
 
 # -----------------------------------------------------------------------
@@ -148,15 +149,22 @@ class PipelineWeather:
             batch_loss_sum = torch.tensor(0.0, device=device, dtype=dtype)
 
             for j in range(self.N_B):
+
                 self.model.init_hidden()
                 idx = random.randint(0, self.N_E - 1)
+                if  idx == 0:#del
+                    idx =1
                 y_win  = train_input[idx]    # [3, TAU] observations y
                 x_true = train_target[idx]   # [4, TAU] true state x: x[0]=tavg(hidden), x[1:]=y(obs)
                 T      = y_win.size(-1)
 
                 # Compute normalization stats from TRUE STATE x [4, TAU]
                 x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
-
+                # x_mean[0] =  train_x0[idx][0]
+                # x_std[0]  = 4
+                prev_x_mean, prev_x_std, _, _ = _win_norm_4d(train_target[idx-1].detach(), device, dtype)  # del
+                x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+                x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
                 # Normalize observations using x[1:] stats (since y = x[1:])
                 y_win_n  = (y_win - x_mean[1:]) / x_std[1:]
 
@@ -227,14 +235,21 @@ class PipelineWeather:
             # ---- CV ----
             self.model.eval()
             with torch.no_grad():
-                cv_batch = torch.empty([self.N_CV], device=device)
+                cv_batch = torch.empty([self.N_CV-1], device=device)#del -1
                 for j in range(self.N_CV):
+                    if j == 0:
+                        continue  # Skip first CV sample to avoid data leakage in normalization (since it uses true state stats) del
                     y_win  = cv_input[j]
                     x_true = cv_target[j]  # [4, TAU] true state x
                     T      = y_win.size(-1)
 
                     # Compute normalization stats from TRUE STATE x
                     x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    prev_x_mean, prev_x_std, _, _ = _win_norm_4d(cv_target[j-1], device, dtype)  # del
+                    x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+                    x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                    # x_mean[0] = cv_x0[j][0]
+                    # x_std[0] = 4
                     y_win_n  = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
 
                     F = SysModel.F_valid[0].to(device) \
@@ -267,7 +282,7 @@ class PipelineWeather:
                         # Compare only tavg (component 0) of predicted vs true state
                         cv_loss  = cv_loss +  self.loss_fn(x_sm[0, t], x_true_n[0, t])
 
-                    cv_batch[j] = cv_loss
+                    cv_batch[j-1] = cv_loss#del
 
                 MSE_cv_lin[ti] = cv_batch.mean()
                 MSE_cv_dB[ti]  = 10 * torch.log10(MSE_cv_lin[ti])
@@ -316,19 +331,26 @@ class PipelineWeather:
         self.model = torch.load(load_model_path, weights_only=False,
                                 map_location=device).eval()
 
-        sq_err     = torch.empty(N_T, device=device, dtype=dtype)
-        rel_err    = torch.empty(N_T, device=device, dtype=dtype)
-        sq_err_denorm = torch.empty(N_T, device=device, dtype=dtype)  # denormalized MSE
+        sq_err     = torch.empty(N_T-1, device=device, dtype=dtype)#del -1
+        rel_err    = torch.empty(N_T-1, device=device, dtype=dtype)#del -1
+        sq_err_denorm = torch.empty(N_T-1, device=device, dtype=dtype)  # denormalized MSE#del -1
         rts_preds = []  # NEW: store denormalized x_pred per window
 
         with torch.no_grad():
             for j in range(N_T):
+                if j == 0:
+                    continue  # Skip first test sample to avoid data leakage in normalization (since it uses true state stats) del
                 y_win  = test_input[j].to(device)    # [3, TAU] observations y
                 x_true = test_target[j].to(device)   # [4, TAU] true state x
                 T      = y_win.size(-1)
 
                 # Compute normalization stats from TRUE STATE x [4, TAU]
                 x_mean, x_std, x_mean0, x_std0 = _win_norm_4d(x_true, device, dtype)
+                prev_x_mean, prev_x_std, _, _ = _win_norm_4d(test_target[j-1], device, dtype)  # del
+                x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+                x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                # x_mean[0] =  test_x0[j][0]
+                # x_std[0]  = 4
                 y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
 
                 F = SysModel.F_test[0].to(device) \
@@ -359,11 +381,11 @@ class PipelineWeather:
                 pred_tavg_norm = x_sm[0, :]  # [T]
 
                 # per-window loss over the whole window (normalized)
-                sq_err[j] = torch.mean((pred_tavg_norm - true_tavg_norm) ** 2)
+                sq_err[j-1] = torch.mean((pred_tavg_norm - true_tavg_norm) ** 2)#del -1
 
                 # relative error over the whole window
-                rel_err[j] = torch.mean(
-                    torch.abs(pred_tavg_norm - true_tavg_norm) / (torch.abs(true_tavg_norm) + 1e-8)
+                rel_err[j-1] = torch.mean(
+                    torch.abs(pred_tavg_norm - true_tavg_norm) / (torch.abs(true_tavg_norm) + 1e-8)#del -1
                 )
 
                 # NEW: Denormalized (real °C) values
@@ -371,7 +393,7 @@ class PipelineWeather:
                 pred_tavg_denorm = pred_tavg_norm * x_std[0] + x_mean[0]  # Denormalize
 
                 # per-window denormalized loss (real °C)
-                sq_err_denorm[j] = torch.mean((pred_tavg_denorm - true_tavg_denorm) ** 2)
+                sq_err_denorm[j-1] = torch.mean((pred_tavg_denorm - true_tavg_denorm) ** 2)#del -1
 
                 # NEW: Denormalize full x_sm trajectory and store
                 x_sm_denorm = x_sm.clone()
@@ -449,12 +471,19 @@ class PipelineWeather:
 
                 for _ in range(batch_size):
                     idx   = random.randint(0, self.N_E - 1)
+                    if idx == 0:
+                        continue  # Skip first batch to avoid data leakage in normalization (since it uses true state stats) del
                     y_win = train_input[idx].to(device)   # [3, TAU] observations y
                     x_true = train_target[idx].to(device)  # [4, TAU] true state x
                     T     = int(y_win.size(-1))
 
                     # Compute normalization stats from TRUE STATE x
                     x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    prev_x_mean, prev_x_std, _, _ = _win_norm_4d(train_target[idx-1], device, dtype)  # del
+                    x_mean[0] = prev_x_mean[0]  # Use the mean of the previous target for normalization del
+                    x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                    # x_mean[0] = train_x0[idx][0]
+                    # x_std[0] = 4
                     y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
                     x_true_n = (x_true - x_mean) / x_std
 
@@ -478,8 +507,9 @@ class PipelineWeather:
                         # Pass F to RTSNet – no detach so RTSNet sees F's grad
                         self.model.update_F(F_current)
                         self.model.InitSequence(x0_norm.clone(), T)
-                        self.model.init_hidden()
                         self.model.prior_Sigma = prior_P
+                        self.model.init_hidden()
+
 
                         x_fwd = torch.stack(
                             [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -522,17 +552,19 @@ class PipelineWeather:
 
                         reg_F       = lambda_F * (dF ** 2).sum()
 
+
                         # Loss on state x, feature 0
                         resid_x_iter = x_sm[0, :] - x_true_n[0, :]
                         loss_x_iter = (resid_x_iter ** 2).mean()
                         iter_loss = alpha[em_iter] * (loss_x_iter + reg_F)
                         total_loss = total_loss + iter_loss
-
+                        # if j == 2:
+                        #     print(f"[LOSS ITER] loss_x_iter={loss_x_iter.item():.4f}")
                     # Final RTS pass with last F – no detach so F grad flows into final loss
                     self.model.update_F(F_current)
                     self.model.InitSequence(x0_norm.clone(), T)
-                    self.model.init_hidden()
                     self.model.prior_Sigma = prior_P
+                    self.model.init_hidden()
 
                     x_fwd2 = torch.stack(
                         [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -549,7 +581,10 @@ class PipelineWeather:
                     resid_x_final = x_sm2[0, :] - x_true_n[0, :]
                     loss_x_final = (resid_x_final ** 2).mean()
                     total_loss = total_loss + alpha[-1] * loss_x_final
-
+                    # print(
+                    #     f"iter_loss={loss_x_iter.item():.4f} "
+                    #     f"final_loss={loss_x_final.item():.4f}"
+                    # )
                     # Optional: F loss computed from the data constraint
                     # F_true is the matrix that satisfies: F_true @ x_true[:, -2] = x_true[:, -2]
                     if f_loss:
@@ -592,13 +627,25 @@ class PipelineWeather:
             model_mstep.eval()
             cv_loss_sum = 0.0
             with torch.no_grad():
+                # hard_sequences = []
+                # easy_sequences = []
+
+                # HARD_TH = 10.0
+                # EASY_TH = 1.0
                 for j in range(self.N_CV):
+                    if j == 0:
+                        continue  # Skip first CV sample to avoid data leakage in normalization (since it uses true state stats) del
                     y_win = cv_input[j].to(device)   # [3, TAU] observations y
                     x_true = cv_target[j].to(device)  # [4, TAU] true state x
                     T     = int(y_win.size(-1))
 
                     # Compute normalization stats from TRUE STATE x
                     x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    prev_x_mean, prev_x_std, _, _ = _win_norm_4d(cv_target[j-1], device, dtype)  # del
+                    x_mean[0] = prev_x_mean[0]  # Use the mean of
+                    x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                    # x_mean[0] = cv_x0[j][0]
+                    # x_std[0] = 4
                     y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
                     x_true_n = (x_true - x_mean) / x_std
 
@@ -620,8 +667,8 @@ class PipelineWeather:
                     for em_iter in range(num_em_iters):
                         self.model.update_F(F_current)
                         self.model.InitSequence(x0_norm.clone(), T)
-                        self.model.init_hidden()
                         self.model.prior_Sigma = prior_P
+                        self.model.init_hidden()
 
                         x_fwd = torch.stack(
                             [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -659,8 +706,9 @@ class PipelineWeather:
                     # Mirror train objective: final RTS pass with last F_current.
                     self.model.update_F(F_current)
                     self.model.InitSequence(x0_norm.clone(), T)
-                    self.model.init_hidden()
                     self.model.prior_Sigma = prior_P
+                    self.model.init_hidden()
+
 
                     x_fwd2 = torch.stack(
                         [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -677,10 +725,32 @@ class PipelineWeather:
                     resid_x_cv = x_sm2[0, :] - x_true_n[0, :]
                     cv_l = (resid_x_cv ** 2).mean()
                     cv_loss_sum += cv_l.item()
+                    # loss_val = cv_l.item()#del
+                    #
+                    # if loss_val > HARD_TH:
+                    #     hard_sequences.append({
+                    #         "idx": j,
+                    #         "loss": loss_val,
+                    #         "x_true": x_true_n.detach().cpu().clone(),
+                    #         "y": y_win_n.detach().cpu().clone(),
+                    #         "x0": x0_norm.detach().cpu().clone(),
+                    #     })
+                    #
+                    # elif loss_val < EASY_TH:
+                    #     easy_sequences.append({
+                    #         "idx": j,
+                    #         "loss": loss_val,
+                    #         "x_true": x_true_n.detach().cpu().clone(),
+                    #         "y": y_win_n.detach().cpu().clone(),
+                    #         "x0": x0_norm.detach().cpu().clone(),
+                    #     })
+
 
             cv_avg = cv_loss_sum / self.N_CV
             scheduler.step(cv_avg)
-
+            # print(f"[DEBUG] hard_sequences={len(hard_sequences)} easy_sequences={len(easy_sequences)}")
+            # torch.save(hard_sequences, "hard_sequences.pt")
+            # torch.save(easy_sequences, "easy_sequences.pt")
             if cv_avg < best_cv_loss:
                 best_cv_loss = cv_avg
                 os.makedirs(os.path.dirname(destination_path_M) or ".", exist_ok=True)
@@ -697,6 +767,557 @@ class PipelineWeather:
 
         print(f"Saved M-Network to: {destination_path_M}")
 
+    def compute_F_opt_full_sequence(self,x_seq, ridge=1e-6):
+        """
+        x_seq: [m, T]
+
+        Solves:
+            F_opt = argmin_F sum_t ||F x(t-1) - x(t)||^2
+        """
+        m_local, T_local = x_seq.shape
+
+        X_prev = x_seq[:, :-1]  # [m, T-1]
+        X_next = x_seq[:, 1:]  # [m, T-1]
+
+        try:
+            F_opt = torch.linalg.lstsq(X_prev.T, X_next.T).solution.T
+        except RuntimeError:
+            XXt = X_prev @ X_prev.T
+            reg = ridge * torch.eye(m_local, device=x_seq.device, dtype=x_seq.dtype)
+            F_opt = (X_next @ X_prev.T) @ torch.linalg.inv(XXt + reg)
+
+        return F_opt
+    def train_emkalmannet_weather_rts(
+            self, SysModel,
+            cv_input, cv_target, cv_x0,
+            train_input, train_target, train_x0,
+            destination_path_M,
+            num_em_iters=2, alpha=(0.05, 0.15, 0.85),
+            lambda_F=1e-2,
+            lambda_f_loss=10.0,
+            f_loss=True,
+            clip_grad=1.0,
+    ):
+        device = self.device
+        dtype = train_input[0].dtype
+        m, n = SysModel.m, SysModel.n
+        self.N_E = len(train_input)
+        self.N_CV = len(cv_input)
+
+
+        if self.M_model is None:
+            self.M_model = DeltaF_MStepNet(m=m, n=n, d_hidden=256).to(device)
+            self.M_optimizer = torch.optim.Adam(
+                self.M_model.parameters(), lr=1e-4, weight_decay=1e-5)
+
+        model_mstep = self.M_model.train()
+        best_cv_loss = 1e18
+        batch_size = 10
+
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.M_optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-6)
+
+        for epoch in range(self.N_steps):
+
+            # ---- TRAIN ----
+            model_mstep.train()
+            train_loss_sum = 0.0
+            grad_norm_sum = 0.0
+            max_grad_norm_epoch = 0.0
+            clip_hit_count = 0
+            grad_bad_count = 0
+            dF_norm_sum = 0.0
+            dF_norm_count = 0
+
+            for j in range(self.N_B):
+                self.M_optimizer.zero_grad()
+                batch_loss = torch.tensor(0.0, device=device, dtype=dtype)
+
+                for _ in range(batch_size):
+                    idx   = random.randint(0, self.N_E - 1)
+                    y_win = train_input[idx].to(device)   # [3, TAU] observations y
+                    x_true = train_target[idx].to(device)  # [4, TAU] true state x
+                    T     = int(y_win.size(-1))
+
+                    # Compute normalization stats from TRUE STATE x
+                    x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    x_mean[0] = train_x0[idx][0]
+                    x_std[0] = 4
+                    y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
+                    x_true_n = (x_true - x_mean) / x_std
+                    F_opt = self.compute_F_opt_full_sequence(x_true_n)
+                    F_base = SysModel.F_train[0].to(device) \
+                        if isinstance(SysModel.F_train, list) \
+                        else SysModel.F_train.to(device)
+                    H = SysModel.H.to(device)
+
+                    x0_raw = train_x0[idx].to(device)
+                    x0_norm = (x0_raw.view(m, 1) - x_mean) / x_std
+
+                    prior_P = SysModel.m2x_0.clone().detach().to(device) \
+                        if hasattr(SysModel, "m2x_0") \
+                        else torch.eye(m, device=device, dtype=dtype)
+
+                    F_current  = F_base.clone()
+                    total_loss = torch.tensor(0.0, device=device, dtype=dtype)
+
+                    for em_iter in range(num_em_iters):
+                        # Use classical RTS with current F
+                        [mse_arr, mse_avg, mse_db, X_smooth, P_smooth, V_smooth] = S_Test(
+                            SysModel,
+                            [y_win_n],
+                            [x_true_n],
+                            F=[F_current],
+                            H=[H],
+                            generate_f=False,
+                            generate_h=False,
+                            init_x_list=[x0_norm.squeeze()],
+                            init_P_list=[prior_P],
+                        )
+                        x_sm = X_smooth[0]  # [m, T]
+
+                        # Sufficient stats
+                        x_prev_full = torch.cat([x0_norm, x_sm[:, :-1]], dim=1)
+                        x_curr_full = x_sm
+
+                        A1      = (x_curr_full @ x_prev_full.T) / T
+                        A2      = (x_prev_full @ x_prev_full.T) / T
+                        delta_x = x_curr_full - F_current @ x_prev_full
+                        S_delta = (delta_x @ delta_x.T) / T
+                        C_delta = (delta_x @ x_prev_full.T) / T
+                        nu      = y_win_n - H @ F_current @ x_prev_full
+                        S_nu    = (nu @ nu.T) / T
+
+                        z_in = torch.cat([
+                            A1.detach().reshape(-1),
+                            A2.detach().reshape(-1),
+                            S_delta.detach().reshape(-1),
+                            S_nu.detach().reshape(-1),
+                            C_delta.detach().reshape(-1),
+                            F_current.detach().reshape(-1),
+                        ], dim=0).view(1, -1)
+
+                        dF = 100*model_mstep(z_in).view(m, m)
+                        dF_norm_sum += dF.detach().norm().item()
+                        dF_norm_count += 1
+                        F_current = F_current + dF
+
+                        reg_F = lambda_F * (dF ** 2).sum()
+
+                        # Loss on state x, feature 0
+                        resid_x_iter = x_sm[0, :] - x_true_n[0, :]
+                        loss_x_iter = (resid_x_iter ** 2).mean()
+                        iter_loss = alpha[em_iter] * (loss_x_iter + reg_F)
+                        # total_loss = total_loss + iter_loss
+
+                    # Final RTS pass with last F
+                    [mse_arr, mse_avg, mse_db, X_smooth2, P_smooth2, V_smooth2] = S_Test(
+                        SysModel,
+                        [y_win_n],
+                        [x_true_n],
+                        F=[F_current],
+                        H=[H],
+                        generate_f=False,
+                        generate_h=False,
+                        init_x_list=[x0_norm.squeeze()],
+                        init_P_list=[prior_P],
+                    )
+                    x_sm2 = X_smooth2[0]
+
+                    # Final loss
+                    resid_x_final = x_sm2[0, :] - x_true_n[0, :]
+                    loss_x_final = (resid_x_final ** 2).mean()
+                    # total_loss = total_loss + alpha[-1] * loss_x_final
+
+                    # loss_f = torch.norm(F_current - F_opt, p='fro') ** 2
+                    # total_loss = total_loss +  loss_f
+                    loss_f = torch.norm(F_current[0] - F_opt[0], p='fro') ** 2
+                    total_loss = total_loss +  loss_f
+
+                    batch_loss = batch_loss + total_loss / batch_size
+
+                batch_loss.backward()
+
+                grads = [p.grad for p in model_mstep.parameters() if p.grad is not None]
+                if grads:
+                    grad_sq = sum((g.detach().norm() ** 2 for g in grads))
+                    grad_norm = torch.sqrt(grad_sq).item()
+                else:
+                    grad_norm = 0.0
+
+                has_bad_grad = any(torch.isnan(g).any() or torch.isinf(g).any() for g in grads)
+                if has_bad_grad:
+                    grad_bad_count += 1
+
+                pre_clip_norm = grad_norm
+                if clip_grad > 0:
+                    clipped_total_norm = torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), clip_grad)
+                    if float(clipped_total_norm) > clip_grad:
+                        clip_hit_count += 1
+                self.M_optimizer.step()
+                train_loss_sum += batch_loss.detach().item()
+                grad_norm_sum += pre_clip_norm
+                if pre_clip_norm > max_grad_norm_epoch:
+                    max_grad_norm_epoch = pre_clip_norm
+
+            train_avg = train_loss_sum / max(self.N_B, 1)
+
+            # ---- CV ----
+            model_mstep.eval()
+            cv_loss_sum = 0.0
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    # ...existing code...
+                    y_win = cv_input[j].to(device)
+                    x_true = cv_target[j].to(device)
+                    T = int(y_win.size(-1))
+
+                    x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    x_mean[0] =  cv_x0[j][0]
+                    x_std[0] = 4
+                    y_win_n = (y_win - x_mean[1:]) / x_std[1:]
+                    x_true_n = (x_true - x_mean) / x_std
+                    # direct transition-fit losses on the true sequence
+                    X_prev_true = x_true_n[:, :-1]  # [m, T-1]
+                    X_next_true = x_true_n[:, 1:]  # [m, T-1]
+
+                    F_opt = self.compute_F_opt_full_sequence(x_true_n)
+                    F_base = SysModel.F_valid[0].to(device) \
+                        if isinstance(SysModel.F_valid, list) \
+                        else SysModel.F_valid.to(device)
+                    H = SysModel.H.to(device)
+                    fit_loss_F_base = torch.sum((F_base @ X_prev_true - X_next_true) ** 2)
+                    fit_loss_F_opt = torch.sum((F_opt @ X_prev_true - X_next_true) ** 2)
+                    x0_raw = cv_x0[j].to(device)
+                    x0_norm = (x0_raw.view(m, 1) - x_mean) / x_std
+
+                    prior_P = SysModel.m2x_0.clone().detach().to(device) \
+                        if hasattr(SysModel, "m2x_0") \
+                        else torch.eye(m, device=device, dtype=dtype)
+
+                    F_current = F_base.clone()
+                    for em_iter in range(num_em_iters):
+                        # Use classical RTS with current F
+                        [mse_arr, mse_avg, mse_db, X_smooth, P_smooth, V_smooth] = S_Test(
+                            SysModel,
+                            [y_win_n],
+                            [x_true_n],
+                            F=[F_current],
+                            H=[H],
+                            generate_f=False,
+                            generate_h=False,
+                            init_x_list=[x0_norm.squeeze()],
+                            init_P_list=[prior_P],
+                        )
+                        x_sm = X_smooth[0]
+
+                        x_prev_full = torch.cat([x0_norm, x_sm[:, :-1]], dim=1)
+                        x_curr_full = x_sm
+                        A1      = (x_curr_full @ x_prev_full.T) / T
+                        A2      = (x_prev_full @ x_prev_full.T) / T
+                        delta_x = x_curr_full - F_current @ x_prev_full
+                        S_delta = (delta_x @ delta_x.T) / T
+                        C_delta = (delta_x @ x_prev_full.T) / T
+                        nu      = y_win_n - H @ F_current @ x_prev_full
+                        S_nu    = (nu @ nu.T) / T
+
+                        z_in = torch.cat([
+                            A1.detach().reshape(-1),
+                            A2.detach().reshape(-1),
+                            S_delta.detach().reshape(-1),
+                            S_nu.detach().reshape(-1),
+                            C_delta.detach().reshape(-1),
+                            F_current.detach().reshape(-1),
+                        ], dim=0).view(1, -1)
+
+                        dF = 100*model_mstep(z_in).view(m, m)
+                        # print('df',dF)
+                        F_current = F_current + dF
+                    # # Final RTS pass with last F
+                    # [mse_arr, mse_avg, mse_db, X_smooth2, P_smooth2, V_smooth2] = S_Test(
+                    #     SysModel,
+                    #     [y_win_n],
+                    #     [x_true_n],
+                    #     F=[F_current],
+                    #     H=[H],
+                    #     generate_f=False,
+                    #     generate_h=False,
+                    #     init_x_list=[x0_norm.squeeze()],
+                    #     init_P_list=[prior_P],
+                    # )
+                    # x_sm2 = X_smooth2[0]
+                    #
+                    # resid_x_cv = x_sm2[0, :] - x_true_n[0, :]
+                    # cv_l = (resid_x_cv ** 2).mean()
+                    # # cv_loss_sum += cv_l.item()
+                    # cv_f_loss = torch.norm(F_current - F_opt, p='fro') ** 2
+                    # cv_loss_sum += cv_f_loss.item()
+                    # Final RTS pass with learned F_current
+                    [mse_arr, mse_avg, mse_db, X_smooth2, P_smooth2, V_smooth2] = S_Test(
+                        SysModel,
+                        [y_win_n],
+                        [x_true_n],
+                        F=[F_current],
+                        H=[H],
+                        generate_f=False,
+                        generate_h=False,
+                        init_x_list=[x0_norm.squeeze()],
+                        init_P_list=[prior_P],
+                    )
+                    x_sm2 = X_smooth2[0]
+
+                    resid_x_cv = x_sm2[0, :] - x_true_n[0, :]
+                    cv_l = (resid_x_cv ** 2).mean()
+
+                    # RTS loss if we use the oracle F_opt
+                    [mse_arr_opt, mse_avg_opt, mse_db_opt, X_smooth_opt, P_smooth_opt, V_smooth_opt] = S_Test(
+                        SysModel,
+                        [y_win_n],
+                        [x_true_n],
+                        F=[F_opt],
+                        H=[H],
+                        generate_f=False,
+                        generate_h=False,
+                        init_x_list=[x0_norm.squeeze()],
+                        init_P_list=[prior_P],
+                    )
+                    x_sm_opt = X_smooth_opt[0]
+
+                    resid_x_cv_opt = x_sm_opt[0, :] - x_true_n[0, :]
+                    cv_l_opt = (resid_x_cv_opt ** 2).mean()
+                    fit_loss_F_current = torch.sum((F_current @ X_prev_true - X_next_true) ** 2)
+                    # cv_f_loss = torch.norm(F_current - F_opt, p='fro') ** 2
+                    cv_f_loss = torch.norm(F_current[0] - F_opt[0], p='fro') ** 2
+                    cv_loss_sum += cv_f_loss.item()
+
+                    if j == 0:
+                        print(
+                            f"[CV DEBUG] "
+                            f"F_loss={cv_f_loss.item():.6f} | "
+                            f"RTS_loss(F_current)={cv_l.item():.6f} | "
+                            f"RTS_loss(F_opt)={cv_l_opt.item():.6f}"
+                        )
+                    #     print(
+                    #         f"[CV FIT DEBUG] "
+                    #         f"fit_loss(F_base)={fit_loss_F_base.item():.6f} | "
+                    #         f"fit_loss(F_current)={fit_loss_F_current.item():.6f} | "
+                    #         f"fit_loss(F_opt)={fit_loss_F_opt.item():.6f}"
+                    #     )
+                    #     print("F_opt:")
+                    #     print(F_opt.detach().cpu())
+                    #     print("F_current:")
+                    #     print(F_current.detach().cpu())
+            cv_avg = cv_loss_sum / self.N_CV
+            scheduler.step(cv_avg)
+            if cv_avg < best_cv_loss:
+                best_cv_loss = cv_avg
+                os.makedirs(os.path.dirname(destination_path_M) or ".", exist_ok=True)
+                torch.save(model_mstep, destination_path_M)
+
+            cur_lr = self.M_optimizer.param_groups[0]['lr']
+            mean_grad = grad_norm_sum / max(self.N_B, 1)
+            mean_dF = dF_norm_sum / max(dF_norm_count, 1)
+            print(f"  [M-net (RTS) epoch {epoch:03d}] train={train_avg:.4f}  "
+                  f"cv={cv_avg:.4f}  best={best_cv_loss:.4f}  lr={cur_lr:.2e}  "
+                  f"grad_mean={mean_grad:.3e} grad_max={max_grad_norm_epoch:.3e}  "
+                  f"clip_hits={clip_hit_count}/{self.N_B} bad_grads={grad_bad_count}  "
+                  f"dF_mean={mean_dF:.3e}")
+
+        print(f"Saved M-Network (trained with RTS) to: {destination_path_M}")
+        # ------------------------------------------------------------------
+        # M-step test  (test_mstep_weather)
+        # ------------------------------------------------------------------
+
+    def test_mstep_weather_rts(
+            self, SysModel, test_input, test_target, test_x0,
+            destination_path_M,
+            num_em_iters=2,
+            print_F_every=50,
+    ):
+        device = self.device
+        m = SysModel.m
+        N_T = len(test_input)
+
+
+        model_mstep = torch.load(destination_path_M, weights_only=False,
+                                 map_location=device).eval()
+
+
+        # Track MSE per iteration across ALL sequences
+        mse_per_iter = torch.zeros(num_em_iters + 1, device=device)
+        count_per_iter = torch.zeros(num_em_iters + 1, device=device)
+        mse_per_iter_denorm = torch.zeros(num_em_iters + 1, device=device)  # NEW: denormalized MSE
+
+        final_F_list = []
+        preds_out = []
+
+        with torch.no_grad():
+            for j in range(N_T):
+                if j == 0:
+                    continue  # Skip first test sample to avoid data leakage in normalization (since it uses true state stats) del
+                y_win = test_input[j].to(device)  # [3, TAU] observations y
+                x_true = test_target[j].to(device)  # [4, TAU] true state x
+                T = y_win.size(-1)
+
+                # Compute normalization stats from TRUE STATE x
+                x_mean, x_std, x_mean0, x_std0 = _win_norm_4d(x_true, device, y_win.dtype)
+                x_mean[0] =  test_x0[j][0]
+                x_std[0]  = 4
+                y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
+                x_true_n = (x_true - x_mean) / x_std
+                F_opt = self.compute_F_opt_full_sequence(x_true_n)
+                F_base = SysModel.F_test[0].to(device) \
+                    if isinstance(SysModel.F_test, list) \
+                    else SysModel.F_test.to(device)
+                H = SysModel.H.to(device)
+
+                x0_raw = test_x0[j].to(device)
+                # Normalize x0 using stats from TRUE STATE x
+                x0_norm = (x0_raw.view(m, 1) - x_mean) / x_std
+
+                prior_P = SysModel.m2x_0.clone().detach().to(device) \
+                    if hasattr(SysModel, "m2x_0") \
+                    else torch.eye(m, device=device, dtype=y_win.dtype)
+
+                F_current = F_base.clone()
+
+                # Track F evolution and MSE per iteration for this sequence
+                F_evolution = [F_current.clone()]
+                mse_evolution = []
+                mse_evolution_denorm = []  # NEW: track denormalized MSE
+
+                for em_iter in range(num_em_iters):
+
+
+                    [mse_arr, mse_avg, mse_db, X_smooth, P_smooth, V_smooth] = S_Test(
+                        SysModel,
+                        [y_win_n],
+                        [x_true_n],
+                        F=[F_current],
+                        H=[H],
+                        generate_f=False,
+                        generate_h=False,
+                        init_x_list=[x0_norm.squeeze()],
+                        init_P_list=[prior_P],
+                    )
+                    x_sm = X_smooth[0]  # [m, T]
+
+                    x_prev_full = torch.cat([x0_norm, x_sm[:, :-1]], dim=1)
+                    x_curr_full = x_sm
+                    A1 = (x_curr_full @ x_prev_full.T) / T
+                    A2 = (x_prev_full @ x_prev_full.T) / T
+                    delta_x = x_curr_full - F_current @ x_prev_full
+                    S_delta = (delta_x @ delta_x.T) / T
+                    C_delta = (delta_x @ x_prev_full.T) / T
+                    nu = y_win_n - H @ F_current @ x_prev_full
+                    S_nu = (nu @ nu.T) / T
+
+                    z_in = torch.cat([
+                        A1.detach().reshape(-1),
+                        A2.detach().reshape(-1),
+                        S_delta.detach().reshape(-1),
+                        S_nu.detach().reshape(-1),
+                        C_delta.detach().reshape(-1),
+                        F_current.detach().reshape(-1),
+                    ], dim=0).view(1, -1)
+
+                    dF = model_mstep(z_in).view(m, m)
+                    F_current = F_current + 100*dF
+                    F_evolution.append(F_current.clone())
+                    f_mse_iter = torch.norm(F_current - F_opt, p='fro') ** 2
+                    # Compute MSE for this iteration on state x, feature 0 (normalized)
+                    x_pred_iter = x_sm[0, :]
+                    true_tavg_norm = x_true_n[0, :]
+                    mse_iter = ((x_pred_iter - true_tavg_norm) ** 2).mean()
+
+                    # NEW: Compute denormalized MSE
+                    x_pred_iter_denorm = x_pred_iter * x_std[0] + x_mean[0]
+                    true_tavg_denorm = x_true[0, :]
+                    mse_iter_denorm = ((x_pred_iter_denorm - true_tavg_denorm) ** 2).mean()
+
+                    mse_evolution.append(mse_iter.item())
+                    mse_evolution_denorm.append(mse_iter_denorm.item())
+
+                    # Accumulate for global statistics
+                    mse_per_iter[em_iter] += mse_iter.item()
+                    mse_per_iter_denorm[em_iter] += mse_iter_denorm.item()
+                    count_per_iter[em_iter] += 1
+
+                # Final RTS pass with last F_current (to match train/CV final prediction)
+
+
+                [mse_arr, mse_avg, mse_db, X_smooth2, P_smooth2, V_smooth2] = S_Test(
+                    SysModel,
+                    [y_win_n],
+                    [x_true_n],
+                    F=[F_current],
+                    H=[H],
+                    generate_f=False,
+                    generate_h=False,
+                    init_x_list=[x0_norm.squeeze()],
+                    init_P_list=[prior_P],
+                )
+                x_sm2 = X_smooth2[0]
+
+                # Denormalize full x prediction [m, T]
+                x_sm2_denorm = x_sm2.clone()
+                for i in range(m):
+                    x_sm2_denorm[i, :] = x_sm2[i, :] * x_std[i] + x_mean[i]
+                f_mse_final = torch.norm(F_current - F_opt, p='fro') ** 2
+                # print(f"      F error vs F_opt: {f_mse_final.item():.6e}")
+                preds_out.append({
+                    "seq_index": j,
+                    "x_pred_norm": x_sm2.detach().cpu(),
+                    "x_true_norm": x_true_n.detach().cpu(),
+                    "x_pred_denorm": x_sm2_denorm.detach().cpu(),  # NEW: full [m, T]
+                    "x_true_denorm": x_true[0, :].detach().cpu(),  # tavg only
+                })
+
+                # Final test MSE on state x, feature 0 (normalized)
+                pred_tavg_norm = x_sm2[0, :]
+                true_tavg_norm = x_true_n[0, :]
+                mse_final = ((pred_tavg_norm - true_tavg_norm) ** 2).mean()
+
+                # NEW: Final denormalized MSE
+                pred_tavg_denorm = x_sm2_denorm[0, :]
+                true_tavg_denorm = x_true[0, :]
+                mse_final_denorm = ((pred_tavg_denorm - true_tavg_denorm) ** 2).mean()
+
+                mse_per_iter[num_em_iters] += mse_final.item()
+                mse_per_iter_denorm[num_em_iters] += mse_final_denorm.item()
+                count_per_iter[num_em_iters] += 1
+
+                final_F_list.append(F_current.detach().clone())
+
+                # Print F evolution every print_F_every windows
+                # if j % print_F_every == 0:
+                #     print(f"  [test window {j:04d}/{N_T}]")
+                #     for it in range(num_em_iters):
+                #         print(
+                #             f"    After EM iter {it + 1}: MSE={mse_evolution[it]:.6e} (norm) "
+                #             f"/ {mse_evolution_denorm[it]:.6e} (denorm) "
+                #             f"({10 * torch.log10(torch.tensor(mse_evolution[it]) + 1e-12):.2f} dB)"
+                #         )
+                #         print(f"      Updated F matrix:\n{F_evolution[it + 1].cpu().numpy()}")
+
+        # Average MSE per iteration (only where computed)
+        mean_mse = torch.zeros(num_em_iters + 1, device=device)
+        mean_mse_denorm = torch.zeros(num_em_iters + 1, device=device)  # NEW
+        for k in range(num_em_iters + 1):
+            if count_per_iter[k] > 0:
+                mean_mse[k] = mse_per_iter[k] / count_per_iter[k]
+                mean_mse_denorm[k] = mse_per_iter_denorm[k] / count_per_iter[k]  # NEW
+
+        mean_mse_db = 10 * torch.log10(mean_mse + 1e-12)
+        mean_mse_db_denorm = 10 * torch.log10(mean_mse_denorm + 1e-12)  # NEW
+
+        print("\n[M-Network TEST] Mean MSE per EM iteration (across all test windows):")
+        for k in range(num_em_iters + 1):
+            print(f"  After EM iter {k + 1}: MSE={mean_mse[k].item():.6e} (norm) / "
+                  f"{mean_mse_denorm[k].item():.6e} °C² (denorm)  "
+                  f"({mean_mse_db[k].item():.2f} dB / {mean_mse_db_denorm[k].item():.2f} dB)")
+
+        return mean_mse, mean_mse_db, final_F_list, preds_out, mean_mse_denorm, mean_mse_db_denorm
     # ------------------------------------------------------------------
     # M-step test  (test_mstep_weather)
     # ------------------------------------------------------------------
@@ -727,12 +1348,19 @@ class PipelineWeather:
 
         with torch.no_grad():
             for j in range(N_T):
+                if j == 0:
+                    continue  # Skip first test sample to avoid data leakage in normalization (since it uses true state stats) del
                 y_win  = test_input[j].to(device)   # [3, TAU] observations y
                 x_true = test_target[j].to(device)  # [4, TAU] true state x
                 T      = y_win.size(-1)
 
                 # Compute normalization stats from TRUE STATE x
                 x_mean, x_std, x_mean0, x_std0 = _win_norm_4d(x_true, device, y_win.dtype)
+                prev_x_mean, prev_x_std, _, _ = _win_norm_4d(test_target[j-1], device, y_win.dtype)  # del
+                x_mean[0] = prev_x_mean[0]  # Use the mean of
+                x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                # x_mean[0] =  test_x0[j][0]
+                # x_std[0]  = 4
                 y_win_n  = (y_win  - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
                 x_true_n = (x_true - x_mean) / x_std
 
@@ -759,8 +1387,9 @@ class PipelineWeather:
                 for em_iter in range(num_em_iters):
                     self.model.update_F(F_current)
                     self.model.InitSequence(x0_norm.clone(), T)
-                    self.model.init_hidden()
                     self.model.prior_Sigma = prior_P
+                    self.model.init_hidden()
+
 
                     x_fwd = torch.stack(
                         [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -817,8 +1446,9 @@ class PipelineWeather:
                 # Final RTS pass with last F_current (to match train/CV final prediction)
                 self.model.update_F(F_current)
                 self.model.InitSequence(x0_norm.clone(), T)
-                self.model.init_hidden()
                 self.model.prior_Sigma = prior_P
+                self.model.init_hidden()
+
 
                 x_fwd2 = torch.stack(
                     [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -956,12 +1586,19 @@ class PipelineWeather:
 
                 for _ in range(batch_size):
                     idx   = random.randint(0, N_E - 1)
+                    if idx == 0:
+                        continue  # Skip first batch to avoid data leakage in normalization (since it uses true state stats) del
                     y_win = train_input[idx].to(device)   # [3, TAU] observations y
                     x_true = train_target[idx].to(device)  # [4, TAU] true state x
                     T     = y_win.size(-1)
 
                     # Compute normalization stats from TRUE STATE x
                     x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+                    prev_x_mean, prev_x_std, _, _ = _win_norm_4d(train_target[idx-1], device, dtype)  # del
+                    x_mean[0] = prev_x_mean[0]  # Use the mean of
+                    x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                    # x_mean[0] = train_x0[idx][0]
+                    # x_std[0] = 4
                     y_win_n = (y_win - x_mean[1:]) / x_std[1:]  # Normalize obs using x[1:] stats
                     y_tgt_n = (x_true - x_mean) / x_std
 
@@ -983,8 +1620,9 @@ class PipelineWeather:
                         # Joint: NO detach on F → grad flows into RTSNet through update_F
                         self.model.update_F(F_current)
                         self.model.InitSequence(x0_norm.clone(), T)
-                        self.model.init_hidden()
                         self.model.prior_Sigma = prior_P
+                        self.model.init_hidden()
+
 
                         x_fwd = torch.stack(
                             [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -1009,15 +1647,22 @@ class PipelineWeather:
                         nu      = y_win_n - H @ F_current @ x_prev_full
                         S_nu    = (nu @ nu.T) / T
 
+                        # z_in = torch.cat([
+                        #     A1.reshape(-1),
+                        #     A2.reshape(-1),
+                        #     S_delta.reshape(-1),
+                        #     S_nu.reshape(-1),
+                        #     C_delta.reshape(-1),
+                        #     F_current.reshape(-1),
+                        # ], dim=0).view(1, -1)
                         z_in = torch.cat([
-                            A1.reshape(-1),
-                            A2.reshape(-1),
-                            S_delta.reshape(-1),
-                            S_nu.reshape(-1),
-                            C_delta.reshape(-1),
+                            A1.detach().reshape(-1),
+                            A2.detach().reshape(-1),
+                            S_delta.detach().reshape(-1),
+                            S_nu.detach().reshape(-1),
+                            C_delta.detach().reshape(-1),
                             F_current.detach().reshape(-1),
                         ], dim=0).view(1, -1)
-
                         dF  = model_mstep(z_in).view(m, m)
                         dF_norm_sum += dF.detach().norm().item()
                         dF_norm_count += 1
@@ -1034,8 +1679,9 @@ class PipelineWeather:
                     # Final RTS pass – NO detach, joint grad flows into RTSNet
                     self.model.update_F(F_current)
                     self.model.InitSequence(x0_norm.clone(), T)
-                    self.model.init_hidden()
                     self.model.prior_Sigma = prior_P
+                    self.model.init_hidden()
+
 
                     x_fwd2 = torch.stack(
                         [self.model(y_win_n[:, t], None, None, None) for t in range(T)],
@@ -1055,58 +1701,54 @@ class PipelineWeather:
 
                     batch_loss = batch_loss + total_loss / batch_size
 
-                # batch_loss.backward()
-                # if clip_grad > 0:
-                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
-                #     torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), clip_grad)
-                # rts_opt.step(); m_opt.step()
-                # train_loss_sum += batch_loss.detach().item()
                 batch_loss.backward()
-
-                rts_grads = [p.grad for p in self.model.parameters() if p.grad is not None]
-                m_grads = [p.grad for p in model_mstep.parameters() if p.grad is not None]
-
-                if rts_grads:
-                    rts_grad_norm = torch.sqrt(sum((g.detach().norm() ** 2 for g in rts_grads))).item()
-                else:
-                    rts_grad_norm = 0.0
-
-                if m_grads:
-                    m_grad_norm = torch.sqrt(sum((g.detach().norm() ** 2 for g in m_grads))).item()
-                else:
-                    m_grad_norm = 0.0
-
-                bad_rts_grad = any(torch.isnan(g).any() or torch.isinf(g).any() for g in rts_grads)
-                bad_m_grad = any(torch.isnan(g).any() or torch.isinf(g).any() for g in m_grads)
-
-                if bad_rts_grad or bad_m_grad:
-                    bad_grad_count += 1
-                    rts_opt.zero_grad(set_to_none=True)
-                    m_opt.zero_grad(set_to_none=True)
-                    print(f"  [JOINT epoch {epoch:03d} batch {j:03d}] bad grads: RTS={bad_rts_grad} M={bad_m_grad}")
-                    continue
-
-                rts_grad_norm_sum += rts_grad_norm
-                m_grad_norm_sum += m_grad_norm
-                max_rts_grad_norm = max(max_rts_grad_norm, rts_grad_norm)
-                max_m_grad_norm = max(max_m_grad_norm, m_grad_norm)
-
                 if clip_grad > 0:
-                    rts_clip_val = torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
-                    m_clip_val = torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), clip_grad)
-
-                    if float(rts_clip_val) > clip_grad:
-                        rts_clip_hits += 1
-                    if float(m_clip_val) > clip_grad:
-                        m_clip_hits += 1
-
-                rts_opt.step()
-                m_opt.step()
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
+                    torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), clip_grad)
+                rts_opt.step(); m_opt.step()
                 train_loss_sum += batch_loss.detach().item()
+                # batch_loss.backward()
 
-
-
-
+                # rts_grads = [p.grad for p in self.model.parameters() if p.grad is not None]
+                # m_grads = [p.grad for p in model_mstep.parameters() if p.grad is not None]
+                #
+                # if rts_grads:
+                #     rts_grad_norm = torch.sqrt(sum((g.detach().norm() ** 2 for g in rts_grads))).item()
+                # else:
+                #     rts_grad_norm = 0.0
+                #
+                # if m_grads:
+                #     m_grad_norm = torch.sqrt(sum((g.detach().norm() ** 2 for g in m_grads))).item()
+                # else:
+                #     m_grad_norm = 0.0
+                #
+                # bad_rts_grad = any(torch.isnan(g).any() or torch.isinf(g).any() for g in rts_grads)
+                # bad_m_grad = any(torch.isnan(g).any() or torch.isinf(g).any() for g in m_grads)
+                #
+                # if bad_rts_grad or bad_m_grad:
+                #     bad_grad_count += 1
+                #     rts_opt.zero_grad(set_to_none=True)
+                #     m_opt.zero_grad(set_to_none=True)
+                #     print(f"  [JOINT epoch {epoch:03d} batch {j:03d}] bad grads: RTS={bad_rts_grad} M={bad_m_grad}")
+                #     continue
+                #
+                # rts_grad_norm_sum += rts_grad_norm
+                # m_grad_norm_sum += m_grad_norm
+                # max_rts_grad_norm = max(max_rts_grad_norm, rts_grad_norm)
+                # max_m_grad_norm = max(max_m_grad_norm, m_grad_norm)
+                #
+                # if clip_grad > 0:
+                #     rts_clip_val = torch.nn.utils.clip_grad_norm_(self.model.parameters(), clip_grad)
+                #     m_clip_val = torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), clip_grad)
+                #
+                #     if float(rts_clip_val) > clip_grad:
+                #         rts_clip_hits += 1
+                #     if float(m_clip_val) > clip_grad:
+                #         m_clip_hits += 1
+                #
+                # rts_opt.step()
+                # m_opt.step()
+                # train_loss_sum += batch_loss.detach().item()
 
             train_avg = train_loss_sum / self.N_B
 
@@ -1115,11 +1757,18 @@ class PipelineWeather:
             cv_loss_sum = 0.0
             with torch.no_grad():
                 for j in range(N_CV):
+                    if j == 0:
+                        continue  # Skip first CV sample to avoid data leakage in normalization (since it uses true state stats) del
                     y_win = cv_input[j].to(device)
                     y_tgt = cv_target[j].to(device)
                     T     = y_win.size(-1)
 
                     x_mean, x_std, _, _ = _win_norm_4d(y_tgt, device, dtype)
+                    prev_x_mean, prev_x_std, _, _ = _win_norm_4d(cv_target[j-1], device, dtype)  # del
+                    x_mean[0] = prev_x_mean[0]  # Use the mean of
+                    x_std[0] =  prev_x_std[0]  # Use the std of the previous target for normalization del
+                    # x_mean[0] = cv_x0[j][0]
+                    # x_std[0] = 4
                     y_win_n = (y_win - x_mean[1:]) / x_std[1:]
                     y_tgt_n = (y_tgt - x_mean) / x_std
 
@@ -1134,8 +1783,9 @@ class PipelineWeather:
                     for em_iter in range(num_em_iters):
                         self.model.update_F(F_current)
                         self.model.InitSequence(x0_norm.clone(), T)
-                        self.model.init_hidden()
                         self.model.prior_Sigma = prior_P
+                        self.model.init_hidden()
+
 
                         x_fwd = torch.stack(
                             [self.model(y_win_n[:, t], None, None, None) for t in range(T)],

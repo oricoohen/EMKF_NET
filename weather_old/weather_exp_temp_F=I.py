@@ -80,11 +80,11 @@ R          = 0.05 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("RTSNet/weather/temptau_10", exist_ok=True)
-path_results_rts        = "RTSNet/weather_temp/tau_10/rtsnet_model.pth"
-path_results_m          = "RTSNet/weather_temp/tau_10_/m_network.pth"
-path_results_rts_joint  = "RTSNet/weather_temp/tau_10/rtsnet_joint.pth"
-path_results_m_joint    = "RTSNet/weather_temp/tau_10/m_network_joint.pth"
+os.makedirs("../RTSNet/weather/temptau_10", exist_ok=True)
+path_results_rts        = "../RTSNet/weather_temp/tau_10/rtsnet_model.pth"
+path_results_m          = "../RTSNet/weather_temp/tau_10_/m_network.pth"
+path_results_rts_joint  = "../RTSNet/weather_temp/tau_10/rtsnet_joint.pth"
+path_results_m_joint    = "../RTSNet/weather_temp/tau_10/m_network_joint.pth"
 
 # ======================================================
 # ARGS
@@ -818,7 +818,7 @@ glued_results = plot_glued_temperature_predictions(
     emkf_preds=all_emkf_smooth_x,
     test_target=test_target,
     test_x0=test_x0,
-    save_path="glued_predictions_120days.png",  # Changed filename
+    save_path="../glued_predictions_120days.png",  # Changed filename
 )
 
 if glued_results is not None:
@@ -826,7 +826,7 @@ if glued_results is not None:
     # Auto-open the plot file
     import subprocess
     import sys
-    plot_path = os.path.abspath("glued_predictions_120days.png")
+    plot_path = os.path.abspath("../glued_predictions_120days.png")
     try:
         if sys.platform == 'win32':
             os.startfile(plot_path)

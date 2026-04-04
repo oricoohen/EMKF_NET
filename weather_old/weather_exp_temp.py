@@ -82,17 +82,17 @@ R          = 0.05 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("RTSNet/weather/Tel Avivtemptau_10", exist_ok=True)
-path_results_rts        = "RTSNet/weather_temp/tau_10/Tel Avivrtsnet_model.pth"
-path_results_m          = "RTSNet/weather_temp/tau_10_/Tel Avivm_network.pth"
-path_results_rts_joint  = "RTSNet/weather_temp/tau_10/Tel Avivrtsnet_joint.pth"
-path_results_m_joint    = "RTSNet/weather_temp/tau_10/Tel Avivm_network_joint.pth"
-
+os.makedirs("../RTSNet/weather/Tel Avivtemptau_10", exist_ok=True)
+path_results_rts        = "../RTSNet/weather_temp/tau_10/check_prev_norm_seq_jersulam_rtsnet_model.pth"
+path_results_m          = "../RTSNet/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network.pth"
+path_results_rts_joint  = "../RTSNet/weather_temp/tau_10/checkprev_norm_seq_jersulam_joint.pth"
+path_results_m_joint    = "../RTSNet/weather_temp/tau_10/checkprev_norm_seq_jersulam_network_joint.pth"
+destination_path_M_rts = "../RTSNet/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network_with_rts.pth"
 # ======================================================
 # ARGS
 # =====================================================
 args          = config.general_settings()
-args.n_steps  = 200      # Increased from 150: more epochs for M-Network training
+args.n_steps  = 100      # Increased from 150: more epochs for M-Network training
 args.n_batch  = 15       # Increased from 5: more batches per epoch
 args.lr       = 1e-4
 args.wd       = 1e-3
@@ -366,6 +366,104 @@ RTSNet_Pipeline.setssModel(sys_model)
 RTSNet_Pipeline.setModel(RTSNet_model, args)
 RTSNet_Pipeline.setTrainingParams(args)
 
+############################################################################################ check the F
+
+print("\n" + "=" * 60)
+print("CHECK: Optimal F for 20 consecutive test sequences")
+print("=" * 60)
+
+def compute_F_opt_full_sequence(x_seq, ridge=1e-6):
+    """
+    x_seq: [m, T]
+
+    Solves:
+        F_opt = argmin_F sum_t ||F x(t-1) - x(t)||^2
+    over all transitions inside the sequence.
+
+    Returns:
+        F_opt: [m, m]
+    """
+    m_local, T_local = x_seq.shape
+
+    X_prev = x_seq[:, :-1]   # [m, T-1]
+    X_next = x_seq[:, 1:]    # [m, T-1]
+
+    try:
+        # Solve X_prev^T @ F^T ≈ X_next^T
+        F_opt = torch.linalg.lstsq(X_prev.T, X_next.T).solution.T
+    except RuntimeError:
+        # fallback with ridge
+        XXt = X_prev @ X_prev.T
+        reg = ridge * torch.eye(m_local, device=x_seq.device, dtype=x_seq.dtype)
+        F_opt = (X_next @ X_prev.T) @ torch.linalg.inv(XXt + reg)
+
+    return F_opt
+
+
+def compute_F_loss(x_seq, F):
+    """
+    x_seq: [m, T]
+    F:    [m, m]
+
+    Returns:
+        sum_t ||F x(t-1) - x(t)||^2
+    """
+    X_prev = x_seq[:, :-1]   # [m, T-1]
+    X_next = x_seq[:, 1:]    # [m, T-1]
+    residual = F @ X_prev - X_next
+    loss = torch.sum(residual ** 2)
+    return loss
+
+
+NUM_SEQ_TO_CHECK = min(20, len(test_target))
+all_F_opt_test = []
+R=1
+for seq_idx in range(NUM_SEQ_TO_CHECK):
+    x_seq = test_target[seq_idx].to(device).to(dtype)   # [m, T]
+    if R==1:
+        R=2
+        print('x_seq', x_seq)
+    F_opt = compute_F_opt_full_sequence(x_seq)
+    loss_opt = compute_F_loss(x_seq, F_opt).item()
+
+    all_F_opt_test.append(F_opt.detach().cpu())
+
+    print("-" * 60)
+    print(f"Sequence {seq_idx}")
+    print(f"x_seq shape: {tuple(x_seq.shape)}")
+    print(f"Optimal loss: {loss_opt:.6f}")
+    print("F_opt:")
+    print(F_opt)
+
+torch.save(all_F_opt_test, "../F_opt_first_20_test_sequences.pt")
+print("\nSaved F_opt list to: F_opt_first_20_test_sequences.pt")
+print("=" * 60)
+K
+
+##########################################################################################
+
+# RTSNet_Pipeline.train_emkalmannet_weather_rts(sys_model,cv_input, cv_target, cv_x0,
+#             train_input, train_target, train_x0,
+#             destination_path_M_rts,
+#             num_em_iters=3, alpha=(0.05, 0.15, 0.85),
+#             lambda_F=1e-2,
+#             lambda_f_loss=10.0,
+#             f_loss=True,
+#             clip_grad=1.0,)
+
+
+
+RTSNet_Pipeline.test_mstep_weather_rts(
+             sys_model, test_input, test_target, test_x0,
+            destination_path_M_rts,
+            num_em_iters=3,
+            print_F_every=50,
+    )
+
+
+
+############################################################################################
+
 # ======================================================
 # STEP 1 – TRAIN RTSNet
 # ======================================================
@@ -396,12 +494,12 @@ print("=" * 60)
 #     train_input=train_input, train_target=train_target, train_x0=train_x0,
 #     destination_path_M=path_results_m,
 #     destination_path_RTS=path_results_rts,
-#     num_em_iters=2,
+#     num_em_iters=1,
 #     alpha=(0.05, 0.15, 0.85),
-#     lambda_F=1.0,
+#     lambda_F=0.01,
 #     generate_f=False,
 #     generate_h=False,
-#     clip_grad=1.0,
+#     clip_grad=3.0,
 # )
 print("Saved M-Network model to:", path_results_m)
 
@@ -422,8 +520,8 @@ print("=" * 60)
 #     path_m_out=path_results_m_joint,
 #     batch_size=10,
 #     num_em_iters=2,
-#     lambda_F=1e-3,
-#     clip_grad=1.0,
+#     lambda_F=1e-5,
+#     clip_grad=3.0,
 #     lr_rts=1e-4, lr_m=1e-4,
 #     wd_rts=1e-5, wd_m=1e-5,
 # )
@@ -437,25 +535,25 @@ print("\n" + "=" * 60)
 print("STEP 3B: TRAIN BiGRU Baseline")
 print("=" * 60)
 
-path_results_bigru = "RTSNet/weather_temp/tau_10/bigru_model.pth"
+path_results_bigru = "../RTSNet/weather_temp/tau_10/bigru_model.pth"
 
 bigru_model = BiGRUBaseline(input_size=7, hidden_size=64, num_layers=2, dropout=0.1)
 
-# train_bigru(
-#     model=bigru_model,
-#     train_input=train_input,
-#     train_target=train_target,
-#     train_x0=train_x0,
-#     cv_input=cv_input,
-#     cv_target=cv_target,
-#     cv_x0=cv_x0,
-#     save_path=path_results_bigru,
-#     n_epochs=200,
-#     batch_size=32,
-#     lr=1e-3,
-#     wd=1e-4,
-#     device=device,
-# )
+train_bigru(
+    model=bigru_model,
+    train_input=train_input,
+    train_target=train_target,
+    train_x0=train_x0,
+    cv_input=cv_input,
+    cv_target=cv_target,
+    cv_x0=cv_x0,
+    save_path=path_results_bigru,
+    n_epochs=200,
+    batch_size=32,
+    lr=1e-3,
+    wd=1e-4,
+    device=device,
+)
 
 print("Saved BiGRU model to:", path_results_bigru)
 
@@ -548,7 +646,9 @@ with torch.no_grad():
         T      = y_win.size(-1)
 
         # Get normalization stats
-        x_mean, x_std, x_mean0, x_std0 = _win_norm_4d(x_true, device, dtype)
+        x_mean, x_std,_,_ = _win_norm_4d(x_true, device, dtype)
+        x_mean[0] = test_x0[j][0]
+        x_std[0] = 4
         y_win_n = (y_win - x_mean[1:]) / x_std[1:]
         x_true_n = (x_true - x_mean) / x_std
 
@@ -722,6 +822,8 @@ for idx in range(len(test_input)):
 
     # Normalize
     x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
+    x_mean[0] = test_x0[idx][0]
+    x_std[0] = 4
     y_win_n = (y_win - x_mean[1:]) / x_std[1:]
     x_true_n = (x_true - x_mean) / x_std
 
@@ -1015,6 +1117,7 @@ def plot_glued_temperature_predictions(
     mnet_preds,
     emkf_opt_preds,
     naive_opt_preds,
+    bigru_preds,
     test_target,
     test_x0,
     save_path="glued_predictions.png",
@@ -1034,6 +1137,7 @@ def plot_glued_temperature_predictions(
         mnet_preds: M-Network predictions list of dicts (from test_mstep_weather)
         emkf_opt_preds: EMKF (F_opt) smoothed trajectories list [m, T] per window (denormalized)
         naive_opt_preds: Naive (F_opt) trajectories list [m, T] per window (denormalized)
+        bigru_preds: BiGRU predictions list [m, T] per window (denormalized)
         test_target: List of test state windows [m, TAU]
         test_x0: List of initial states [m]
         save_path: Path to save the figure
@@ -1054,6 +1158,7 @@ def plot_glued_temperature_predictions(
     glued_emkf_opt = []
     glued_naive_opt = []
     glued_naive = []
+    glued_bigru = []
 
     # Glue each window
     for w_idx in range(start_idx, start_idx + num_windows):
@@ -1065,7 +1170,8 @@ def plot_glued_temperature_predictions(
 
         # Get normalization stats for this window
         x_mean, x_std, _, _ = _win_norm_4d(x_true, device, dtype)
-
+        x_mean[0] = test_x0[j][0]
+        x_std[0] = 4
         # TRUE trajectory (raw, already denormalized)
         true_tavg_real = x_true[0, :]
         glued_true.append(true_tavg_real.detach().cpu().numpy())
@@ -1123,6 +1229,12 @@ def plot_glued_temperature_predictions(
         naive_tavg_real = np.full(tau, x0_tavg_raw)
         glued_naive.append(naive_tavg_real)
 
+        # BiGRU prediction
+        if w_idx < len(bigru_preds):
+            bigru_pred_denorm = bigru_preds[w_idx]
+            bigru_tavg_real = bigru_pred_denorm[0, :]
+            glued_bigru.append(bigru_tavg_real.numpy() if hasattr(bigru_tavg_real, 'numpy') else bigru_tavg_real)
+
     # Concatenate all windows
     true_curve = np.concatenate(glued_true) if glued_true else None
     rtsnet_curve = np.concatenate(glued_rtsnet) if glued_rtsnet else None
@@ -1131,6 +1243,7 @@ def plot_glued_temperature_predictions(
     emkf_opt_curve = np.concatenate(glued_emkf_opt) if glued_emkf_opt else None
     naive_opt_curve = np.concatenate(glued_naive_opt) if glued_naive_opt else None
     naive_curve = np.concatenate(glued_naive) if glued_naive else None
+    bigru_curve = np.concatenate(glued_bigru) if glued_bigru else None
 
     if true_curve is None:
         print("  ERROR: No true data to plot!")
@@ -1154,10 +1267,13 @@ def plot_glued_temperature_predictions(
         ax.plot(x_axis, rtsnet_curve, 'b-', linewidth=1.5, label='RTSNet', alpha=0.7)
 
     if mnet_curve is not None:
-        ax.plot(x_axis, mnet_curve, 'r-', linewidth=1.5, label='M-Network', alpha=0.7)
+        ax.plot(x_axis, mnet_curve, 'r-', linewidth=1.5, label='M-Network (Joint)', alpha=0.7)
 
     if emkf_opt_curve is not None:
         ax.plot(x_axis, emkf_opt_curve, 'g-', linewidth=1.5, label='EMKF (F_opt)', alpha=0.7)
+
+    if bigru_curve is not None:
+        ax.plot(x_axis, bigru_curve, 'orange', linewidth=1.5, label='BiGRU', alpha=0.7)
 
     if naive_opt_curve is not None:
         ax.plot(x_axis, naive_opt_curve, 'c--', linewidth=1.5, label='Naive (F_opt)', alpha=0.8)
@@ -1192,6 +1308,7 @@ def plot_glued_temperature_predictions(
         'emkf_opt': emkf_opt_curve,
         'naive_opt': naive_opt_curve,
         'naive': naive_curve,
+        'bigru': bigru_curve,
     }
 
 
@@ -1204,7 +1321,7 @@ print("=" * 60)
 
 # Calculate how many windows we can actually plot
 max_windows = min(len(test_target), len(rts_preds), len(all_rts_classic_smooth_x),
-                  len(pred_dicts), len(all_emkf_smooth_x))
+                  len(pred_dicts), len(all_emkf_smooth_x), len(bigru_preds))
 num_plot_windows = min(12, max_windows)  # Changed from 6 to 12 (120 days)
 
 glued_results = plot_glued_temperature_predictions(
@@ -1215,9 +1332,10 @@ glued_results = plot_glued_temperature_predictions(
     mnet_preds=pred_dicts,
     emkf_opt_preds=all_rolling_emkf_smooth_x,
     naive_opt_preds=all_rolling_naive_f_x,
+    bigru_preds=bigru_preds,
     test_target=test_target,
     test_x0=test_x0,
-    save_path="glued_predictions_120days.png",  # Changed filename
+    save_path="../glued_predictions_120days.png",  # Changed filename
 )
 
 if glued_results is not None:
@@ -1225,7 +1343,7 @@ if glued_results is not None:
     # Auto-open the plot file
     import subprocess
     import sys
-    plot_path = os.path.abspath("glued_predictions_120days.png")
+    plot_path = os.path.abspath("../glued_predictions_120days.png")
     try:
         if sys.platform == 'win32':
             os.startfile(plot_path)
@@ -1435,7 +1553,7 @@ for seq_idx in range(num_sequences_to_plot):
                 bbox=dict(boxstyle='round', facecolor='lightcoral', alpha=0.7))
 
 plt.tight_layout()
-comparison_plot_path = "mnet_bigru_comparison.png"
+comparison_plot_path = "../mnet_bigru_comparison.png"
 plt.savefig(comparison_plot_path, dpi=150, bbox_inches='tight')
 print(f"✓ Comparison plot saved to: {os.path.abspath(comparison_plot_path)}")
 
