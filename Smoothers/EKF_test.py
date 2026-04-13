@@ -3,7 +3,7 @@ import torch
 import time
 from Smoothers.EKF import ExtendedKalmanFilter
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def EKFTest(SysModel, test_input, test_target, F =None, allStates=True, randomInit = False,test_init=None):
 
     N_T = test_target.size()[0]
@@ -12,11 +12,14 @@ def EKFTest(SysModel, test_input, test_target, F =None, allStates=True, randomIn
     loss_fn = nn.MSELoss(reduction='mean')
     
     # MSE [Linear]
-    MSE_EKF_linear_arr = torch.empty(N_T)
+    MSE_EKF_linear_arr = torch.empty(N_T, device=device)
     start = time.time()
     EKF = ExtendedKalmanFilter(SysModel)
 
-    KG_array = torch.zeros_like(EKF.KG_array)
+    # Check if per-sequence H matrices are available
+    has_H_test = hasattr(SysModel, 'H_test') and SysModel.H_test is not None
+
+    KG_array = torch.zeros_like(EKF.KG_array, device=device)  # Initialize KG_array to accumulate values across sequences
     # Allocate empty list for output
     EKF_out = []
     j=0
@@ -28,6 +31,15 @@ def EKFTest(SysModel, test_input, test_target, F =None, allStates=True, randomIn
             SysModel.F = F[F_index]
             SysModel.update_f(F[F_index])
             EKF.f = SysModel.f
+
+        # Use per-sequence H matrix if available
+        if has_H_test:
+            SysModel.H = SysModel.H_test[j]
+            # Update the observation matrix in SysModel
+            if hasattr(SysModel, 'H_T'):
+                SysModel.H_T = SysModel.H.T
+            # Recreate EKF with updated H matrix
+            EKF = ExtendedKalmanFilter(SysModel)
 
         if(randomInit):
             EKF.InitSequence(torch.unsqueeze(test_init[j,:],1), SysModel.m2x_0)

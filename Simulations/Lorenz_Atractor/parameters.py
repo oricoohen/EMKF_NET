@@ -1,16 +1,17 @@
 import torch
 import math
-torch.pi = torch.acos(torch.zeros(1)).item() * 2 # which is 3.1415927410125732
-from torch import autograd
 
+from torch import autograd
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.pi = torch.acos(torch.zeros(1,device=device)).item() * 2 # which is 3.1415927410125732
 #########################
 ### Design Parameters ###
 #########################
 m = 3
 n = 3
 variance = 0
-m1x_0 = torch.ones(m, 1) 
-m2x_0 = 0 * 0 * torch.eye(m)
+m1x_0 = torch.ones(m, 1, device=device)
+m2x_0 = 0 * 0 * torch.eye(m, device=device)
 
 ### Decimation
 delta_t_gen =  1e-5
@@ -31,23 +32,23 @@ pitch = pitch_deg * (math.pi/180)
 RX = torch.tensor([
                 [1, 0, 0],
                 [0, math.cos(roll), -math.sin(roll)],
-                [0, math.sin(roll), math.cos(roll)]])
+                [0, math.sin(roll), math.cos(roll)]],device=device)
 RY = torch.tensor([
                 [math.cos(pitch), 0, math.sin(pitch)],
                 [0, 1, 0],
-                [-math.sin(pitch), 0, math.cos(pitch)]])
+                [-math.sin(pitch), 0, math.cos(pitch)]],device=device)
 RZ = torch.tensor([
                 [math.cos(yaw), -math.sin(yaw), 0],
                 [math.sin(yaw), math.cos(yaw), 0],
-                [0, 0, 1]])
+                [0, 0, 1]],device=device)
 
 RotMatrix = torch.mm(torch.mm(RZ, RY), RX)
 
 ### Auxiliar MultiDimensional Tensor B and C (they make A --> Differential equation matrix)
-B = torch.tensor([[[0,  0, 0],[0, 0, -1],[0,  1, 0]], torch.zeros(m,m), torch.zeros(m,m)]).float()
+B = torch.tensor([[[0,  0, 0],[0, 0, -1],[0,  1, 0]], torch.zeros(m,m, device=device), torch.zeros(m,m, device=device)], device=device).float()
 C = torch.tensor([[-10, 10,    0],
                   [ 28, -1,    0],
-                  [  0,  0, -8/3]]).float()
+                  [  0,  0, -8/3]], device=device).float()
 
 ######################################################
 ### State evolution function f for Lorenz Atractor ###
@@ -57,7 +58,7 @@ def f_gen(x):
     BX = torch.reshape(torch.matmul(B, x),(m,m))
     A = torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C)  
     # Taylor Expansion for F    
-    F = torch.eye(m)
+    F = torch.eye(m, device=device)
     for j in range(1,J+1):
         F_add = (torch.matrix_power(A*delta_t_gen, j)/math.factorial(j))
         F = torch.add(F, F_add)
@@ -70,7 +71,7 @@ def f(x):
     A = (torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C))
     
     # Taylor Expansion for F    
-    F = torch.eye(m)
+    F = torch.eye(m, device=device)
     for j in range(1,J+1):
         F_add = (torch.matrix_power(A*delta_t, j)/math.factorial(j))
         F = torch.add(F, F_add)
@@ -84,7 +85,7 @@ def fInacc(x):
     A = torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C)
     
     # Taylor Expansion for F    
-    F = torch.eye(m)
+    F = torch.eye(m, device=device)
     for j in range(1,J_mod+1):
         F_add = (torch.matrix_power(A*delta_t, j)/math.factorial(j))
         F = torch.add(F, F_add)
@@ -96,7 +97,7 @@ def fRotate(x):
     BX = torch.reshape(torch.matmul(B, x),(m,m)) 
     A = (torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C))  
     # Taylor Expansion for F    
-    F = torch.eye(m)
+    F = torch.eye(m, device=device)
     for j in range(1,J+1):
         F_add = (torch.matrix_power(A*delta_t, j)/math.factorial(j))
         F = torch.add(F, F_add)
@@ -106,7 +107,7 @@ def fRotate(x):
 ##################################################
 ### Observation function h for Lorenz Atractor ###
 ##################################################
-H_design = torch.eye(n)
+H_design = torch.eye(n, device=device)
 H_Rotate = torch.mm(RotMatrix,H_design)
 H_Rotate_inv = torch.inverse(H_Rotate)
 
@@ -127,18 +128,18 @@ def hRotate(x):
 Q_non_diag = False
 R_non_diag = False
 
-Q_structure = torch.eye(m)
-R_structure = torch.eye(n)
+Q_structure = torch.eye(m, device=device)
+R_structure = torch.eye(n, device=device)
 
 if(Q_non_diag):
     q_d = 1
     q_nd = 1/2
-    Q = torch.tensor([[q_d, q_nd, q_nd],[q_nd, q_d, q_nd],[q_nd, q_nd, q_d]])
+    Q = torch.tensor([[q_d, q_nd, q_nd],[q_nd, q_d, q_nd],[q_nd, q_nd, q_d]], device=device)
 
 if(R_non_diag):
     r_d = 1
     r_nd = 1/2
-    R = torch.tensor([[r_d, r_nd, r_nd],[r_nd, r_d, r_nd],[r_nd, r_nd, r_d]])
+    R = torch.tensor([[r_d, r_nd, r_nd],[r_nd, r_d, r_nd],[r_nd, r_nd, r_d]], device=device)
 
 ##################################
 ### Utils for non-linear cases ###

@@ -37,7 +37,7 @@ def generate_random_F_matrices(num_F: int, delta_ = 0.5, F_init=None):
         F_mats.append(F_i.clone())
     return F_mats
 
-def rotate_F(F, i=0, j=1, theta=0.78, many=True, randomit=True):
+def rotate_F(F, i=0, j=1, theta=0.2, many=True, randomit=True):
     """
     Apply Givens rotation to F (or list of F) in (i,j) plane.
     """
@@ -87,9 +87,10 @@ def make_rotated_h_nonlinear(h_nonlinear, phi_deg: float = 30.0):
     return partial(h_rotate_apply, h_base=h_nonlinear, phi_deg=phi_deg)
 
 
+
 class SystemModel:
 
-    def __init__(self, f, Q, h, R, T, T_test, m, n, prior_Q=None, prior_Sigma=None, prior_S=None):
+    def __init__(self, f, Q, h, R, T, T_test, m, n,H=None, prior_Q=None, prior_Sigma=None, prior_S=None):
 
         ####################
         ### Motion Model ###
@@ -101,6 +102,7 @@ class SystemModel:
         ### Observation Model ###
         #########################
         self.h = h
+        self.H = H
         self.n = n
         self.R = R
         ################
@@ -170,6 +172,20 @@ class SystemModel:
             return y_col.view(self.m)  # <-- 1-D [m]
 
         self.f = f_linear_1d
+
+    def update_h(self, H):
+        self.H   = H
+        self.H_T = H.T
+        def h_linear_1d(x: torch.Tensor) -> torch.Tensor:
+            # accept [m] or [m,1]; always RETURN [m]
+            if x.dim() == 2:
+                x_col = x  # [n,1]
+            else:
+                x_col = x.view(self.n, 1)  # [n,1]
+            y_col = H @ x_col  # [n,1]
+            return y_col.view(self.n)  # <-- 1-D [n]
+
+        self.h = h_linear_1d
     #########################
     ### Generate Sequence ###
     #########################
@@ -186,23 +202,23 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        q2 = torch.tensor(0.01,device=self.F.device,dtype=self.F.dtype)
-        r2 = torch.tensor(1., device=self.F.device, dtype=self.F.dtype)
-
-        lam_q = torch.rsqrt(q2)
-        lam_r = torch.rsqrt(r2)
-
-        lam_vec_q = lam_q.expand(self.m)
-        lam_vec_r = lam_r.expand(self.n)
-
-        q_dist = Exponential(lam_vec_q)
-        r_dist = Exponential(lam_vec_r)
+        # q2 = torch.tensor(0.01,device=self.F.device,dtype=self.F.dtype)
+        # r2 = torch.tensor(1., device=self.F.device, dtype=self.F.dtype)
+        #
+        # lam_q = torch.rsqrt(q2)
+        # lam_r = torch.rsqrt(r2)
+        #
+        # lam_vec_q = lam_q.expand(self.m)
+        # lam_vec_r = lam_r.expand(self.n)
+        #
+        # q_dist = Exponential(lam_vec_q)
+        # r_dist = Exponential(lam_vec_r)
         # Generate Sequence Iteratively
         for t in range(0, T):
 
             ########################
             #### State Evolution ###
-            ########################   
+            ########################
             if torch.equal(Q_gen,torch.zeros_like(Q_gen)):# No noise
                  xt = self.f(self.x_prev)   
             elif self.m == 1: # 1 dim noise
@@ -263,7 +279,7 @@ class SystemModel:
     ######################
     ### Generate Batch ###
     ######################
-    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True, H_gen=False,x0_list = None, F_init=None, H_init=None):
+    def GenerateBatch(self, size, T, delta = 0.5, randomInit=False, randomLength=False,F_gen=True, H_gen=True,x0_list = None, F_init=None, H_init=None):
         if(randomLength):
             # Allocate Empty list for Input
             self.Input = []
@@ -289,17 +305,21 @@ class SystemModel:
         if H_gen == True:
             from Simulations.Linear_sysmdl import generate_random_H_matrices
             H_matrices = generate_random_H_matrices(size // 10 + 1, obs_dim=self.n, state_dim=self.m, H_init=H_init)
+            print('ori it is all ok you are the bext"')
         else:
             # For non-linear h, H_matrices will be None or can be a placeholder
             H_matrices = H_gen
 
         for i in range(0, size):
-            index_F = i // 10
-            self.F = F_matrices[index_F]
-            self.F_T = F_matrices[index_F].T
-            self.update_f(F_matrices[index_F])
+            index_F = i // 10 #final exp
+            # self.F = F_matrices[index_F]
+            # self.F_T = F_matrices[index_F].T
+            # self.update_f(F_matrices[index_F])
             self.H = H_matrices[index_F]
             self.H_T = H_matrices[index_F].T
+            self.update_h(H_matrices[index_F])
+            # print(self.H)
+            # print(self.h(torch.eye(self.n, device=self.device)[1])) # test h is working
             # Generate Sequence
             ### Generate Examples
             # ---- choose init x0 for this sequence i ----ori

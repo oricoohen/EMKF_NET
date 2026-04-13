@@ -75,7 +75,106 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2,F_init=None):
     # print('ori seltaaaaaa', F_i)
     return F_matrices
 
-def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2, H_init=None):
+def build_rotation_matrix_3d(theta_x, theta_y, theta_z, device, dtype):
+    cx, sx = torch.cos(theta_x), torch.sin(theta_x)
+    cy, sy = torch.cos(theta_y), torch.sin(theta_y)
+    cz, sz = torch.cos(theta_z), torch.sin(theta_z)
+
+    Rx = torch.tensor([
+        [1, 0, 0],
+        [0, cx, -sx],
+        [0, sx, cx]
+    ], device=device, dtype=dtype)
+
+    Ry = torch.tensor([
+        [cy, 0, sy],
+        [0, 1, 0],
+        [-sy, 0, cy]
+    ], device=device, dtype=dtype)
+
+    Rz = torch.tensor([
+        [cz, -sz, 0],
+        [sz, cz, 0],
+        [0, 0, 1]
+    ], device=device, dtype=dtype)
+
+    return Rz @ Ry @ Rx
+
+def rotate_H(H, i=0, j=1, theta=0.087, many=True, randomit=False):
+    """
+    Rotate H using full 3D rotation like RTSNet paper:
+        H_rot = R @ H
+    """
+    def apply_rotation(H_single, theta):
+        device = H_single.device
+        dtype = H_single.dtype
+
+        if randomit:
+            theta_x = torch.rand(1, device=device, dtype=dtype) * theta
+            theta_y = torch.rand(1, device=device, dtype=dtype) * theta
+            theta_z = torch.rand(1, device=device, dtype=dtype) * theta
+        else:
+            theta_x = theta
+            theta_y = theta
+            theta_z = theta
+
+        R = build_rotation_matrix_3d(theta_x, theta_y, theta_z, device, dtype)
+
+        return R @ H_single
+
+    if not many:
+        if randomit:
+            theta = uniform_two_ranges(0,1)*theta
+        theta = torch.tensor(theta, device=H.device)
+        H=apply_rotation(H, theta)
+        print(H)
+        return H
+    else:
+        rotated_list = []
+        for H_i in H:
+            if randomit:
+                angle = uniform_two_ranges(0.0,1)*theta
+                angle = torch.tensor(angle, device=H[0].device)
+            else:
+                angle = torch.tensor(theta, device=H[0].device)
+            rotated_list.append(apply_rotation(H_i, angle))
+            # delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
+            # print("Deviation:", delta.item())
+        print(' a sample of the F switched ', rotated_list[2])
+        return torch.stack(rotated_list)
+def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.2, H_init=None):
+    """
+    Generate a list of random H matrices using rotation.
+    Args:
+        num_H (int): Number of random H matrices to generate.
+        obs_dim (int): Dimensionality of the observation vector.
+        state_dim (int): Dimensionality of the state vector.
+        H_init (torch.Tensor or list, optional): Initial H matrix or list of matrices. Defaults to None.
+    Returns:
+        List[torch.Tensor]: List of random observation matrices H.
+    """
+    H_matrices = []
+    if H_init is None:
+        # Default H: start with a base that isn't identity for better diversity
+        # H = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
+        H= torch.eye(3, device=device)
+    else:
+        H = H_init
+        w
+    for k in range(num_H + 1):
+        if H_init is None:
+            # For square matrices, rotate directly in observation space
+            H_i = rotate_H(H,  theta=theta, many=False, randomit=True)
+            # print('ori', H_i)
+        else:
+            H_i = rotate_H(H[k], theta=theta, many=False, randomit=True)
+            k
+        # H_i = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
+        H_matrices.append(H_i)
+    return H_matrices
+
+
+def generate_random_H_matrices_old(num_H, obs_dim=2, state_dim=2, H_init=None):
     """
     Generate a list of random H matrices using rotation.
     Args:
@@ -174,13 +273,17 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
         R[j, i] = torch.sin(theta)
         R[j, j] = torch.cos(theta)
 
-        return R @ F_single @ R.T
+        H = R @ F_single @ R.T
+        print('DEHIL',H, theta,i,j)
+        return H
 
     if not many:
         if randomit:
             theta = uniform_two_ranges(0,1)*theta
-        theta = torch.tensor(theta)
-        return apply_rotation(F, torch.tensor(theta, device=F.device), i, j)
+        theta = torch.tensor(theta, device=F.device)
+        H=apply_rotation(F, theta, i, j)
+        print(H)
+        return H
     else:
         rotated_list = []
         for F_i in F:
