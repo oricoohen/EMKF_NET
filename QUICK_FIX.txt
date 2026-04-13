@@ -1,0 +1,40 @@
+# Quick Fix Summary
+
+## Error
+```
+RuntimeError: Expected all tensors to be on the same device, but found at least two devices, cuda:0 and cpu!
+```
+
+## Quick Solution
+Added 6 lines after each `torch.load()` call in `main_lor_DT.py`:
+
+```python
+# Move data to device
+train_input_long = train_input_long.to(device)
+train_target_long = train_target_long.to(device)
+cv_input = cv_input.to(device)
+cv_target = cv_target.to(device)
+test_input = test_input.to(device)
+test_target = test_target.to(device)
+```
+
+For list-type data:
+```python
+train_input_pass2 = [x.to(device) for x in train_input_pass2] if isinstance(train_input_pass2, list) else train_input_pass2.to(device)
+```
+
+## Why
+- `torch.load()` loads data on CPU
+- Your model is on GPU
+- Operations between CPU and GPU tensors fail
+- `.to(device)` moves tensors to GPU
+
+## Applied To
+1. Main data loading (line ~109)
+2. Pass 2 full info section (line ~244)
+3. Pass 2 partial section (line ~353)
+4. Pass 2 estH section (line ~481)
+
+All changes have been applied to: `C:\Users\orico\Desktop\EMKF_NET\main_lor_DT.py`
+
+Try running your script now - the error should be resolved!

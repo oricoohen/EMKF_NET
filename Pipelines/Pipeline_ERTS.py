@@ -10118,8 +10118,9 @@ class Pipeline_ERTS:
 
                 # E-step via frozen RTSNet → x_smooth
                 self.model.InitSequence(SysModel.m1x_0, T)
-                self.model.init_hidden()
                 self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+                self.model.init_hidden()
+
 
                 x_forward = torch.empty(m, T, device=device)
                 x_smooth = torch.empty(m, T, device=device)
@@ -10167,14 +10168,15 @@ class Pipeline_ERTS:
 
                     h_loss = torch.mean((H_next - H_true) ** 2)
                     reg = lambda_H * torch.mean(deltaH_mat ** 2)
-                    total_loss_h_seq += h_loss.item() +reg
-                    H_current = H_next
+                    total_loss_h_seq += h_loss +reg
+                    H_current = H_next.clone()
                     self.model.update_H(H_current)
 
                     # E-step via frozen RTSNet → x_smooth
                     self.model.InitSequence(SysModel.m1x_0, T)
-                    self.model.init_hidden()
                     self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+                    self.model.init_hidden()
+
 
                     x_forward = torch.empty(m, T, device=device)
                     x_smooth = torch.empty(m, T, device=device)
@@ -10193,7 +10195,7 @@ class Pipeline_ERTS:
                     y_curr = y_seq  # [n, T]
 
                     x_loss = torch.mean((x_curr - x_true_seq) ** 2)
-                    total_loss_x_seq += x_loss.item()
+                    total_loss_x_seq += x_loss
                     ##########################################################
                     # # y-loss (measurement-space loss)
                     # H = SysModel.H.to(device)  # [n, m]
@@ -10217,8 +10219,8 @@ class Pipeline_ERTS:
                     # total_loss += weight * loss_em
                     # H_current = H_next
 
-                # after `for em_iter in range(num_em_iters):`
-                total_loss_seq = total_loss_h_seq + total_loss_x_seq
+                    # after `for em_iter in range(num_em_iters):`
+                    total_loss_seq += total_loss_h_seq + total_loss_x_seq
                 loss_seq_avarage = total_loss_seq / float(num_em_iters)  # average over EM iterations
                 total_loss_batch += loss_seq_avarage
             total_loss_batch = total_loss_batch / float(self.N_B)
