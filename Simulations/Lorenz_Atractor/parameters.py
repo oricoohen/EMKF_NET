@@ -56,7 +56,7 @@ C = torch.tensor([[-10, 10,    0],
 ### f_gen is for dataset generation
 def f_gen(x):
     BX = torch.reshape(torch.matmul(B, x),(m,m))
-    A = torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C)  
+    A = torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C)
     # Taylor Expansion for F    
     F = torch.eye(m, device=device)
     for j in range(1,J+1):
@@ -80,7 +80,7 @@ def f(x):
 
 ### fInacc will be fed to smoothers & RTSNet, note that the mismatch comes from delta_t and J_mod
 def fInacc(x):
-    BX = torch.reshape(torch.matmul(B, x),(m,m))
+    BX = torch.reshape(torch.matmul(B[0], x),(m,m))
     #A = torch.add(torch.einsum('nhw,wa->nh', B, x).T,C)
     A = torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C)
     
@@ -94,8 +94,8 @@ def fInacc(x):
 
 ### fInacc will be fed to smoothers & RTSNet, note that the mismatch comes from delta_t and rotation
 def fRotate(x):
-    BX = torch.reshape(torch.matmul(B, x),(m,m)) 
-    A = (torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C))  
+    BX = torch.reshape(torch.matmul(B[0], x),(m,m))
+    A = (torch.add(BX.permute(*torch.arange(BX.ndim - 1, -1, -1)),C))
     # Taylor Expansion for F    
     F = torch.eye(m, device=device)
     for j in range(1,J+1):

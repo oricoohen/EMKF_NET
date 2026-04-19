@@ -5,7 +5,7 @@ import torch
 
 from Simulations.Lorenz_Atractor.parameters import getJacobian
 
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class ExtendedKalmanFilter:
 
     def __init__(self, SystemModel):
@@ -96,10 +96,10 @@ class ExtendedKalmanFilter:
     def GenerateSequence(self, y, T):
         # Pre allocate an array for predicted state and variance
         self.H_last = None
-        self.x = torch.empty(size=[self.m, T])
-        self.sigma = torch.empty(size=[self.m, self.m, T])
+        self.x = torch.empty(size=[self.m, T], device=device)
+        self.sigma = torch.empty(size=[self.m, self.m, T], device=device)
         # Pre allocate KG array
-        self.KG_array = torch.zeros((T, self.m, self.n))
+        self.KG_array = torch.zeros((T, self.m, self.n), device=device)
         self.i = 0  # Index for KG_array alocation
 
         self.m1x_posterior = torch.squeeze(self.m1x_0)

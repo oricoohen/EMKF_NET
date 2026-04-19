@@ -350,8 +350,8 @@ elif switch == 'partial':
         #      MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_partial, cv_input, cv_target, train_input,
         #                                                    train_target, path_results_rtsnet21)
         ## Test Neural Network
-        [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
-            sys_model_partial, test_input, test_target, path_results_rtsnet21,generate_h=None,generate_f=None)
+        # [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
+        #     sys_model_partial, test_input, test_target, path_results_rtsnet21,generate_h=None,generate_f=None)
         # Save trained model
         torch.save(RTSNet_Pipeline.model, path_results_rtsnet21)
     ##################################################################################

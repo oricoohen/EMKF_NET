@@ -100,7 +100,7 @@ def build_rotation_matrix_3d(theta_x, theta_y, theta_z, device, dtype):
 
     return Rz @ Ry @ Rx
 
-def rotate_H(H, i=0, j=1, theta=0.087, many=True, randomit=False):
+def rotate_H(H,  theta=0.087, many=True, randomit=False):
     """
     Rotate H using full 3D rotation like RTSNet paper:
         H_rot = R @ H
@@ -142,7 +142,7 @@ def rotate_H(H, i=0, j=1, theta=0.087, many=True, randomit=False):
             # print("Deviation:", delta.item())
         print(' a sample of the F switched ', rotated_list[2])
         return torch.stack(rotated_list)
-def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.2, H_init=None):
+def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.6, H_init=None):
     """
     Generate a list of random H matrices using rotation.
     Args:
@@ -160,7 +160,7 @@ def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.2, H_init=N
         H= torch.eye(3, device=device)
     else:
         H = H_init
-        w
+
     for k in range(num_H + 1):
         if H_init is None:
             # For square matrices, rotate directly in observation space

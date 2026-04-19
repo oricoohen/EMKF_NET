@@ -4,6 +4,7 @@ from emkf.func import  compute_A1, compute_A2, compute_A3, Ell
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_H
 from Smoothers.Extended_RTS_Smoother_test import S_Test_ext
 import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
@@ -454,7 +455,155 @@ def EMKF_H_analitic(sys_model, F, H_0_matrices, Q, R, Y, x_0, P_0, X, max_it=3, 
     return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list
 
 
+def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3, generate_h=True, init_x_list=None, init_P_list=None):
+    """
+    EM algorithm for estimating observation matrix H.
 
+    This function performs EM iterations to estimate H while keeping F FIXED.
+    Structure: For each sequence, run all EM iterations before moving to next sequence.
+
+    Notation:
+      • N_seq = number of sequences
+      • T     = length of each time series
+      • m     = state dimension
+      • n     = observation dimension
+
+    Inputs:
+      sys_model    : SystemModel object containing system parameters
+      F            : FIXED state transition matrix, Tensor (m×m) - SAME for all sequences
+      H_0_matrices : list of initial H guesses (TO BE ESTIMATED), each Tensor (n×m)
+      Q            : process noise covariance, Tensor (m×m)
+      R            : measurement noise covariance, Tensor (n×n)
+      Y            : all measurements, Tensor (N_seq, n, T)
+      x_0          : prior mean of x₀, Tensor (m, 1)
+      P_0          : prior covariance of x₀, Tensor (m, m)
+      X            : true states (for MSE computation), Tensor (N_seq, m, T)
+      max_it       : maximum number of EM iterations per sequence
+      generate_h   : if True, use grouped H (index = j // 10); else one H per sequence
+      init_x_list  : optional list of initial state means per sequence
+      init_P_list  : optional list of initial covariances per sequence
+
+    Returns:
+      H_matrices   : list of H estimates per sequence, length N_seq, each list has (max_it+1) H estimates
+      mean_mse_final : final mean MSE across sequences (scalar)
+      last_x_list  : list of final smoothed states x_T for each sequence
+      last_P_list  : list of final smoothed covariances P_T for each sequence
+    """
+
+    m = sys_model.m  # state dimension
+    n = sys_model.n  # observation dimension
+    T = Y.size(-1)   # sequence length
+    N_seq = Y.size(0)  # number of sequences
+
+    # Accumulators for MSE across sequences, per iteration
+    sum_mse_per_iter = torch.zeros(max_it, dtype=torch.float64, device=Y.device)
+    last_x_list = []
+    last_P_list = []
+    H_matrices = []  # Store H evolution for each sequence
+
+    print(f"\n{'='*60}")
+    print(f"Starting EM for H estimation")
+    print(f"  Sequences: {N_seq}, State dim: {m}, Obs dim: {n}, Length: {T}")
+    print(f"  Iterations per sequence: {max_it}")
+    print(f"  F is FIXED (same for all), estimating H")
+    print(f"{'='*60}\n")
+
+    # ========== OUTER LOOP: For each sequence ==========
+    for j in range(N_seq):
+
+        # Select appropriate H initial guess for this sequence/group
+        if generate_h:
+            h_index = j // 10
+        else:
+            h_index = j
+        H_est = H_0_matrices[h_index].clone()
+
+        Y_j = Y[j]      # [n, T]
+        X_true_j = X[j] # [m, T]
+
+        # Initialize H evolution list for this sequence
+        H_all_j = [H_est.clone()]
+
+        # Set initial conditions for this sequence
+        if init_x_list is not None:
+            x0_j = init_x_list[j]
+            P0_j = init_P_list[j]
+        else:
+            x0_j = x_0
+            P0_j = P_0
+
+
+        # ========== INNER LOOP: EM iterations for this sequence ==========
+        for q in range(max_it):
+            # ========== E-STEP: Run RTS smoother with current H and FIXED F ==========
+            sys_model.InitSequence(x0_j, P0_j)
+
+            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, V_smooth] = S_Test_ext_H(
+                sys_model,
+                Y_j.unsqueeze(0),
+                X_true_j.unsqueeze(0),
+                H_list=[H_est],
+                generate_h=False,
+                init_x_list=[x0_j],
+                init_P_list=[P0_j]
+            )
+
+            # Accumulate MSE for this iteration
+            sum_mse_per_iter[q] += float(_mse_avg)
+
+            # Extract results (remove batch dimension)
+            X_s = X_smooth.squeeze(0)  # [m, T]
+            P_s = P_smooth.squeeze(0)  # [m, m, T]
+
+            # ========== M-STEP: Update H for this sequence ==========
+            # Accumulate sufficient statistics over time
+            C1 = torch.zeros((n, m), dtype=Y.dtype, device=Y.device)  # Σ_t y_t x_t^T
+            C2 = torch.zeros((m, m), dtype=Y.dtype, device=Y.device)  # Σ_t (x_t x_t^T + P_t)
+
+            for t in range(T):
+                # C1: Σ_t y_t x_t^T
+                C1 += Y_j[:, t].unsqueeze(1) @ X_s[:, t].unsqueeze(0)  # [n,1] @ [1,m] = [n,m]
+
+                # C2: Σ_t (x_t x_t^T + P_t)
+                C2 += X_s[:, t].unsqueeze(1) @ X_s[:, t].unsqueeze(0) + P_s[:, :, t]  # [m,m]
+
+            # Add regularization for numerical stability
+            eps = 1e-6 * torch.eye(m, device=C2.device, dtype=C2.dtype)
+            C2 = C2 + eps
+
+            # H_new = C1 @ inv(C2)
+            # Using solve for numerical stability: H_new^T = C2^T \ C1^T
+            H_est = torch.linalg.solve(C2.T, C1.T).T  # [n, m]
+            H_all_j.append(H_est.clone())
+
+        # Store H evolution for this sequence
+        H_matrices.append(H_all_j)
+
+        # Store final state for continuity across sequences
+        x_T = X_s[:, -1].unsqueeze(-1).clone()  # [m, 1]
+        P_T = P_s[:, :, -1].clone()             # [m, m]
+        last_x_list.append(x_T)
+        last_P_list.append(P_T)
+
+    # -------- After all sequences: report mean MSE per iteration --------
+    mean_mse_per_seq_lin = (sum_mse_per_iter / N_seq).clone()
+    mean_mse_db = 10.0 * torch.log10(mean_mse_per_seq_lin + 1e-12)
+
+    print(f"\n{'='*60}")
+    print("EM iterations completed for all sequences")
+    print(f"{'='*60}\n")
+
+    print("=== Mean MSE across sequences per iteration ===")
+    for q in range(max_it):
+        print(f"Iter {q:02d}: mean MSE = {mean_mse_db[q].item():.3f} dB")
+
+    final_mean_mse = mean_mse_per_seq_lin[-1]
+
+    # Create empty lists for compatibility with expected return format
+    likelihoods = [[] for _ in range(N_seq)]
+    iterations_list = [max_it-1 for _ in range(N_seq)]
+
+    return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list
 
 
 def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_true,max_it=5, generate_f=True, generate_h=True,init_x_list=None, init_P_list=None,  update_F=True, update_H=True):

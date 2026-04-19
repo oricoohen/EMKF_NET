@@ -6,7 +6,7 @@ import torch.nn.functional as F
 # ----- fixed device -----
 device = torch.device("cuda")
 
-
+#####################################################################################regular rts
 # ============================================================
 # 1. M-step network: ΔH = MLP(z_in)
 # ============================================================
@@ -15,13 +15,11 @@ class DeltaH_MStepNet(nn.Module):
     Single M-step network for H:
       ΔH = MLP(z_in),  H^{(i+1)} = H^{(i)} + ΔH
 
-    z_in block layout (all flattened, then concatenated):
-      [ A_yx (n*m) | A_xx (m*m) | S_nu_corr (n*n) | C_nu_x (n*m) | H_current (n*m) ]
+   z_in block layout (all flattened, then concatenated):
+  [ H_current (n*m) | H_em (n*m) | S_nu_corr (n*n) | C_nu_x (n*m) ]
 
-    Input:
-      - z_in: [B, d_z] where d_z = 3*(n*m) + (m*m) + (n*n)
-    Output:
-      - ΔH:  [B, n, m]
+Input:
+  - z_in: [B, d_z] where d_z = 3*(n*m) + (n*n)
       """
     def __init__(self, m, n, d_hidden=256,dH_scale=1):
         super().__init__()
@@ -29,11 +27,10 @@ class DeltaH_MStepNet(nn.Module):
         self.n = n
         self.dH_scale = dH_scale #change ori
         self.block_dims = [
-            n * m,  # A_yx
-            m * m,  # A_xx
+            n * m,  # H_current
+            n * m,  # H_em
             n * n,  # S_nu_corr
-            n * m,  # C_nu_x
-            n * m  # H_current
+            n * m  # C_nu_x
         ]
         self.d_z = sum(self.block_dims)
 

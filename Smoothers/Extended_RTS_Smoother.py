@@ -3,7 +3,7 @@ Theoretical Non-linear Linear RTS Smoother
 """
 import torch
 from Simulations.Lorenz_Atractor.parameters import getJacobian
-
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class Extended_rts_smoother:
 
     def __init__(self, SystemModel):
@@ -67,8 +67,8 @@ class Extended_rts_smoother:
     #########################
     def GenerateSequence(self, filter_x, filter_sigma, T):
         # Pre allocate an array for predicted state and variance
-        self.s_x = torch.empty(size=[self.m, T])
-        self.s_sigma = torch.empty(size=[self.m, self.m, T])
+        self.s_x = torch.empty(size=[self.m, T],device=device)
+        self.s_sigma = torch.empty(size=[self.m, self.m, T],device=device)
         # Pre allocate SG array
         # self.SG_array = torch.zeros((self.T,self.m,self.m))#delete
         self.SGains = []
