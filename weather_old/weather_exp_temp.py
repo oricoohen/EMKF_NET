@@ -82,12 +82,12 @@ R          = 0.05 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("../RTSNet/weather/Tel Avivtemptau_10", exist_ok=True)
-path_results_rts        = "../RTSNet/weather_temp/tau_10/check_prev_norm_seq_jersulam_rtsnet_model.pth"
-path_results_m          = "../RTSNet/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network.pth"
-path_results_rts_joint  = "../RTSNet/weather_temp/tau_10/checkprev_norm_seq_jersulam_joint.pth"
-path_results_m_joint    = "../RTSNet/weather_temp/tau_10/checkprev_norm_seq_jersulam_network_joint.pth"
-destination_path_M_rts = "../RTSNet/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network_with_rts.pth"
+os.makedirs("../RTSNet/old_attempts/weather/Tel Avivtemptau_10", exist_ok=True)
+path_results_rts        = "../RTSNet/old_attempts/weather_temp/tau_10/check_prev_norm_seq_jersulam_rtsnet_model.pth"
+path_results_m          = "../RTSNet/old_attempts/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network.pth"
+path_results_rts_joint  = "../RTSNet/old_attempts/weather_temp/tau_10/checkprev_norm_seq_jersulam_joint.pth"
+path_results_m_joint    = "../RTSNet/old_attempts/weather_temp/tau_10/checkprev_norm_seq_jersulam_network_joint.pth"
+destination_path_M_rts = "../RTSNet/old_attempts/weather_temp/tau_10_/check_prev_norm_seq_jersulam_network_with_rts.pth"
 # ======================================================
 # ARGS
 # =====================================================
@@ -535,7 +535,7 @@ print("\n" + "=" * 60)
 print("STEP 3B: TRAIN BiGRU Baseline")
 print("=" * 60)
 
-path_results_bigru = "../RTSNet/weather_temp/tau_10/bigru_model.pth"
+path_results_bigru = "../RTSNet/old_attempts/weather_temp/tau_10/bigru_model.pth"
 
 bigru_model = BiGRUBaseline(input_size=7, hidden_size=64, num_layers=2, dropout=0.1)
 

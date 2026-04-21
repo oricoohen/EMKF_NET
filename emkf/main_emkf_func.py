@@ -498,6 +498,7 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
     # Accumulators for MSE across sequences, per iteration
     sum_mse_per_iter = torch.zeros(max_it, dtype=torch.float64, device=Y.device)
     last_x_list = []
+    full_x_list = []  # Store full smoothed trajectories for each sequence
     last_P_list = []
     H_matrices = []  # Store H evolution for each sequence
 
@@ -584,6 +585,7 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
         P_T = P_s[:, :, -1].clone()             # [m, m]
         last_x_list.append(x_T)
         last_P_list.append(P_T)
+        full_x_list.append(X_s)  # Store full smoothed trajectory for this sequence
 
     # -------- After all sequences: report mean MSE per iteration --------
     mean_mse_per_seq_lin = (sum_mse_per_iter / N_seq).clone()
@@ -603,7 +605,7 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
     likelihoods = [[] for _ in range(N_seq)]
     iterations_list = [max_it-1 for _ in range(N_seq)]
 
-    return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list
+    return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list,full_x_list
 
 
 def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_true,max_it=5, generate_f=True, generate_h=True,init_x_list=None, init_P_list=None,  update_F=True, update_H=True):

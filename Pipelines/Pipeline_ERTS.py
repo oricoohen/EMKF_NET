@@ -9371,6 +9371,300 @@ class Pipeline_ERTS:
         return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch, self.MSE_train_linear_epoch,
                 self.MSE_train_dB_epoch]
 
+    def train_H_mstep_net_3_datasets_with_rts(self, SysModel, cv_input, cv_target, train_input, train_target,
+                                     destination_path_M, load_mnet, num_em_iters=3, H_init=None,
+                                     alpha=(0.05, 0.1, 0.85), lambda_H=1e-3, generate_h=True, datasets=3):
+        """
+        M-step training for H (observation matrix) across 3 datasets.
+        - F is FIXED (known dynamics) - same for all sequences and datasets
+        - H is DIVERSE (unknown, changes across datasets)
+        - Trains M-network to predict ΔH given smoothed states and statistics
+        """
+        # Basic sizes
+        self.N_E = len(train_input[0])
+        self.N_CV = len(cv_input[0])
+        m = SysModel.m
+        n = SysModel.n
+
+        # M-step model for H
+        self.M_model_H = torch.load(load_mnet, weights_only=False).to(self.device)
+        model_mstep = self.M_model_H.train()
+        self.M_optimizer_H = torch.optim.Adam(model_mstep.parameters(), lr=self.learningRate)
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            model_mstep.train()
+            self.M_optimizer_H.zero_grad()
+
+            batch_total_loss = 0.0
+            batch_x_loss_start = 0.0
+            batch_x_loss_em = [0.0] * num_em_iters
+
+            for _ in range(self.N_B):
+                n_e = random.randint(0, self.N_E - 1)
+
+                # H_base = H_init.clone().to(self.device) if H_init is not None else SysModel.H.clone().detach().to(
+                #     self.device)
+                x_0 = SysModel.m1x_0.clone().detach().to(self.device)
+
+                sample_total_loss = 0.0
+
+
+                if H_init is None:
+                    if generate_h:
+                        h_index = n_e // 10
+                        H_base = SysModel.H_train[0][h_index].clone().detach().to(self.device)
+                    else:
+                        H_base = SysModel.H_train[0][n_e].clone().detach().to(self.device)
+                else:
+                    H_base = H_init.clone().to(self.device)
+
+                for data in range(datasets):
+                    y_seq = train_input[data][n_e]
+                    x_true_seq = train_target[data][n_e]
+                    T = y_seq.size(-1)
+
+                    # Get true H for this dataset
+                    if generate_h is True:
+                        h_index = n_e // 10
+                        H_true = SysModel.H_train_TRUE[data][h_index]
+                    else:
+                        H_true = SysModel.H_train_TRUE[data][n_e]
+
+                    H_current = H_base
+
+                    [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, _] = S_Test_ext_H(
+                        SysModel,
+                        y_seq.unsqueeze(0),
+                        x_true_seq.unsqueeze(0),
+                        H_list=[H_current],
+                        generate_h=False,
+                        init_x_list=[x_0],
+                        init_P_list=[SysModel.m2x_0]
+                    )
+
+                    x_curr = X_smooth.squeeze(0)  # [m, T]
+                    P_curr = P_smooth.squeeze(0)  # [m, m, T]
+                    y_curr = y_seq
+
+                    x_loss_start = torch.mean((x_curr - x_true_seq) ** 2)
+                    batch_x_loss_start += x_loss_start.detach().item()
+                    for em_iter in range(num_em_iters):
+
+                        # residuals
+                        Hx = H_current @ x_curr
+                        nu = y_curr - Hx
+                        nu_mean = nu.mean(dim=1, keepdim=True)
+                        nu_c = nu - nu_mean
+                        x_mean = x_curr.mean(dim=1, keepdim=True)
+                        x_c = x_curr - x_mean
+
+                        S_nu = (nu_c @ nu_c.T) / T
+                        C_nu_x = (nu_c @ x_c.T) / T
+
+                        # EM-style sufficient statistics
+                        C1 = (y_curr @ x_curr.T) / T
+                        C2 = torch.zeros((m, m), device=x_curr.device, dtype=x_curr.dtype)
+
+                        for t in range(T):
+                            xt = x_curr[:, t].unsqueeze(1)
+                            C2 += xt @ xt.T + P_curr[:, :, t]
+
+                        C2 = C2 / T
+                        eps = 1e-5 * torch.eye(m, device=x_curr.device, dtype=x_curr.dtype)
+                        C2 = 0.5 * (C2 + C2.T) + eps
+
+                        H_em = torch.linalg.solve(C2.T, C1.T).T
+                        z_in = torch.cat([
+                            H_current.detach().reshape(-1),
+                            H_em.detach().reshape(-1),
+                            S_nu.detach().reshape(-1),
+                            C_nu_x.detach().reshape(-1)
+                        ], dim=0).reshape(1, -1)
+
+                        deltaH = model_mstep(z_in)
+                        deltaH_mat = deltaH.view(n, m)
+
+                        beta = 0.1
+                        H_next = H_em + beta * deltaH_mat
+                        H_current = H_next  # update for next EM iteration
+                        [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth, _] = S_Test_ext_H(
+                            SysModel,
+                            y_seq.unsqueeze(0),
+                            x_true_seq.unsqueeze(0),
+                            H_list=[H_current],
+                            generate_h=False,
+                            init_x_list=[x_0],
+                            init_P_list=[SysModel.m2x_0]
+                        )
+
+                        x_curr = X_smooth.squeeze(0)
+                        P_curr = P_smooth.squeeze(0)
+                        y_curr = y_seq
+
+                        x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                        batch_x_loss_em[em_iter] += x_loss.detach().item()
+
+                        h_loss = torch.mean((H_next - H_true) ** 2)
+                        reg = lambda_H * torch.mean(deltaH_mat ** 2)
+
+                        loss_em = 0.5 * (h_loss + reg) + x_loss
+
+                        if em_iter == 0:
+                            weight = alpha[0]
+                        elif em_iter == 1:
+                            weight = alpha[1]
+                        else:
+                            weight = alpha[2]
+                        sample_total_loss += weight * loss_em
+
+                    H_base = H_current.detach()
+                    x_0 = x_curr[:, -1].detach()
+                sample_total_loss = sample_total_loss / float(datasets)
+                batch_total_loss += sample_total_loss
+            loss = batch_total_loss / self.N_B
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=1.0)
+            self.M_optimizer_H.step()
+            denom = self.N_B * datasets
+            avg_x_loss_start = batch_x_loss_start / denom
+            avg_x_loss_em = [x / denom for x in batch_x_loss_em]
+
+            em_msg = " ".join([f"x_loss_em{k}={avg_x_loss_em[k]:.6f}" for k in range(num_em_iters)])
+            print(f"[epoch {epoch:03d}] x_loss_start={avg_x_loss_start:.6f} {em_msg} loss_all={loss.item():.6f}")
+            # Validation
+            model_mstep.eval()
+            cv_loss_sum = 0.0
+            batch_cv_x_loss_start = 0.0
+            batch_cv_x_loss_em = [0.0] * num_em_iters
+
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    x_0_cv = SysModel.m1x_0
+                    sample_total_loss_cv = 0.0
+                    if H_init is None:
+                        if generate_h:
+                            h_index = j// 10
+                            H_base_cv = SysModel.H_valid[0][h_index].clone().detach().to(self.device)
+                        else:
+                            H_base_cv = SysModel.H_valid[0][j].clone().detach().to(self.device)
+                    else:
+                        H_base_cv = H_init
+                    for data in range(datasets):
+                        y_cv = cv_input[data][j]
+                        x_true_cv_seq = cv_target[data][j]
+                        T_cv = y_cv.size(-1)
+                        if generate_h is True:
+                            h_index_cv = j // 10
+                            H_true_cv = SysModel.H_valid_TRUE[data][h_index_cv]
+                        else:
+                            H_true_cv = SysModel.H_valid_TRUE[data][j]
+
+                        H_current_cv = H_base_cv.clone()
+
+                        [_mse_arr_cv, _mse_avg_cv, _mse_db_cv, X_smooth_cv, P_smooth_cv, _] = S_Test_ext_H(
+                            SysModel,
+                            y_cv.unsqueeze(0),
+                            x_true_cv_seq.unsqueeze(0),
+                            H_list=[H_current_cv],
+                            generate_h=False,
+                            init_x_list=[x_0_cv],
+                            init_P_list=[SysModel.m2x_0]
+                        )
+
+                        x_curr = X_smooth_cv.squeeze(0)
+                        P_curr_cv = P_smooth_cv.squeeze(0)
+                        y_curr = y_cv
+                        x_loss_start_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                        batch_cv_x_loss_start += x_loss_start_cv.item()
+                        for em_iter in range(num_em_iters):
+                            nu_cv = y_curr - (H_current_cv @ x_curr)
+                            nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                            nu_c_cv = nu_cv - nu_mean_cv
+
+                            x_mean_cv = x_curr.mean(dim=1, keepdim=True)
+                            x_c_cv = x_curr - x_mean_cv
+
+                            S_nu_cv = (nu_c_cv @ nu_c_cv.T) / T_cv
+                            C_nu_x_cv = (nu_c_cv @ x_c_cv.T) / T_cv
+
+                            C1_cv = (y_curr @ x_curr.T) / T_cv
+                            C2_cv = torch.zeros((m, m), device=x_curr.device, dtype=x_curr.dtype)
+
+                            for t in range(T_cv):
+                                xt = x_curr[:, t].unsqueeze(1)
+                                C2_cv += xt @ xt.T + P_curr_cv[:, :, t]
+
+                            C2_cv = C2_cv / T_cv
+                            eps_cv = 1e-5 * torch.eye(m, device=x_curr.device, dtype=x_curr.dtype)
+                            C2_cv = 0.5 * (C2_cv + C2_cv.T) + eps_cv
+
+                            H_em_cv = torch.linalg.solve(C2_cv.T, C1_cv.T).T
+
+                            z_cv = torch.cat([
+                                H_current_cv.reshape(-1),
+                                H_em_cv.reshape(-1),
+                                S_nu_cv.reshape(-1),
+                                C_nu_x_cv.reshape(-1)
+                            ], dim=0).reshape(1, -1)
+
+                            dH_cv = model_mstep(z_cv)
+                            dH_cv_mat = dH_cv.view(n, m)
+
+                            beta = 0.1
+                            H_next_cv = H_em_cv + beta * dH_cv_mat
+                            H_current_cv = H_next_cv  # update for next EM iteration
+                            h_loss_cv = torch.mean((H_next_cv - H_true_cv) ** 2)
+                            reg_cv = lambda_H * torch.mean(dH_cv_mat ** 2)
+                            [_mse_arr_cv, _mse_avg_cv, _mse_db_cv, X_smooth_cv, P_smooth_cv, _] = S_Test_ext_H(
+                                SysModel,
+                                y_cv.unsqueeze(0),
+                                x_true_cv_seq.unsqueeze(0),
+                                H_list=[H_current_cv],
+                                generate_h=False,
+                                init_x_list=[x_0_cv],
+                                init_P_list=[SysModel.m2x_0]
+                            )
+
+                            x_curr = X_smooth_cv.squeeze(0)
+                            P_curr_cv = P_smooth_cv.squeeze(0)
+                            y_curr = y_cv
+                            x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                            batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
+
+                            loss_em_cv = 0.5 * (h_loss_cv + reg_cv) + x_loss_cv
+
+                            if em_iter == 0:
+                                weight = alpha[0]
+                            elif em_iter == 1:
+                                weight = alpha[1]
+                            else:
+                                weight = alpha[2]
+
+                            sample_total_loss_cv += weight * loss_em_cv
+
+                        x_0_cv = x_curr[:, -1].detach()
+                        H_base_cv = H_current_cv.detach()
+
+                    sample_total_loss_cv = sample_total_loss_cv / float(datasets)
+                    cv_loss_sum += sample_total_loss_cv.item()
+
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+            cv_denom = self.N_CV * datasets
+            avg_cv_x_loss_start = batch_cv_x_loss_start / cv_denom
+            avg_cv_x_loss_em = [x / cv_denom for x in batch_cv_x_loss_em]
+
+            cv_em_msg = " ".join([f"cv_x_loss_em{k}={avg_cv_x_loss_em[k]:.6f}" for k in range(num_em_iters)])
+            print(f"[epoch {epoch:03d}] cv_x_loss_start={avg_cv_x_loss_start:.6f} {cv_em_msg} cv_all={cv_epoch:.6f}")
+            print(f"BEST: epoch={self.MSE_cv_idx_opt}  best_cv_loss={self.MSE_cv_dB_opt:.6f}")
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                self.MSE_cv_idx_opt = epoch
+                torch.save(model_mstep, destination_path_M)
+
+
     def train_H_mstep_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
                         destination_path_M, load_path_RTS,load_mnet, num_em_iters=3,H_init = None,
                         alpha=(0.05, 0.1, 0.85), lambda_H=1e-3, generate_h=True, datasets=3):
@@ -9687,7 +9981,6 @@ class Pipeline_ERTS:
         self.MSE_cv_idx_opt = 0
 
         for epoch in range(self.N_steps):
-            train_loss_sum = 0.0
             model_mstep.train()
             self.model.train()
             self.optimizer_joint.zero_grad()
@@ -9705,7 +9998,11 @@ class Pipeline_ERTS:
                 sample_total_loss = 0.0
 
                 if H_init is None:
-                    H_current = SysModel.H_train[0][n_e].clone().detach().to(self.device)
+                    if generate_h:
+                        h_index = n_e // 10
+                        H_current = SysModel.H_train[0][h_index].clone().detach().to(self.device)
+                    else:
+                        H_current = SysModel.H_train[0][n_e].clone().detach().to(self.device)
                 else:
                     H_current = H_base
 
@@ -9837,8 +10134,11 @@ class Pipeline_ERTS:
                     sample_total_loss_cv = 0.0
 
                     if H_init is None:
-                        H_base_cv = SysModel.H_cv[0][j].clone().detach().to(self.device)
-
+                        if generate_h:
+                            h_index = j // 10
+                            H_base_cv = SysModel.H_valid[0][h_index].clone().detach().to(self.device)
+                        else:
+                            H_base_cv= SysModel.H_valid[0][j].clone().detach().to(self.device)
 
 
                     for data in range(datasets):
@@ -10884,7 +11184,7 @@ class Pipeline_ERTS:
                 f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
     def train_H_mstep_net(self, SysModel, cv_input, cv_target, train_input, train_target,
                           destination_path_M, destination_path_RTS,load_destination_path_M=None, num_em_iters=3,
-                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True, non_linear_f=False):
+                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True):
         """
         Single-function M-step training for H (observation matrix).
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.

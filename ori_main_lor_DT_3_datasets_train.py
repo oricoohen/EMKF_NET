@@ -91,23 +91,15 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-path_load_rtsnet_full = 'RTSNet/lorenz_rotated_10/full/rtsnet_30.pt'
-path_results_rtsnet_full = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_full.pt'
-path_results_rtsnet_partial = 'RTSNet/lorenz_rotated_10/partial/rtsnet_30.pt'
-destination_path_rtsnet = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_partial.pt'
-destination_path_mnet = 'RTSNet/lorenz_rotated_10/exp_3/2iter_mnet_30.pt'
-# load_path_joint_mnet30 =  'RTSNet/lorenz_rotated/partial/m_net/Mstep_net_new_2iters_30,pt'
-load_path_joint_mnet30 = 'RTSNet/lorenz_rotated_10/exp_3/1iter_mnet_30.pt'
-destination_path_rtsnet_true = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_true.pt'
-
-destination_path_rtsnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30.pt'
-destination_path_mnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30.pt'
-destination_path_rtsnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30h0.8.pt'
-destination_path_mnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30_h0.8.pt'
-destination_path_joint_mnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/mnet_diff_start.pt'
-destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/rtsnet_diff_start.pt'
-destination_path_jmnet_rts = 'RTSNet/lorenz_rotated_10/exp_3/Mstep_net_RTS_regular_2iters_30.pt'
-load_path_M_rts_rts = 'RTSNet/lorenz_rotated_10/partial/m_net/Mstep_net_new_2iters_30_RTS_ANALITIC.pt'
+load_path_rtsnet_full = 'RTSNet/william/1dataset/RTSNet_full.pt'
+load_path_rtsnet_partial = 'RTSNet/william/1dataset/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/william/1dataset/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/william/1dataset/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/william/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/william/3datasets/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/william/3datasets/M_step_net.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/william/3datasets/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/william/3datasets/M_step_net_joint.pt'
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
 all_train_targets = []
@@ -229,15 +221,27 @@ print("="*80)
 sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
 sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
+sys_model_true = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+sys_model_true.InitSequence(m1x_0, m2x_0)  # x0 and P0
+
+
 # CRITICAL: Set H lists as 3-dataset structure
 sys_model.H_train = all_H_matrices_train_rotate
 sys_model.H_valid = all_H_matrices_cv_rotate
 sys_model.H_test =  all_H_matrices_test_rotate
 
+sys_model_true.H_train =  all_H_matrices_train
+sys_model_true.H_valid = all_H_matrices_cv
+sys_model_true.H_test = all_H_matrices_test
+
 # These _TRUE versions are what the loss is computed against
 sys_model.H_train_TRUE = all_H_matrices_train
 sys_model.H_valid_TRUE = all_H_matrices_cv
 sys_model.H_test_TRUE = all_H_matrices_test
+
+sys_model_true.H_train_TRUE = all_H_matrices_train
+sys_model_true.H_valid_TRUE = all_H_matrices_cv
+sys_model_true.H_test_TRUE = all_H_matrices_test
 
 print("✓ System model configured with 3-dataset H structure")
 
@@ -275,51 +279,47 @@ print(f"  H regularization (lambda_H): 1e-3")
 print(f"  F is FIXED (not estimated)")
 
 print("\nStarting training...")
-# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,path_results_rtsnet_full
-#                         , path_load_rtsnet_full, H_init=H_Rotate, datasets=3)
+
+
+######################RTSNet Full Training - H Estimation######################
+print('RTSNet Full Training - H Estimation')
+RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
+                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=3)
+
+######################RTSNet PARTIAL Training - H Estimation######################
+print('RTSNet PARTIAL Training - H Estimation')
+RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_partial
+                        , load_path_rtsnet_partial, H_init=H_Rotate, datasets=3)
+
+print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
-# RTSNet_Pipeline.train_H_mstep_net_3_datasets(
-#     SysModel=sys_model,
-#     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
-#     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
-#     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
-#     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
-#     destination_path_M=destination_path_mnet,
-#     load_path_RTS=destination_path_rtsnet,
-#     load_mnet=load_path_joint_mnet30,
-#     num_em_iters=num_em_iters,
-#     alpha=(0.15, 1., 0.85),          # Weights for EM iterations
-#     lambda_H=1e-3,                    # Regularization on ΔH
-#     generate_h=True,                  # Use grouped H (h_index = n_e // 10)
-#     H_init=H_Rotate,                   # Start from the rotated H
-#     datasets=3                        # Number of datasets
-# )
-
-# RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
-#     SysModel=sys_model,
-#     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
-#     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
-#     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
-#     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
-#     destination_path_M=destination_path_joint_mnet_diff_start,
-#     destination_path_RTS=destination_path_joint_rtsnet_diff_start,
-#     load_path_RTS=destination_path_rtsnet_joint_h,
-#     load_mnet=destination_path_mnet_joint_h,
-#     num_em_iters=num_em_iters,
-#     alpha=(0.5, 1., 0.85),          # Weights for EM iterations
-#     lambda_H=1e-3,                    # Regularization on ΔH
-#     generate_h=True,                  # Use grouped H (h_index = n_e // 10)
-#     H_init=None,                   # Start from the rotated H
-#     datasets=3)                        # Number of datasets
-
-
-RTSNet_Pipeline.train_H_mstep_net_3_datasets_with_rts(SysModel=sys_model,
+RTSNet_Pipeline.train_H_mstep_net_3_datasets(
+    SysModel=sys_model,
     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
-    destination_path_M=destination_path_jmnet_rts,
-    load_mnet=load_path_M_rts_rts,
+    destination_path_M=destination_path_M_reg,
+    load_path_RTS=destination_path_rtsnet_partial,
+    load_mnet=load_path_M_joint,
+    num_em_iters=num_em_iters,
+    alpha=(0.15, 1., 0.85),          # Weights for EM iterations
+    lambda_H=1e-3,                    # Regularization on ΔH
+    generate_h=True,                  # Use grouped H (h_index = n_e // 10)
+    H_init=H_Rotate,                   # Start from the rotated H
+    datasets=3                        # Number of datasets
+)
+print('MNET AND RTSNET JOINT Training - H Estimation')
+RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
+    SysModel=sys_model,
+    cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
+    cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
+    train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
+    train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
+    destination_path_M=destination_path_M_joint,
+    destination_path_RTS=destination_path_rtsnet_partial_joint,
+    load_path_RTS=destination_path_rtsnet_partial,
+    load_mnet=destination_path_M_reg,
     num_em_iters=num_em_iters,
     alpha=(0.5, 1., 0.85),          # Weights for EM iterations
     lambda_H=1e-3,                    # Regularization on ΔH
@@ -329,7 +329,7 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_with_rts(SysModel=sys_model,
 print("\n" + "="*80)
 print("TRAINING COMPLETE")
 print("="*80)
-print(f"Best M-network model saved to: {destination_path_M}")
+
 
 #########################################################################################################
 # OPTIONAL: TEST THE TRAINED MODEL

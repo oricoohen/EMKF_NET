@@ -134,14 +134,127 @@ def rotate_H(H,  theta=0.087, many=True, randomit=False):
         for H_i in H:
             if randomit:
                 angle = uniform_two_ranges(0.0,1)*theta
-                angle = torch.tensor(angle, device=H[0].device)
+                angle = torch.tensor(angle, device=device)
             else:
-                angle = torch.tensor(theta, device=H[0].device)
+                angle = torch.tensor(theta, device=device)
             rotated_list.append(apply_rotation(H_i, angle))
             # delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
             # print("Deviation:", delta.item())
         print(' a sample of the F switched ', rotated_list[2])
         return torch.stack(rotated_list)
+def estimate_H_ls(y, x):
+    # y: [n, T]
+    # x: [m, T]
+
+    C1 = y @ x.T                     # [n, m]
+    C2 = x @ x.T                     # [m, m]
+
+    eps = 1e-6 * torch.eye(x.size(0), device=x.device, dtype=x.dtype)
+    C2 = C2 + eps
+
+    H_hat = torch.linalg.solve(C2.T, C1.T).T
+    return H_hat
+def estimate_Q_R_from_true_data(all_inputs_by_H,
+                                all_targets_by_H,
+                                all_H_matrices,
+                                f,
+                                Q_structure=None,
+                                R_structure=None,
+                                device=None,
+                                dtype=torch.float32):
+    """
+    Estimate:
+      1) full Q_hat, R_hat
+      2) scalar q2_hat, r2_hat such that
+            Q ~= q2_hat * Q_structure
+            R ~= r2_hat * R_structure
+
+    Assumptions:
+      - all_targets_by_H[d] shape: [N_T, m, T]
+      - all_inputs_by_H[d]  shape: [N_T, n, T]
+      - all_H_matrices[d] is a list of length N_T,
+        each item H_seq shape [n, m]
+      - f(x) takes x shape [m,1] and returns [m,1]
+    """
+
+    if device is None:
+        device = all_targets_by_H[0].device
+
+    m = all_targets_by_H[0].shape[1]
+    n = all_inputs_by_H[0].shape[1]
+
+    Q_sum = torch.zeros((m, m), device=device, dtype=dtype)
+    R_sum = torch.zeros((n, n), device=device, dtype=dtype)
+
+    count_q = 0
+    count_r = 0
+
+    for d in range(len(all_targets_by_H)):
+        X = all_targets_by_H[d].to(device)   # [N_T, m, T]
+        Y = all_inputs_by_H[d].to(device)    # [N_T, n, T]
+        H_list = all_H_matrices[d]           # list length N_T, each [n,m]
+
+        N_T = X.shape[0]
+        T = X.shape[2]
+
+        for k in range(N_T):
+            Hk = H_list[k].to(device)
+
+            # ---------- R from measurement residuals ----------
+            # v_t = y_t - H_t x_t
+            for t in range(T):
+                x_t = X[k, :, t].unsqueeze(-1)   # [m,1]
+                y_t = Y[k, :, t].unsqueeze(-1)   # [n,1]
+
+                y_pred = Hk @ x_t                # [n,1]
+                v_t = y_t - y_pred               # [n,1]
+
+                R_sum += v_t @ v_t.T
+                count_r += 1
+
+            # ---------- Q from process residuals ----------
+            # w_t = x_t - f(x_{t-1})
+            for t in range(1, T):
+                x_prev = X[k, :, t - 1].unsqueeze(-1)   # [m,1]
+                x_t    = X[k, :, t].unsqueeze(-1)       # [m,1]
+
+                x_pred = f(x_prev)                      # [m,1]
+                w_t = x_t - x_pred                      # [m,1]
+
+                Q_sum += w_t @ w_t.T
+                count_q += 1
+
+    Q_hat_full = Q_sum / max(count_q, 1)
+    R_hat_full = R_sum / max(count_r, 1)
+
+    results = {
+        "Q_hat_full": Q_hat_full,
+        "R_hat_full": R_hat_full,
+        "count_q": count_q,
+        "count_r": count_r,
+    }
+
+    # ------------------------------------------------
+    # If you want scalar q2_hat and r2_hat on structure
+    # Solve in LS sense:
+    #   q2_hat = argmin ||Q_hat_full - q2 * Q_structure||_F^2
+    #   r2_hat = argmin ||R_hat_full - r2 * R_structure||_F^2
+    # Closed form:
+    #   a_hat = <A,S> / <S,S>
+    # ------------------------------------------------
+    if Q_structure is not None:
+        QS = Q_structure.to(device=device, dtype=dtype)
+        q2_hat = torch.sum(Q_hat_full * QS) / torch.sum(QS * QS)
+        results["q2_hat"] = q2_hat
+        results["Q_hat_structured"] = q2_hat * QS
+
+    if R_structure is not None:
+        RS = R_structure.to(device=device, dtype=dtype)
+        r2_hat = torch.sum(R_hat_full * RS) / torch.sum(RS * RS)
+        results["r2_hat"] = r2_hat
+        results["R_hat_structured"] = r2_hat * RS
+
+    return results
 def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.6, H_init=None):
     """
     Generate a list of random H matrices using rotation.
