@@ -99,7 +99,7 @@ max_iter = 10
 
 cycles = 10
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)

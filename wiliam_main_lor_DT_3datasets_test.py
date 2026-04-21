@@ -71,7 +71,7 @@ Q_structure = Q_structure.to(device)
 R_structure = R_structure.to(device)
 H_design = H_design.to(device)
 args = config.general_settings()
-args.N_T = 10   # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30    # Length of the time series for training and cross-validation sequences.
 args.T_test = 30 # Length of the time series for test sequences.
