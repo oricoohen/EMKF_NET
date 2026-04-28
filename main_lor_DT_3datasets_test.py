@@ -13,7 +13,7 @@ from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
-
+from Baselines.BiGRU_smoother import train_bigru_smoother, test_bigru_smoother
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
 import shutil
@@ -71,18 +71,18 @@ Q_structure = Q_structure.to(device)
 R_structure = R_structure.to(device)
 H_design = H_design.to(device)
 args = config.general_settings()
-args.N_T = 10   # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30    # Length of the time series for training and cross-validation sequences.
 args.T_test = 30 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
-max_iter = 2
+num_iters = 2
 
-cycles = 10
+cycles = 3
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -94,19 +94,17 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_full.pt'
-destination_path_rtsnet_full_30T = 'RTSNet/lorenz_rotated_10/full/rtsnet_30.pt'
-destination_path_rtsnet_partial_30T = 'RTSNet/lorenz_rotated_10/rtsnet_30_partial.pt'
-destination_path_rtsnet_partial_exp_3 = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_partial.pt'
-destination_path_rtsnet_partial_exp_3joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30.pt'
-destination_path_mnet_2iter = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30.pt'
-destination_path_rtsnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30.pt'
-destination_path_mnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30.pt'
-destination_path_rtsnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30h0.8.pt'
-destination_path_mnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30_h0.8.pt'
-destination_path_joint_mnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/mnet_diff_start.pt'
-destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/rtsnet_diff_start.pt'
-
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
+# destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.6.pt'
+# destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_4 datasets_5H.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_4datasets_5H.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 
 H_matrices_for_datasets_d = []
@@ -116,7 +114,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.08, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 H_deji = [torch.eye(n, m, device=DEVICE) for _ in range(args.N_T)]
@@ -141,7 +139,7 @@ for dataset_id in range(1, cycles+1):
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
     # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp1_H/regular/'
+    dataFolderName = f'Simulations/Lorenz_Atractor/data/test_r=1/'
     dataFileName = f'snr_0{args.T_test}_dataset0_{dataset_id}.pt'
     dataFileName_H = f'snr_0_H_dataset0_{dataset_id}.pt'
     dataFileName_F = f'snr_0_F_dataset0_{dataset_id}.pt'
@@ -312,16 +310,16 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_joint_rtsnet_diff_start,
-            destination_path_M=destination_path_joint_mnet_diff_start,
-            num_em_iters=2,
+            destination_path_RTS=destination_path_rtsnet_partial_joint,
+            destination_path_M=destination_path_M_joint,
+            num_em_iters=num_iters,
             generate_h=False)
     else:
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_joint_rtsnet_diff_start,
-            destination_path_M=destination_path_joint_mnet_diff_start,
-            num_em_iters=2,
+            destination_path_RTS=destination_path_rtsnet_partial_joint,
+            destination_path_M=destination_path_M_joint,
+            num_em_iters=num_iters,
             generate_h=False,
             init_x_list=x0_em_last,
             init_P_list=None)
@@ -365,10 +363,10 @@ for dataset_id in range(cycles):
     # Use NNTest to get results with initial guess H
     if dataset_id == 0:
         results = RTSNet_Pipeline.NNTest(
-            sys_model_init, test_input, test_target, destination_path_joint_rtsnet_diff_start,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
     else:
         results = RTSNet_Pipeline.NNTest(
-            sys_model_init, test_input, test_target, destination_path_joint_rtsnet_diff_start,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
 
     all_initH_x.append(results[3].detach().clone())  # [N_T, m, T]
     # Extract MSE in dB

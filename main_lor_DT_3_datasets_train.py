@@ -92,21 +92,21 @@ print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
 path_load_rtsnet_full = 'RTSNet/lorenz_rotated_10/full/rtsnet_30.pt'
-path_results_rtsnet_full = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_full.pt'
+path_results_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/rtsnet_30_full.pt'
 path_results_rtsnet_partial = 'RTSNet/lorenz_rotated_10/partial/rtsnet_30.pt'
-destination_path_rtsnet = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_partial.pt'
-destination_path_mnet = 'RTSNet/lorenz_rotated_10/exp_3/2iter_mnet_30.pt'
+destination_path_rtsnet = 'RTSNet/lorenz_rotated_10/3datasets/rtsnet_30_partial.pt'
+destination_path_mnet = 'RTSNet/lorenz_rotated_10/3datasets/2iter_mnet_30.pt'
 # load_path_joint_mnet30 =  'RTSNet/lorenz_rotated/partial/m_net/Mstep_net_new_2iters_30,pt'
-load_path_joint_mnet30 = 'RTSNet/lorenz_rotated_10/exp_3/1iter_mnet_30.pt'
-destination_path_rtsnet_true = 'RTSNet/lorenz_rotated_10/exp_3/rtsnet_30_true.pt'
+load_path_joint_mnet30 = 'RTSNet/lorenz_rotated_10/3datasets/1iter_mnet_30.pt'
+destination_path_rtsnet_true = 'RTSNet/lorenz_rotated_10/3datasets/rtsnet_30_true.pt'
 
-destination_path_rtsnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30.pt'
-destination_path_mnet_joint = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30.pt'
-destination_path_rtsnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/rtsnet_mnet_30h0.8.pt'
-destination_path_mnet_joint_h = 'RTSNet/lorenz_rotated_10/exp_3/joint/2iter_mnet_mnet_30_h0.8.pt'
+destination_path_rtsnet_joint = 'RTSNet/lorenz_rotated_10/3datasets/joint/rtsnet_mnet_30.pt'
+destination_path_mnet_joint = 'RTSNet/lorenz_rotated_10/3datasets/joint/2iter_mnet_mnet_30.pt'
+destination_path_rtsnet_joint_h = 'RTSNet/lorenz_rotated_10/3datasets/joint/rtsnet_mnet_30h0.8.pt'
+destination_path_mnet_joint_h = 'RTSNet/lorenz_rotated_10/3datasets/joint/2iter_mnet_mnet_30_h0.8.pt'
 destination_path_joint_mnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/mnet_diff_start.pt'
 destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz_rotated_10/partial/joint/rtsnet_diff_start.pt'
-destination_path_jmnet_rts = 'RTSNet/lorenz_rotated_10/exp_3/Mstep_net_RTS_regular_2iters_30.pt'
+destination_path_jmnet_rts = 'RTSNet/lorenz_rotated_10/3datasets/Mstep_net_RTS_regular_2iters_30.pt'
 load_path_M_rts_rts = 'RTSNet/lorenz_rotated_10/partial/m_net/Mstep_net_new_2iters_30_RTS_ANALITIC.pt'
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []

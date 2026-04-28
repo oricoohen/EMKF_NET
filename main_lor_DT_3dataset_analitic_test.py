@@ -99,7 +99,7 @@ max_iter = 10
 
 cycles = 10
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -140,7 +140,7 @@ for dataset_id in range(1, cycles+1):
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
     # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp1_H/regular/'
+    dataFolderName = f'Simulations/Linear_canonical/paper/exp1_H/regular/test_'
     dataFileName = f'snr_0{args.T_test}_dataset00_{dataset_id}.pt'
     dataFileName_H = f'snr_0_H_dataset00_{dataset_id}.pt'
     dataFileName_F = f'snr_0_F_dataset00_{dataset_id}.pt'

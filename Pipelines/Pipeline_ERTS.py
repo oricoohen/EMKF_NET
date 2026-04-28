@@ -9988,6 +9988,8 @@ class Pipeline_ERTS:
             batch_total_loss = 0.0
             batch_x_loss_start = 0.0
             batch_x_loss_em = [0.0] * num_em_iters
+            batch_h_loss_em = [0.0] * num_em_iters
+            batch_reg_em = [0.0] * num_em_iters
 
             for _ in range(self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
@@ -10070,6 +10072,8 @@ class Pipeline_ERTS:
                         H_current = H_next  # update for next EM iteration
                         h_loss = torch.mean((H_next - H_true) ** 2)
                         reg = lambda_H * torch.mean(deltaH_mat ** 2)
+                        batch_h_loss_em[em_iter] += h_loss.detach().item()
+                        batch_reg_em[em_iter] += reg.detach().item()
                         self.model.update_H(H_current)
                         self.model.InitSequence(x_0, T)
                         self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
@@ -10093,7 +10097,7 @@ class Pipeline_ERTS:
 
                         x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                         batch_x_loss_em[em_iter] += x_loss.detach().item()
-                        loss_em = 1.5*h_loss + reg*0.5 + x_loss
+                        loss_em = 5*h_loss + reg*0.5 + x_loss
 
                         if em_iter == 0:
                             weight = alpha[0]
@@ -10117,8 +10121,14 @@ class Pipeline_ERTS:
             denom = self.N_B * datasets
             avg_x_loss_start = batch_x_loss_start / denom
             avg_x_loss_em = [x / denom for x in batch_x_loss_em]
-
-            em_msg = " ".join([f"x_loss_em{k}={avg_x_loss_em[k]:.6f}" for k in range(num_em_iters)])
+            avg_h_loss_em = [x / denom for x in batch_h_loss_em]
+            avg_reg_em = [x / denom for x in batch_reg_em]
+            em_msg = " ".join([
+                f"x{k}={avg_x_loss_em[k]:.4f} "
+                f"h{k}={avg_h_loss_em[k]:.4f} "
+                f"reg{k}={avg_reg_em[k]:.4f}"
+                for k in range(num_em_iters)
+            ])
             print(f"[epoch {epoch:03d}] x_loss_start={avg_x_loss_start:.6f} {em_msg} loss_all={loss.item():.6f}")
             # Validation
             model_mstep.eval()
@@ -10126,7 +10136,8 @@ class Pipeline_ERTS:
             cv_loss_sum = 0.0
             batch_cv_x_loss_start = 0.0
             batch_cv_x_loss_em = [0.0] * num_em_iters
-
+            batch_cv_h_loss_em = [0.0] * num_em_iters
+            batch_cv_reg_em = [0.0] * num_em_iters
             with torch.no_grad():
                 for j in range(self.N_CV):
                     H_base_cv = H_init
@@ -10201,6 +10212,8 @@ class Pipeline_ERTS:
                             H_current_cv = H_next_cv  # update for next EM iteration
                             h_loss_cv = torch.mean((H_next_cv - H_true_cv) ** 2)
                             reg_cv = lambda_H * torch.mean(dH_cv_mat ** 2)
+                            batch_cv_h_loss_em[em_iter] += h_loss_cv.item()
+                            batch_cv_reg_em[em_iter] += reg_cv.item()
                             self.model.update_H(H_current_cv)
                             self.model.InitSequence(x_0_cv, T_cv)
                             self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
@@ -10223,7 +10236,7 @@ class Pipeline_ERTS:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = h_loss_cv + reg_cv*0.5 + x_loss_cv
+                            loss_em_cv = 5*h_loss_cv + reg_cv*0.5 + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -10244,8 +10257,15 @@ class Pipeline_ERTS:
             cv_denom = self.N_CV * datasets
             avg_cv_x_loss_start = batch_cv_x_loss_start / cv_denom
             avg_cv_x_loss_em = [x / cv_denom for x in batch_cv_x_loss_em]
+            avg_cv_h_loss_em = [x / cv_denom for x in batch_cv_h_loss_em]
+            avg_cv_reg_em = [x / cv_denom for x in batch_cv_reg_em]
 
-            cv_em_msg = " ".join([f"cv_x_loss_em{k}={avg_cv_x_loss_em[k]:.6f}" for k in range(num_em_iters)])
+            cv_em_msg = " ".join([
+                f"cv_x{k}={avg_cv_x_loss_em[k]:.6f} "
+                f"cv_h{k}={avg_cv_h_loss_em[k]:.6f} "
+                f"cv_reg{k}={avg_cv_reg_em[k]:.6f}"
+                for k in range(num_em_iters)
+            ])
             print(f"[epoch {epoch:03d}] cv_x_loss_start={avg_cv_x_loss_start:.6f} {cv_em_msg} cv_all={cv_epoch:.6f}")
             print(f"BEST: epoch={self.MSE_cv_idx_opt}  best_cv_loss={self.MSE_cv_dB_opt:.6f}")
             if cv_epoch < self.MSE_cv_dB_opt:
@@ -12208,7 +12228,6 @@ class Pipeline_ERTS:
         n = SysModel.n  # CRITICAL: observation dimension
 
         all_test_losses = []
-        all_h_losses = []
 
         # Load and freeze RTSNet (smoother only)
         self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
@@ -12221,6 +12240,7 @@ class Pipeline_ERTS:
         loss_list = torch.zeros(N_T, device=device)
         x_loss_sum_per_iter = torch.zeros(num_em_iters, device=device)
         h_loss_per_iter = torch.zeros(num_em_iters, device=device)
+        reg_per_iter = torch.zeros(num_em_iters, device=device)
         final_H_list = []
         final_x_list = []
         list_x = []
@@ -12249,10 +12269,6 @@ class Pipeline_ERTS:
                 # --------- EM unrolling over H ---------
                 H_current = H_base.clone()
                 total_loss = 0.0
-                H_estimates = []
-                H_losses_mse = []
-                H_losses_total = []
-                x_losses_mse = []
 
                 if init_x_list is not None:
                     P0 = SysModel.m2x_0
@@ -12282,7 +12298,8 @@ class Pipeline_ERTS:
                 # ---------------- Stats for H M-network ----------------
                 x_curr = x_smooth  # [m, T]
                 y_curr = y_seq  # [n, T]
-                loss_x_list[0] += torch.mean((x_curr - x_true_seq) ** 2).item()
+                x_loss_init = torch.mean((x_curr - x_true_seq) ** 2).item()
+                loss_x_list[0] += x_loss_init
                 for em_iter in range(num_em_iters):
 
 
@@ -12339,7 +12356,8 @@ class Pipeline_ERTS:
                     x_curr = x_smooth  # [m, T]
                     y_curr = y_seq  # [n, T]
                     x_loss = torch.mean((x_curr - x_true_seq) ** 2)
-                    loss_x_list[em_iter + 1] += torch.mean((x_curr - x_true_seq) ** 2).item()
+
+                    loss_x_list[em_iter + 1] += x_loss.item()
 
                     # if em_iter == num_em_iters - 1:
                     #     loss_em = 15 * h_loss + reg + x_loss
@@ -12348,6 +12366,7 @@ class Pipeline_ERTS:
 
                     x_loss_sum_per_iter[em_iter] += x_loss.item()
                     h_loss_per_iter[em_iter] += h_loss.item()
+                    reg_per_iter[em_iter] += reg.item()
                     loss_em = h_loss + reg + x_loss
                     total_loss += loss_em.item()
                     # total_loss += weight * loss_em
@@ -12357,12 +12376,6 @@ class Pipeline_ERTS:
                     # all_h_losses.append(h_loss.item())
                     all_test_losses.append(loss_em.item())
                     # Store H estimates for selected sequences
-                    if j % 5 == 0:
-                        H_estimates.append(H_next.detach())
-                        H_losses_mse.append(h_loss.item())
-                        H_losses_total.append(loss_em.item())
-                        x_losses_mse.append(x_loss.item())
-
                 list_x.append(x_curr.detach().clone())
                 # Store final H and final x_smooth for this sequence
                 final_H_list.append(H_current.detach().clone())  # [n, m]
@@ -12371,40 +12384,31 @@ class Pipeline_ERTS:
                 # Final loss for this sequence
                 loss_list[j] = total_loss / float(num_em_iters)
 
-                # Print summary for selected sequences
-                # if j % 5 == 0:
-                #     print(f"\n[H M-step TEST] sequence {j} summary")
-                #     print("H_true:\n", H_true.detach())
-                #     print("H_init (H_base):\n", H_base.detach())
-                #
-                #     mse_H_init = torch.mean((H_base - H_true) ** 2).item()
-                #     print(f"Initial H MSE loss = {mse_H_init:.6e}")
-                #
-                #     for k, (H_est, h_mse, x_mse, total_val) in enumerate(
-                #             zip(H_estimates, H_losses_mse, x_losses_mse, H_losses_total)):
-                #         h_db = 10.0 * math.log10(h_mse)
-                #         x_db = 10.0 * math.log10(x_mse)
-                #         tot_db = 10.0 * math.log10(total_val)
-                #         print(f"\n  EM iter {k + 1}:")
-                #         print("  H_est:\n", H_est)
-                #         print(f"  H-loss (MSE_H)                 = {h_db:.2f} dB")
-                #         print(f"  x-loss (MSE_x)                 = {x_db:.2f} dB")
-                #         print(f"  total loss (H + reg + x)       = {tot_db:.2f} dB")
-
 
         mean_loss = loss_list.mean().item()
         print(f"[H M-step TEST] mean_loss={mean_loss:.6f}")
         # Average x-MSE for each EM iteration over all sequences
         mean_x_mse_per_iter = x_loss_sum_per_iter / float(N_T)
         mean_H_mse_per_iter = h_loss_per_iter / float(N_T)
+        mean_reg_per_iter = reg_per_iter / float(N_T)
+        mean_x_loss_list = loss_x_list / float(N_T)
 
-        print("[H M-step TEST] Mean x-MSE per EM iteration:")
+        print("[H M-step TEST] Mean losses per EM iteration:")
+
+        x0 = mean_x_loss_list[0].item()
+        print(f"  init: x_loss = {x0:.6e} ({10.0 * math.log10(x0):.2f} dB)")
+
         for k in range(num_em_iters):
-            mse_k = mean_x_mse_per_iter[k].item()
-            db_k = 10.0 * math.log10(mse_k)
-            print(f"  EM iter {k + 1}: mean x-MSE = {mse_k:.6e}  ({db_k: .2f} dB)")
-            print(f'x_loss_{k}', loss_x_list[k].item())
-        print(f'x_loss_{num_em_iters}', loss_x_list[num_em_iters].item())
+            x_k = mean_x_loss_list[k + 1].item()
+            h_k = mean_H_mse_per_iter[k].item()
+            reg_k = mean_reg_per_iter[k].item()
+
+            print(
+                f"  EM iter {k + 1}: "
+                f"x_loss = {x_k:.6e} ({10.0 * math.log10(x_k):.2f} dB), "
+                f"H_loss = {h_k:.6e} ({10.0 * math.log10(h_k):.2f} dB), "
+                f"reg = {reg_k:.6e} ({10.0 * math.log10(reg_k):.2f} dB)"
+            )
 
 
         # Convert per-iteration mean x-MSE to numpy (linear and dB)
