@@ -58,7 +58,7 @@ args.N_T = 200
 args.T = 30
 args.T_test = 30
 ### training parameters
-args.n_steps = 2000
+args.n_steps = 600
 args.n_batch = 30
 args.lr = 1e-3
 args.wd = 1e-3
@@ -67,22 +67,24 @@ offset = 0  # offset for the data
 chop = False  # whether to chop data sequences into shorter sequences
 # path_results = 'RTSNet/'
 DatafolderName = 'Simulations/Lorenz_Atractor/data/T100_Hrot1' + '/'
-switch = 'full'  # 'full' or 'partial' or 'estH' or rotated_true or rotated_partial
+switch = 'partial'  # 'full' or 'partial' or 'estH' or rotated_true or rotated_partial
 destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/1dataset/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/1dataset/M_step_net.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/1dataset/RTSNet_partial_joint.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/1dataset/M_step_net_joint.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_001/1dataset/M_step_net.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_001/1dataset/M_step_net_joint.pt'
 
 emkalmanet =True
 emkalmanet_joint =True
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([1.], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
-
+InitIsRandom_train = False
+InitIsRandom_cv = False
+InitIsRandom_test = False
 Q = q2[0] * Q_structure
 R = r2[0] * R_structure
 
@@ -102,10 +104,12 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
 fileName_H = "Simulations/Lorenz_Atractor/data/T100_Hrot1/2ndPass/partial/H_per_seq0.pt"
 print("Start Data Gen")
-DataGen(args, sys_model, DatafolderName + dataFileName[0],DatafolderName + dataFName[0],fileName_H =fileName_H ,H_gen = True)
+DataGen(args, sys_model, DatafolderName + dataFileName[0],DatafolderName + dataFName[0],fileName_H =fileName_H ,H_gen = True,randomInit_train=InitIsRandom_train,
+    randomInit_cv=InitIsRandom_cv,
+    randomInit_test=InitIsRandom_test)
 print("Data Load")
 print(dataFileName[0])
-[train_input_long, train_target_long, cv_input, cv_target, test_input, test_target] = torch.load(
+[train_input_long, train_target_long, train_init, cv_input, cv_target, cv_init, test_input, test_target, test_init] = torch.load(
     DatafolderName + dataFileName[0])
 
 # Load H matrices per sequence
@@ -137,7 +141,9 @@ cv_input = cv_input.to(device)
 cv_target = cv_target.to(device)
 test_input = test_input.to(device)
 test_target = test_target.to(device)
-
+train_init = train_init.to(device)
+cv_init = cv_init.to(device)
+test_init = test_init.to(device)
 if chop:
     print("chop training data")
     [train_target, train_input, train_init] = Short_Traj_Split(train_target_long, train_input_long, args.T)
@@ -186,9 +192,9 @@ sys_model_partial.H_valid = [H.clone() for H in H_matrices_val]
 sys_model_partial.H_test = [H.clone() for H in H_matrices_test]
 
 # Create WRONG H matrices by rotating them (F stays correct)
-sys_model_partial.H_train = rotate_H(sys_model_partial.H_train,  theta=0.6, many=True, randomit=True)
-sys_model_partial.H_valid = rotate_H(sys_model_partial.H_valid, theta=0.6,  many=True, randomit=True)
-sys_model_partial.H_test  = rotate_H(sys_model_partial.H_test,   theta=0.6, many=True, randomit=True)
+sys_model_partial.H_train = rotate_H(sys_model_partial.H_train,  theta=0.4, many=True, randomit=True)
+sys_model_partial.H_valid = rotate_H(sys_model_partial.H_valid, theta=0.4,  many=True, randomit=True)
+sys_model_partial.H_test  = rotate_H(sys_model_partial.H_test,   theta=0.4, many=True, randomit=True)
 # H is DIVERSE - different H matrices
 
 sys_model_partial.H_train_TRUE = H_matrices_train
@@ -251,70 +257,72 @@ input_sample = torch.reshape(test_input[0, :, :], [1, n, args.T_test])
 #######################
 ### Evaluate RTSNet ###
 #######################
-if switch == 'full':
+# if switch == 'full':
 
-    ## RTSNet - 1 full ###
-    ######################
-    ## Build Neural Network
-    print("RTSNet with full model info")
-    RTSNet_model = RTSNetNN()
-    RTSNet_model.NNBuild(sys_model, args)
-    # ## Train Neural Network
-    RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
-    RTSNet_Pipeline.setssModel(sys_model)
-    RTSNet_Pipeline.setModel(RTSNet_model,args)
-    print("Number of trainable parameters for RTSNet:",
-          sum(p.numel() for p in RTSNet_model.parameters() if p.requires_grad))
-    RTSNet_Pipeline.setTrainingParams(args)
-    [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,
-     MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target,
-                                                   destination_path_rtsnet_full,load_model_path=None ,generate_h=True)
-   # Test Neural Network
-    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
-        sys_model, test_input, test_target, destination_path_rtsnet_full,generate_h=True,generate_f=None)
+## RTSNet - 1 full ###
+######################
+## Build Neural Network
+print("RTSNet with full model info")
+RTSNet_model = RTSNetNN()
+RTSNet_model.NNBuild(sys_model, args)
+# ## Train Neural Network
+RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
+RTSNet_Pipeline.setssModel(sys_model)
+RTSNet_Pipeline.setModel(RTSNet_model,args)
+print("Number of trainable parameters for RTSNet:",
+      sum(p.numel() for p in RTSNet_model.parameters() if p.requires_grad))
+RTSNet_Pipeline.setTrainingParams(args)
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,
+ MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target,
+                                               destination_path_rtsnet_full,load_model_path=None ,generate_h=True,train_init=train_init,
+cv_init=cv_init)
+# Test Neural Network
+[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
+    sys_model, test_input, test_target, destination_path_rtsnet_full,generate_h=True,generate_f=None,init_x_list=test_init,
+init_P_list=None)
 
-    ## Save trained model
-    torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_full)
+## Save trained model
+torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_full)
 
     ####################################################################################
 
 ####################################################################################
-elif switch == 'partial':
-    ## RTSNet with model mismatch ####################################################################################
-    #########################
-    ## RTSNet - 1 partial ###
-    #########################
-    ## Build Neural Network
-    print("RTSNet with observation model mismatch")
-    RTSNet_model = RTSNetNN()
-    RTSNet_model.NNBuild(sys_model_partial, args)
-    ## Train Neural Network
-    RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
-    RTSNet_Pipeline.setssModel(sys_model_partial)
-    RTSNet_Pipeline.setModel(RTSNet_model,args)
-    RTSNet_Pipeline.setTrainingParams(args)
+# elif switch == 'partial':
+## RTSNet with model mismatch ####################################################################################
+#########################
+## RTSNet - 1 partial ###
+#########################
+## Build Neural Network
+print("RTSNet with observation model mismatch")
+RTSNet_model = RTSNetNN()
+RTSNet_model.NNBuild(sys_model_partial, args)
+## Train Neural Network
+RTSNet_Pipeline = Pipeline(strTime, "RTSNet", "RTSNet")
+RTSNet_Pipeline.setssModel(sys_model_partial)
+RTSNet_Pipeline.setModel(RTSNet_model,args)
+RTSNet_Pipeline.setTrainingParams(args)
 
-    # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,
-    #  MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_partial, cv_input, cv_target, train_input,
-    #                                                train_target, destination_path_rtsnet_partial,destination_path_rtsnet_full,generate_h=True)
-    ## Test Neural Network
-    [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
-        sys_model_partial, test_input, test_target, destination_path_rtsnet_partial,generate_h=True,generate_f=None)
-    # Save trained model
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_partial, cv_input, cv_target, train_input,
+                                    train_target, destination_path_rtsnet_partial,destination_path_rtsnet_full,generate_h=True)
+# ## Test Neural Network
+# [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
+#     sys_model_partial, test_input, test_target, destination_path_rtsnet_partial,generate_h=True,generate_f=None,init_x_list=test_init,
+# init_P_list=None)
+# Save trained model
 
-    torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_partial)
+torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_partial)
 
-    if emkalmanet:
-        # RTSNet_Pipeline.train_H_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
-        #                   destination_path_M_reg, destination_path_rtsnet_partial, load_destination_path_M = None,num_em_iters=num_em_iters,
-        #                   alpha=(0.15, 1, 0.85), lambda_H=1e-3, generate_h=True)
-        # if emkalmanet_joint:
-        RTSNet_Pipeline.train_jointH_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
-                              destination_path_M_joint, destination_path_rtsnet_partial_joint, destination_path_M_reg,destination_path_rtsnet_partial,num_em_iters=num_em_iters,
-                              alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
-        RTSNet_Pipeline.test_H_mstep_net(sys_model_partial, test_input, test_target,
-                         destination_path_rtsnet_partial_joint, destination_path_M_joint, num_em_iters=num_em_iters,
-                        lambda_H=1e-3, generate_h=True, init_x_list=None, init_P_list=None)
+if emkalmanet:
+    RTSNet_Pipeline.train_H_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
+                      destination_path_M_reg, destination_path_rtsnet_partial, load_destination_path_M = None,num_em_iters=num_em_iters,
+                      alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
+    # if emkalmanet_joint:
+    RTSNet_Pipeline.train_jointH_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
+                          destination_path_M_joint, destination_path_rtsnet_partial_joint, destination_path_M_reg,destination_path_rtsnet_partial,num_em_iters=num_em_iters,
+                          alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
+    # RTSNet_Pipeline.test_H_mstep_net(sys_model_partial, test_input, test_target,
+    #                  destination_path_rtsnet_partial_joint, destination_path_M_joint, num_em_iters=num_em_iters,
+    #                 lambda_H=1e-3, generate_h=True, init_x_list=None, init_P_list=None)
 
 ###################################################################################
 

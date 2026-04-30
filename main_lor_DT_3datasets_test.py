@@ -27,7 +27,7 @@ torch.backends.cudnn.benchmark = True  # optional
 
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
-SEED = 0
+SEED = 1
 # ============================================
 # STORAGE FOR PLOTTING PREDICTED X
 # ============================================
@@ -124,6 +124,7 @@ all_inputs_by_H = []
 all_targets_by_H = []
 all_H_matrices = []
 
+
 x0_last = None
 # Generate datasets with diverse H (F is FIXED)
 for dataset_id in range(1, cycles+1):
@@ -146,7 +147,43 @@ for dataset_id in range(1, cycles+1):
     # Generate data with FIXED F and DIVERSE H
     print(f"Generating data for dataset {dataset_id}...")
 
-    DataGen(args, sys_model,
+    if dataset_id == 1:
+        if InitIsRandom_test:
+            DataGen(args, sys_model,
+            dataFolderName + dataFileName,
+            dataFolderName + dataFileName_F,
+            fileName_H=dataFolderName + dataFileName_H,
+            delta=1,
+            randomInit_train=False,
+            randomInit_cv=False,
+            randomInit_test=True,
+            randomLength=False,
+            Test=True,
+            F_gen=False,  # F is FIXED across datasets
+            H_gen=H_current,
+            x0_list=x0_last,
+            H_init=H_current)  # Use x0_last for continuity in test set
+            [training_input, training_target, training_init, cv_input, cv_target, cv_init, test_input, test_target,test_init] = torch.load(
+            dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+        else:
+            DataGen(args, sys_model,
+                        dataFolderName + dataFileName,
+                        dataFolderName + dataFileName_F,
+                        fileName_H=dataFolderName + dataFileName_H,
+                        delta=1,
+                        randomInit_train=False,
+                        randomInit_cv=False,
+                        randomInit_test=False,
+                        randomLength=False,
+                        Test=True,
+                        F_gen=False,  # F is FIXED across datasets
+                        H_gen=H_current,
+                        x0_list=x0_last,
+                        H_init=H_current)  # Use x0_last for continuity in test set
+            [training_input, training_target, cv_input, cv_target, test_input, test_target] = torch.load(
+                    dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+    else:
+        DataGen(args, sys_model,
             dataFolderName + dataFileName,
             dataFolderName + dataFileName_F,
             fileName_H=dataFolderName + dataFileName_H,
@@ -160,9 +197,10 @@ for dataset_id in range(1, cycles+1):
             H_gen=H_current,
             x0_list=x0_last,
             H_init=H_current)  # Use x0_last for continuity in test set
-    # Load the generated data
-    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
-        dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+        #Load the generated data
+        [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
+            dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
     # print(f"H matrices loaded for dataset {H_test_mat_list}:")
     x_last = test_target[:,:,-1].clone()
@@ -177,6 +215,7 @@ for dataset_id in range(1, cycles+1):
     all_inputs_by_H.append(test_input)
     all_targets_by_H.append(test_target)
     all_H_matrices.append(H_test_mat_list)
+
 
 # ============================================================
 # Estimate Q,R from the TRUE generated data
@@ -206,6 +245,34 @@ sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  
 sys_model.InitSequence(m1x_0, m2x_0)  # x
 for d in range(cycles):
     all_true_x.append(all_targets_by_H[d].clone())
+
+bigru_path = 'RTSNet/lorenz_rotated_10/x_0_not_randomize/3datasets/benchmarks/bigru_smoother10.pt'
+
+bigru_mse_lin_sum = 0.0
+bigru_results = []
+
+for dataset_id in range(cycles):
+
+    print(f"\n--- BiGRU Dataset {dataset_id + 1} ---")
+
+    mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
+        test_input=all_inputs_by_H[dataset_id],
+        test_target=all_targets_by_H[dataset_id],
+        load_path=bigru_path,
+        device=device
+    )
+
+    bigru_results.append(mse_bigru_db)  # just for printing
+    bigru_mse_lin_sum += mse_bigru      # accumulate LINEAR MSE
+
+    print(f"Dataset {dataset_id+1} - BiGRU MSE: {mse_bigru_db:.3f} dB")
+avg_bigru_mse = bigru_mse_lin_sum / cycles
+avg_bigru_mse_db = 10 * torch.log10(torch.tensor(avg_bigru_mse, device=device))
+
+print("\n=== BiGRU SUMMARY ===")
+print(f"Average BiGRU MSE: {avg_bigru_mse_db.item():.3f} dB")
+
+
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -244,8 +311,14 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         # Use NNTest to get results with TRUE H
         #[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime]
+        # results = RTSNet_Pipeline.NNTest(
+        #     sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+        if InitIsRandom_test:
+            xT0_last = test_init.clone()
+        else:
+            xT0_last = None
         results = RTSNet_Pipeline.NNTest(
-            sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+            sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
     else:
         results = RTSNet_Pipeline.NNTest(
             sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
@@ -264,8 +337,6 @@ for dataset_id in range(cycles):
     pT0_last = sys_model_true.m2x_0.clone().detach()
 
 average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
-
-
 
 #############################################################################
 # AI EMKF Sequential Testing
@@ -308,12 +379,21 @@ for dataset_id in range(cycles):
     print(f"Running test_H_mstep_net on dataset {dataset_id + 1}...")
 
     if dataset_id == 0:
+        # x0_em_last = test_init.clone()
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
             destination_path_RTS=destination_path_rtsnet_partial_joint,
             destination_path_M=destination_path_M_joint,
             num_em_iters=num_iters,
             generate_h=False)
+        # test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
+        #     sys_model_ai, test_input, test_target,
+        #     destination_path_RTS=destination_path_rtsnet_partial_joint,
+        #     destination_path_M=destination_path_M_joint,
+        #     num_em_iters=num_iters,
+        #     generate_h=False,
+        #     init_x_list=x0_em_last,
+        #     init_P_list=None)
     else:
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
@@ -362,8 +442,12 @@ for dataset_id in range(cycles):
 
     # Use NNTest to get results with initial guess H
     if dataset_id == 0:
+        # xH0_last = test_init.clone()
         results = RTSNet_Pipeline.NNTest(
             sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+        # results = RTSNet_Pipeline.NNTest(
+        #     sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint, generate_h=False,
+        #     generate_f=None, init_x_list=xH0_last, init_P_list=None)
     else:
         results = RTSNet_Pipeline.NNTest(
             sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)

@@ -165,9 +165,28 @@ def test_bigru_smoother(
 
     with torch.no_grad():
         x_hat = model(test_input)
-        mse = torch.mean((x_hat - test_target) ** 2)
-        mse_db = 10.0 * torch.log10(mse)
 
-    print(f"[BiGRU TEST] MSE = {mse.item():.6e}, dB = {mse_db.item():.3f}")
+        print("test_input shape =", test_input.shape)
+        print("test_target shape =", test_target.shape)
+        print("x_hat shape =", x_hat.shape)
 
-    return mse, mse_db, x_hat
+        assert x_hat.shape == test_target.shape, \
+            f"Shape mismatch: x_hat={x_hat.shape}, target={test_target.shape}"
+
+        err = (x_hat - test_target) ** 2
+
+        mse_all = err.mean()
+        mse_per_dim = err.mean(dim=(0, 2))  # [m]
+        mse_per_t = err.mean(dim=(0, 1))  # [T]
+        mse_per_seq = err.mean(dim=(1, 2))  # [N]
+        mse_db = 10 * torch.log10(mse_all).item()
+        print("MSE all =", mse_all.item(), "dB =", 10 * torch.log10(mse_all).item())
+        # print("MSE per state dim =", mse_per_dim)
+        # print("MSE per state dim dB =", 10 * torch.log10(mse_per_dim))
+        # print("MSE first seq =", mse_per_seq[0].item())
+        # print("x_hat min/max =", x_hat.min().item(), x_hat.max().item())
+        # print("target min/max =", test_target.min().item(), test_target.max().item())
+
+    print(f"[BiGRU TEST] MSE = {mse_all.item():.6e}, dB = {10 * torch.log10(mse_all).item():.3f}")
+
+    return mse_all, mse_db, x_hat

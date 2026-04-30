@@ -331,7 +331,7 @@ class SystemModel:
             # Randomize initial conditions to get a rich dataset
             # NOTE: Only randomize if x0_list is NOT provided. If x0_list is provided, use it explicitly.
             if(randomInit ):
-                variance = 100
+                variance = 50
                 initConditions = torch.rand_like(self.m1x_0) * variance
                 self.m1x_0_rand[i,:] = torch.squeeze(initConditions)
             self.InitSequence(initConditions, self.m2x_0)

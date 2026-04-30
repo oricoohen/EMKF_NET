@@ -959,7 +959,7 @@ class Pipeline_ERTS:
 
         return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch, self.MSE_train_linear_epoch, self.MSE_train_dB_epoch]
     def NNTrain(self, SysModel, cv_input, cv_target, train_input, train_target,path_results, load_model_path=None,generate_f=False,generate_h=False,
-                CompositionLoss=False):
+                CompositionLoss=False, train_init=None, cv_init=None):
 
         self.N_E = len(train_input)
         self.N_CV = len(cv_input)
@@ -1029,6 +1029,8 @@ class Pipeline_ERTS:
                                      device=y_training.device, dtype=y_training.dtype)
 
                 # Init Hidden State
+                if train_init is not None:
+                    SysModel.m1x_0 = train_init[n_e]
                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
                 self.model.init_hidden()
 
@@ -1129,6 +1131,8 @@ class Pipeline_ERTS:
                         SysModel.H = SysModel.H_valid[index]
                         self.model.update_H(SysModel.H)
 
+                    if cv_init is not None:
+                        SysModel.m1x_0 = cv_init[j]
                     self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
                     self.model.init_hidden()
 
@@ -1621,7 +1625,7 @@ class Pipeline_ERTS:
                 if (init_x_list is not None):
                     P0 = SysModel.m2x_0
                     x0 = init_x_list[j]
-                    # SysModel.m1x_0=x0
+                    SysModel.m1x_0=x0
                 else:
                     P0 = SysModel.m2x_0
                     x0 = SysModel.m1x_0
@@ -9951,7 +9955,7 @@ class Pipeline_ERTS:
 
     def train_H_mstep_net_3_datasets_joint(self, SysModel, cv_input, cv_target, train_input, train_target,
                                      destination_path_M, destination_path_RTS,load_path_RTS, load_mnet, num_em_iters=3, H_init=None,
-                                     alpha=(0.05, 0.1, 0.85), lambda_H=1e-3, generate_h=True, datasets=3):
+                                     alpha=(0.05, 0.1, 0.85), lambda_H=1e-3, generate_h=True, datasets=3,x_0_train_list = None,x_0_cv_list =None):
         """
         M-step training for H (observation matrix) across 3 datasets.
         - F is FIXED (known dynamics) - same for all sequences and datasets
@@ -9996,6 +10000,9 @@ class Pipeline_ERTS:
 
                 H_base = H_init.clone().to(self.device) if H_init is not None else SysModel.H.clone().detach().to(
                     self.device)
+                if x_0_train_list == None:
+                    SysModel.m1x_0 = x_0_train_list[n_e]
+
                 x_0 = SysModel.m1x_0.clone().detach().to(self.device)
                 sample_total_loss = 0.0
 
@@ -10141,7 +10148,6 @@ class Pipeline_ERTS:
             with torch.no_grad():
                 for j in range(self.N_CV):
                     H_base_cv = H_init
-                    x_0_cv = SysModel.m1x_0
                     sample_total_loss_cv = 0.0
 
                     if H_init is None:
@@ -10150,8 +10156,9 @@ class Pipeline_ERTS:
                             H_base_cv = SysModel.H_valid[0][h_index].clone().detach().to(self.device)
                         else:
                             H_base_cv= SysModel.H_valid[0][j].clone().detach().to(self.device)
-
-
+                    if x_0_cv_list != None:
+                        SysModel.m1x_0 = x_0_cv_list[j]
+                    x_0_cv = SysModel.m1x_0.clone()
                     for data in range(datasets):
                         y_cv = cv_input[data][j]
                         x_true_cv_seq = cv_target[data][j]
@@ -11204,7 +11211,7 @@ class Pipeline_ERTS:
                 f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
     def train_H_mstep_net(self, SysModel, cv_input, cv_target, train_input, train_target,
                           destination_path_M, destination_path_RTS,load_destination_path_M=None, num_em_iters=3,
-                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True):
+                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True, train_init=None, cv_init=None):
         """
         Single-function M-step training for H (observation matrix).
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
@@ -11275,6 +11282,8 @@ class Pipeline_ERTS:
                 self.model.update_H(H_current)
 
                 # E-step via frozen RTSNet → x_smooth
+                if train_init is not None:
+                    SysModel.m1x_0 = train_init[n_e]
                 self.model.InitSequence(SysModel.m1x_0, T)
                 self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
                 self.model.init_hidden()
@@ -11442,6 +11451,8 @@ class Pipeline_ERTS:
 
                     # --- RTS smoother with current F_current_cv ---
                     self.model.update_H(H_current_cv)
+                    if cv_init is not None:
+                        SysModel.m1x_0 = cv_init[j]
                     self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
                     self.model.init_hidden()
                     self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
@@ -11560,7 +11571,7 @@ class Pipeline_ERTS:
 
     def train_jointH_mstep_net(self, SysModel, cv_input, cv_target, train_input, train_target,
                           destination_path_M, destination_path_RTS, load_destination_path_M=None, load_path_RTS=None,num_em_iters=3,
-                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True):
+                          alpha=(0.0, 0.0, 1.0), lambda_H=1e-3, generate_h=True,train_init = None,cv_init =None):
         """
         Single-function M-step training for H (observation matrix).
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
@@ -11633,7 +11644,13 @@ class Pipeline_ERTS:
                 self.model.update_H(H_current)
 
                 # E-step via frozen RTSNet → x_smooth
-                self.model.InitSequence(SysModel.m1x_0, T)
+                if train_init:
+                    x_0 = train_init[n_e]
+                    SysModel.m1x_0 = x_0
+                else:
+                    x_0 =SysModel.m1x_0
+
+                self.model.InitSequence(x_0, T)
                 self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
                 self.model.init_hidden()
 
@@ -11807,7 +11824,12 @@ class Pipeline_ERTS:
 
                     # --- RTS smoother with current F_current_cv ---
                     self.model.update_H(H_current_cv)
-                    self.model.InitSequence(SysModel.m1x_0.to(device), T_cv)
+                    if cv_init:
+                        x_0_cv = cv_init[j]
+                        SysModel.m1x_0 = x_0_cv
+                    else:
+                        x_0_cv = SysModel.m1x_0
+                    self.model.InitSequence(x_0_cv, T_cv)
                     self.model.init_hidden()
                     self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
 
