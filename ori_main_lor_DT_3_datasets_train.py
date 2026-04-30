@@ -68,7 +68,7 @@ args.T = 30
 args.T_test = 30
 ### training parameters
 args.n_steps = 700
-args.n_batch = 30
+args.n_batch = 15
 args.lr = 1e-3
 args.wd = 1e-3
 
@@ -107,7 +107,7 @@ destination_path_M_joint0_4 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_join
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_4 datasets_5H.pt'
-# destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_4datasets_5H.pt'
+# load_m = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_4datasets_5H.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_5 datasets.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets.pt'
 
@@ -174,9 +174,9 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
-    val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
-    test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
+    train_rotate =rotate_H(H_train_mat, theta=0.35, many=True, randomit=True)
+    val_rotate = rotate_H(H_val_mat, theta=0.35, many=True, randomit=True)
+    test_rotate = rotate_H(H_test_mat_list, theta=0.35, many=True, randomit=True)
 
     H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
@@ -301,21 +301,21 @@ print("\nStarting training...")
 #########################base lines###########################
 bigru_path = 'RTSNet/lorenz_rotated_10/x_0_not_randomize/3datasets/benchmarks/bigru_smoother10.pt'
 
-train_bigru_smoother(
-    train_input=all_train_inputs,
-    train_target=all_train_targets,
-    cv_input=all_cv_inputs,
-    cv_target=all_cv_targets,
-    n=n,
-    m=m,
-    save_path=bigru_path,
-    device=device,
-    epochs=300,
-    batch_size=32,
-    lr=1e-3,
-    hidden_size=128,
-    num_layers=2
-)
+# train_bigru_smoother(
+#     train_input=all_train_inputs,
+#     train_target=all_train_targets,
+#     cv_input=all_cv_inputs,
+#     cv_target=all_cv_targets,
+#     n=n,
+#     m=m,
+#     save_path=bigru_path,
+#     device=device,
+#     epochs=300,
+#     batch_size=32,
+#     lr=1e-3,
+#     hidden_size=128,
+#     num_layers=2
+# )
 
 mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
     test_input=all_test_inputs,

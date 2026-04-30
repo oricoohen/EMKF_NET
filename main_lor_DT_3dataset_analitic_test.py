@@ -15,7 +15,9 @@ from Simulations.Lorenz_Atractor.parameters import m1x_0, m2x_0, m, n, \
 from Simulations.Linear_sysmdl import rotate_F, rotate_H,estimate_Q_R_from_true_data, estimate_H_ls
 from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_H
 
-
+import matplotlib
+matplotlib.use("TkAgg")
+import matplotlib.pyplot as plt
 
 
 cudnn.benchmark = True
