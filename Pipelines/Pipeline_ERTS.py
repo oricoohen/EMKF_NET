@@ -10000,7 +10000,7 @@ class Pipeline_ERTS:
 
                 H_base = H_init.clone().to(self.device) if H_init is not None else SysModel.H.clone().detach().to(
                     self.device)
-                if x_0_train_list == None:
+                if x_0_train_list != None:
                     SysModel.m1x_0 = x_0_train_list[n_e]
 
                 x_0 = SysModel.m1x_0.clone().detach().to(self.device)
