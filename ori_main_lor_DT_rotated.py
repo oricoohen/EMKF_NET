@@ -58,7 +58,7 @@ args.N_T = 200
 args.T = 30
 args.T_test = 30
 ### training parameters
-args.n_steps = 400
+args.n_steps = 300
 args.n_batch = 30
 args.lr = 1e-3
 args.wd = 1e-3
@@ -309,12 +309,13 @@ RTSNet_Pipeline.setTrainingParams(args)
 torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_partial)
 
 if emkalmanet:
-    # RTSNet_Pipeline.train_H_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
-    #                   destination_path_M_reg, destination_path_rtsnet_partial, load_destination_path_M = None,num_em_iters=num_em_iters,
-    #                   alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
+    RTSNet_Pipeline.train_H_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
+                      destination_path_M_reg, destination_path_rtsnet_partial, load_destination_path_M = None,num_em_iters=num_em_iters,
+                      alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
     # if emkalmanet_joint:
     RTSNet_Pipeline.train_jointH_mstep_net(sys_model_partial, cv_input, cv_target, train_input, train_target,
-                          destination_path_M_joint, destination_path_rtsnet_partial_joint, destination_path_M_reg,destination_path_rtsnet_partial,num_em_iters=num_em_iters,
+                          destination_path_M =destination_path_M_joint, destination_path_RTS =destination_path_rtsnet_partial_joint,
+                                           load_destination_path_M= destination_path_M_reg,load_path_RTS =destination_path_rtsnet_partial,num_em_iters=num_em_iters,
                           alpha=(0.3, 1, 0.85), lambda_H=1e-3, generate_h=True)
     # RTSNet_Pipeline.test_H_mstep_net(sys_model_partial, test_input, test_target,
     #                  destination_path_rtsnet_partial_joint, destination_path_M_joint, num_em_iters=num_em_iters,
