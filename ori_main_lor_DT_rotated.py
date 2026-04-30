@@ -272,12 +272,10 @@ print("Number of trainable parameters for RTSNet:",
 RTSNet_Pipeline.setTrainingParams(args)
 [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,
  MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target,
-                                               destination_path_rtsnet_full,load_model_path=None ,generate_h=True,train_init=train_init,
-cv_init=cv_init)
+                                               destination_path_rtsnet_full,load_model_path=None ,generate_h=True)
 # Test Neural Network
 [MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime] = RTSNet_Pipeline.NNTest(
-    sys_model, test_input, test_target, destination_path_rtsnet_full,generate_h=True,generate_f=None,init_x_list=test_init,
-init_P_list=None)
+    sys_model, test_input, test_target, destination_path_rtsnet_full,generate_h=True,generate_f=None)
 
 ## Save trained model
 torch.save(RTSNet_Pipeline.model, destination_path_rtsnet_full)
