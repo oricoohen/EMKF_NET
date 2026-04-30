@@ -109,7 +109,7 @@ DataGen(args, sys_model, DatafolderName + dataFileName[0],DatafolderName + dataF
     randomInit_test=InitIsRandom_test)
 print("Data Load")
 print(dataFileName[0])
-[train_input_long, train_target_long, train_init, cv_input, cv_target, cv_init, test_input, test_target, test_init] = torch.load(
+[train_input_long, train_target_long, cv_input, cv_target, test_input, test_target] = torch.load(
     DatafolderName + dataFileName[0])
 
 # Load H matrices per sequence
@@ -141,9 +141,7 @@ cv_input = cv_input.to(device)
 cv_target = cv_target.to(device)
 test_input = test_input.to(device)
 test_target = test_target.to(device)
-train_init = train_init.to(device)
-cv_init = cv_init.to(device)
-test_init = test_init.to(device)
+
 if chop:
     print("chop training data")
     [train_target, train_input, train_init] = Short_Traj_Split(train_target_long, train_input_long, args.T)
