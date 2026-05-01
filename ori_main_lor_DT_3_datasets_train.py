@@ -338,8 +338,8 @@ print('RTSNet Full Training - H Estimation')
 
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_partial
-                        , destination_path_rtsnet_partial, H_init=H_Rotate, datasets=3)
+RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
+                        , load_path_RTS = load_path_rtsnet_partial_joint, H_init=H_Rotate, datasets=3)
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
