@@ -24,7 +24,12 @@ import shutil
 
 from Baselines.BiGRU_smoother import train_bigru_smoother, test_bigru_smoother
 print("Pipeline Start - EMKF H Estimation")
+import os
 
+def ensure_parent_dir(path: str):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
 # === ADD: global device/dtype ===
 DEVICE = torch.device("cuda")
 DTYPE = torch.float32
@@ -102,6 +107,16 @@ destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_pa
 destination_path_M_reg = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net_joint.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_partial_joint.pt'
+bigru_path = 'RTSNet/lorenz_rotated_001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+for p in [
+    destination_path_rtsnet_full,
+    destination_path_rtsnet_partial,
+    destination_path_M_reg,
+    destination_path_M_joint,
+    destination_path_rtsnet_partial_joint,
+    bigru_path,
+]:
+    ensure_parent_dir(p)
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
 all_train_targets = []
@@ -290,7 +305,7 @@ print("\nStarting training...")
 
 
 #########################base lines###########################
-bigru_path = 'RTSNet/lorenz_rotated_001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+
 
 train_bigru_smoother(
     train_input=all_train_inputs,
