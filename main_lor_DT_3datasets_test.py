@@ -94,17 +94,17 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_4 datasets_5H.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_4datasets_5H.pt'
+# destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
+# destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
+# destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
+destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_5 datasets_finallll.pt'
+destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets_finalllll.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/2iter_mnet.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 
 H_matrices_for_datasets_d = []
@@ -246,7 +246,7 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x
 for d in range(cycles):
     all_true_x.append(all_targets_by_H[d].clone())
 
-bigru_path = 'RTSNet/lorenz_rotated_10/x_0_not_randomize/3datasets/benchmarks/bigru_smoother10.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother.pt'
 
 bigru_mse_lin_sum = 0.0
 bigru_results = []
