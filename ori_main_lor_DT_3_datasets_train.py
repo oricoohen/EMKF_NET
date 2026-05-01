@@ -307,21 +307,21 @@ print("\nStarting training...")
 #########################base lines###########################
 
 
-train_bigru_smoother(
-    train_input=all_train_inputs,
-    train_target=all_train_targets,
-    cv_input=all_cv_inputs,
-    cv_target=all_cv_targets,
-    n=n,
-    m=m,
-    save_path=bigru_path,
-    device=device,
-    epochs=300,
-    batch_size=32,
-    lr=1e-3,
-    hidden_size=128,
-    num_layers=2
-)
+# train_bigru_smoother(
+#     train_input=all_train_inputs,
+#     train_target=all_train_targets,
+#     cv_input=all_cv_inputs,
+#     cv_target=all_cv_targets,
+#     n=n,
+#     m=m,
+#     save_path=bigru_path,
+#     device=device,
+#     epochs=300,
+#     batch_size=32,
+#     lr=1e-3,
+#     hidden_size=128,
+#     num_layers=2
+# )
 
 mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
     test_input=all_test_inputs,
@@ -333,8 +333,8 @@ mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
 
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
-                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=3)
+# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
+#                         , load_path_rtsnet_full, H_init=H_Rotate, datasets=3)
 
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
