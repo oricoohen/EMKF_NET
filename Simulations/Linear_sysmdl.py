@@ -281,7 +281,6 @@ def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.6, H_init=N
             # print('ori', H_i)
         else:
             H_i = rotate_H(H[k], theta=theta, many=False, randomit=True)
-            k
         # H_i = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
         H_matrices.append(H_i)
     return H_matrices
