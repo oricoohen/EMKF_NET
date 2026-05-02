@@ -79,10 +79,10 @@ args.wd = 1e-3
 
 torch.manual_seed(1)
 
-cycles = 4  # Number of datasets (each represents 30 timesteps with different F)
+cycles = 5  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10.], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -98,20 +98,20 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/1dataset/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_001/1dataset/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_partial_joint.pt'
+load_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/1dataset/RTSNet_full.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/1dataset/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/1dataset/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_10/1dataset/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint_final.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother5_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -184,9 +184,9 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    train_rotate =rotate_H(H_train_mat, theta=0.35, many=True, randomit=True)
-    val_rotate = rotate_H(H_val_mat, theta=0.35, many=True, randomit=True)
-    test_rotate = rotate_H(H_test_mat_list, theta=0.35, many=True, randomit=True)
+    train_rotate =rotate_H(H_train_mat, theta=0.3, many=True, randomit=True)
+    val_rotate = rotate_H(H_val_mat, theta=0.3, many=True, randomit=True)
+    test_rotate = rotate_H(H_test_mat_list, theta=0.3, many=True, randomit=True)
 
     H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
