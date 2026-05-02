@@ -118,7 +118,7 @@ for p in [
     destination_path_M_reg,
     destination_path_M_joint,
     destination_path_rtsnet_partial_joint,
-    bigru_path,
+    # bigru_path,
 ]:
     ensure_parent_dir(p)
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
@@ -327,12 +327,12 @@ print("\nStarting training...")
 #     num_layers=2
 # )
 
-mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
-    test_input=all_test_inputs,
-    test_target=all_test_targets,
-    load_path=bigru_path,
-    device=device
-)
+# mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
+#     test_input=all_test_inputs,
+#     test_target=all_test_targets,
+#     load_path=bigru_path,
+#     device=device
+# )
 
 
 ######################RTSNet Full Training - H Estimation######################
