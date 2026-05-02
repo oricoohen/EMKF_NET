@@ -82,7 +82,7 @@ num_iters = 2
 
 cycles = 5
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -94,10 +94,10 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
-# destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
+destination_path_M = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
@@ -105,10 +105,9 @@ destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0
 destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets_finalllll.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_joint_final.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint_final.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint_final.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
-
 H_matrices_for_datasets_d = []
 
 initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
@@ -116,7 +115,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.25, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 H_deji = [torch.eye(n, m, device=DEVICE) for _ in range(args.N_T)]
@@ -248,7 +247,7 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x
 for d in range(cycles):
     all_true_x.append(all_targets_by_H[d].clone())
 
-bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
 
 bigru_mse_lin_sum = 0.0
 bigru_results = []
@@ -295,6 +294,7 @@ print('\n=== Starting AI EMKF Experiment with Pre-trained RTSNet ===')
 print('\n=== Baseline: MSE with TRUE H matrices ===')
 true_H_results = []
 true_mse_lin_sum = 0.0
+xT0_last = None
 for dataset_id in range(cycles):
     print(f"\n--- Testing Dataset {dataset_id + 1} with TRUE H ---")
 
@@ -315,10 +315,10 @@ for dataset_id in range(cycles):
         #[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime]
         # results = RTSNet_Pipeline.NNTest(
         #     sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
-        if InitIsRandom_test:
-            xT0_last = test_init.clone()
-        else:
-            xT0_last = None
+        # if InitIsRandom_test:
+        #     xT0_last = test_init.clone()
+        # else:
+        #     xT0_last = None
         results = RTSNet_Pipeline.NNTest(
             sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
     else:
@@ -380,12 +380,13 @@ for dataset_id in range(cycles):
     # Run test_H_mstep_net (this will iteratively improve H estimates)
     print(f"Running test_H_mstep_net on dataset {dataset_id + 1}...")
 
+
     if dataset_id == 0:
         # x0_em_last = test_init.clone()
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial_joint,
-            destination_path_M=destination_path_M_joint,
+            destination_path_RTS=destination_path_rtsnet_partial,
+            destination_path_M=destination_path_M,
             num_em_iters=num_iters,
             generate_h=False)
         # test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
@@ -399,8 +400,8 @@ for dataset_id in range(cycles):
     else:
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial_joint,
-            destination_path_M=destination_path_M_joint,
+            destination_path_RTS=destination_path_rtsnet_partial,
+            destination_path_M=destination_path_M,
             num_em_iters=num_iters,
             generate_h=False,
             init_x_list=x0_em_last,
@@ -446,13 +447,13 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         # xH0_last = test_init.clone()
         results = RTSNet_Pipeline.NNTest(
-            sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
         # results = RTSNet_Pipeline.NNTest(
         #     sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint, generate_h=False,
         #     generate_f=None, init_x_list=xH0_last, init_P_list=None)
     else:
         results = RTSNet_Pipeline.NNTest(
-            sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
 
     all_initH_x.append(results[3].detach().clone())  # [N_T, m, T]
     # Extract MSE in dB

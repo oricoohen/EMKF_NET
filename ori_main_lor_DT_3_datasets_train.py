@@ -79,7 +79,7 @@ args.wd = 1e-3
 
 torch.manual_seed(1)
 
-cycles = 5  # Number of datasets (each represents 30 timesteps with different F)
+cycles = 4  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
 r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
@@ -184,9 +184,9 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
-    val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
-    test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
+    train_rotate =rotate_H(H_train_mat, theta=0.35, many=True, randomit=True)
+    val_rotate = rotate_H(H_val_mat, theta=0.35, many=True, randomit=True)
+    test_rotate = rotate_H(H_test_mat_list, theta=0.35, many=True, randomit=True)
 
     H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
