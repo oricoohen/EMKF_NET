@@ -109,7 +109,7 @@ destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint_final.pt'
-# destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
+# destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother5_datasets.pt'
 for p in [

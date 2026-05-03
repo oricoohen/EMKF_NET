@@ -92,14 +92,14 @@ print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
 load_path_rtsnet_full = 'RTSNet/william/1dataset/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/william/1dataset/RTSNet_partial.pt'
+load_path_rtsnet_partial = 'RTSNet/william/1dataset/RTSNet_partial2h.pt'
 load_path_rtsnet_partial_joint = 'RTSNet/william/1dataset/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/william/1dataset/M_step_net_joint.pt'
+load_path_M_joint = 'RTSNet/william/1dataset/M_step_net_joint2h.pt'
 destination_path_rtsnet_full = 'RTSNet/william/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/william/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_partial = 'RTSNet/william/3datasets/RTSNet_partial2h.pt'
 destination_path_M_reg = 'RTSNet/william/3datasets/M_step_net.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/william/3datasets/RTSNet_partial_joint.pt'
-destination_path_M_joint = 'RTSNet/william/3datasets/M_step_net_joint.pt'
+destination_path_M_joint = 'RTSNet/william/3datasets/M_step_net_joint2h.pt'
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
 all_train_targets = []

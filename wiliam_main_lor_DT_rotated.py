@@ -69,10 +69,10 @@ chop = False  # whether to chop data sequences into shorter sequences
 DatafolderName = 'Simulations/Lorenz_Atractor/data/T100_Hrot1' + '/'
 switch = 'full'  # 'full' or 'partial' or 'estH' or rotated_true or rotated_partial
 destination_path_rtsnet_full = 'RTSNet/william/1dataset/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/william/1dataset/RTSNet_partial.pt'
+destination_path_rtsnet_partial = 'RTSNet/william/1dataset/RTSNet_partial2h.pt'
 destination_path_M_reg = 'RTSNet/william/1dataset/M_step_net.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/william/1dataset/RTSNet_partial_joint.pt'
-destination_path_M_joint = 'RTSNet/william/1dataset/M_step_net_joint.pt'
+destination_path_M_joint = 'RTSNet/william/1dataset/M_step_net_joint2h.pt'
 
 emkalmanet =True
 emkalmanet_joint =True

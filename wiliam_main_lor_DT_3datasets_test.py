@@ -95,10 +95,10 @@ print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
 destination_path_rtsnet_full = 'RTSNet/william/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/william/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_partial = 'RTSNet/william/3datasets/RTSNet_partial2h.pt'
 destination_path_M_reg = 'RTSNet/william/3datasets/M_step_net.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/william/3datasets/RTSNet_partial_joint.pt'
-destination_path_M_joint = 'RTSNet/william/3datasets/M_step_net_joint.pt'
+destination_path_M_joint = 'RTSNet/william/3datasets/M_step_net_joint2h.pt'
 
 # Generate diverse H matrices for datasets (F is FIXED)
 

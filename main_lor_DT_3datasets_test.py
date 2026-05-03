@@ -102,7 +102,7 @@ destination_path_M = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
 destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.4_5 datasets_finallll.pt'
-destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets_finalllll.pt'
+# destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets_finalllll.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_joint_final.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
@@ -386,8 +386,8 @@ for dataset_id in range(cycles):
         # x0_em_last = test_init.clone()
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial,
-            destination_path_M=destination_path_M,
+            destination_path_RTS=destination_path_rtsnet_partial_joint,
+            destination_path_M=destination_path_M_joint,
             num_em_iters=num_iters,
             generate_h=False)
         # test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
@@ -401,8 +401,8 @@ for dataset_id in range(cycles):
     else:
         test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
             sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial,
-            destination_path_M=destination_path_M,
+            destination_path_RTS=destination_path_rtsnet_partial_joint,
+            destination_path_M=destination_path_M_joint,
             num_em_iters=num_iters,
             generate_h=False,
             init_x_list=x0_em_last,
