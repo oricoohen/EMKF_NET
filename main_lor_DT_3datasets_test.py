@@ -105,8 +105,8 @@ destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.4_5datasets_finalllll.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_joint_final.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/one/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/one/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 H_matrices_for_datasets_d = []
 
