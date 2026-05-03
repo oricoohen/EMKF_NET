@@ -73,7 +73,18 @@ destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/1dataset/RTSNet_pa
 destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/1dataset/M_step_net.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/1dataset/RTSNet_partial_joint.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/1dataset/M_step_net_joint.pt'
+import os
 
+paths = [
+    destination_path_rtsnet_full,
+    destination_path_rtsnet_partial,
+    destination_path_M_reg,
+    destination_path_rtsnet_partial_joint,
+    destination_path_M_joint
+]
+
+for p in paths:
+    os.makedirs(os.path.dirname(p), exist_ok=True)
 emkalmanet =True
 emkalmanet_joint =True
 num_em_iters = 2
