@@ -111,7 +111,7 @@ destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/RT
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint_final.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_01/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_0001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -327,12 +327,12 @@ print("\nStarting training...")
 #     num_layers=2
 # )
 
-mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
-    test_input=all_test_inputs,
-    test_target=all_test_targets,
-    load_path=bigru_path,
-    device=device
-)
+# mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
+#     test_input=all_test_inputs,
+#     test_target=all_test_targets,
+#     load_path=bigru_path,
+#     device=device
+# )
 
 
 ######################RTSNet Full Training - H Estimation######################
