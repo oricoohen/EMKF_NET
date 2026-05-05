@@ -10104,7 +10104,7 @@ class Pipeline_ERTS:
 
                         x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                         batch_x_loss_em[em_iter] += x_loss.detach().item()
-                        loss_em = 2*h_loss + reg*0.5 + x_loss
+                        loss_em = 5*h_loss + reg*0.5 + x_loss
 
                         if em_iter == 0:
                             weight = alpha[0]
@@ -10243,7 +10243,7 @@ class Pipeline_ERTS:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = 2*h_loss_cv + reg_cv*0.5 + x_loss_cv
+                            loss_em_cv = 5*h_loss_cv + reg_cv*0.5 + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
