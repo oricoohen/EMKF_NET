@@ -71,8 +71,8 @@ switch = 'partial'  # 'full' or 'partial' or 'estH' or rotated_true or rotated_p
 destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_full.pt'
 destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial.pt'
 destination_path_M_reg = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial_joint2.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net_joint2.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net_joint.pt'
 import os
 
 paths = [
