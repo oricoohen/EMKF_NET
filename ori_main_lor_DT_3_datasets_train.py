@@ -82,7 +82,7 @@ torch.manual_seed(1)
 cycles = 5  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
