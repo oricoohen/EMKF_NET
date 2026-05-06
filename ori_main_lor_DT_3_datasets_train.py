@@ -74,7 +74,7 @@ args.T_test = 30
 ### training parameters
 args.n_steps = 400
 args.n_batch = 15
-args.lr = 1e-3
+args.lr = 1e-4
 args.wd = 1e-3
 
 torch.manual_seed(1)
@@ -82,7 +82,7 @@ torch.manual_seed(1)
 cycles = 5  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -98,20 +98,20 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/1dataset/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/1dataset/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/1dataset/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_0001/1dataset/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_partial_joint.pt'
+load_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_full.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_01/3datasets/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint_final.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint_final.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_0001/3datasets/benchmarks/bigru_smoother5_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_01/3datasets/benchmarks/bigru_smoother5_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -326,7 +326,7 @@ print("\nStarting training...")
 #     hidden_size=128,
 #     num_layers=2
 # )
-
+#
 # mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
 #     test_input=all_test_inputs,
 #     test_target=all_test_targets,
@@ -372,8 +372,8 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
     destination_path_M=destination_path_M_joint,
     destination_path_RTS=destination_path_rtsnet_partial_joint,
-    load_path_RTS=destination_path_rtsnet_partial,
-    load_mnet=destination_path_M_reg,
+    load_path_RTS=load_path_rtsnet_partial_joint,
+    load_mnet=load_path_M_joint,
     num_em_iters=num_em_iters,
     alpha=(0.4, 1., 0.),          # Weights for EM iterations
     lambda_H=1e-3,                    # Regularization on ΔH

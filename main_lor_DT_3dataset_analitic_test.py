@@ -99,9 +99,9 @@ torch.manual_seed(1)
 
 max_iter = 10
 
-cycles = 3
+cycles = 5
 
-r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -118,7 +118,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.25, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
@@ -372,37 +372,37 @@ x_emkf_glued = torch.cat([all_emkf_x[d][sample_idx] for d in range(cycles)], dim
 x_initH_glued = torch.cat([all_initH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
 
 T_len = all_true_x[0].shape[2]
-
-for dim in range(x_true_glued.shape[0]):
-    plt.figure(figsize=(12, 5))
-
-    plt.plot(x_true_glued[dim].numpy(), label="True x", linewidth=2)
-    plt.plot(x_rts_trueH_glued[dim].numpy(), label="RTS (TRUE H)", linewidth=2)
-    plt.plot(x_emkf_glued[dim].numpy(), label="EMKF / learned H", linewidth=2)
-    plt.plot(x_initH_glued[dim].numpy(), label="RTS (initial H)", linewidth=2)
-
-    for d in range(1, cycles):
-        plt.axvline(d * T_len, linestyle='--')
-
-    plt.title(f"Glued trajectories for x[{dim}] - sample {sample_idx}")
-    plt.xlabel("t")
-    plt.ylabel("value")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
-
-fig = plt.figure(figsize=(9, 7))
-ax = fig.add_subplot(111, projection='3d')
-
-ax.plot(x_true_glued[0].numpy(), x_true_glued[1].numpy(), x_true_glued[2].numpy(), label="True x", linewidth=2)
-ax.plot(x_rts_trueH_glued[0].numpy(), x_rts_trueH_glued[1].numpy(), x_rts_trueH_glued[2].numpy(), label="RTS TRUE H", linewidth=2)
-ax.plot(x_emkf_glued[0].numpy(), x_emkf_glued[1].numpy(), x_emkf_glued[2].numpy(), label="EMKF learned H", linewidth=2)
-ax.plot(x_initH_glued[0].numpy(), x_initH_glued[1].numpy(), x_initH_glued[2].numpy(), label="RTS initial H", linewidth=2)
-
-ax.set_title(f"3D glued trajectories - sample {sample_idx}")
-ax.set_xlabel("x1")
-ax.set_ylabel("x2")
-ax.set_zlabel("x3")
-ax.legend()
-plt.tight_layout()
-plt.show()
+#
+# for dim in range(x_true_glued.shape[0]):
+#     plt.figure(figsize=(12, 5))
+#
+#     plt.plot(x_true_glued[dim].numpy(), label="True x", linewidth=2)
+#     plt.plot(x_rts_trueH_glued[dim].numpy(), label="RTS (TRUE H)", linewidth=2)
+#     plt.plot(x_emkf_glued[dim].numpy(), label="EMKF / learned H", linewidth=2)
+#     plt.plot(x_initH_glued[dim].numpy(), label="RTS (initial H)", linewidth=2)
+#
+#     for d in range(1, cycles):
+#         plt.axvline(d * T_len, linestyle='--')
+#
+#     plt.title(f"Glued trajectories for x[{dim}] - sample {sample_idx}")
+#     plt.xlabel("t")
+#     plt.ylabel("value")
+#     plt.legend()
+#     plt.tight_layout()
+#     plt.show()
+#
+# fig = plt.figure(figsize=(9, 7))
+# ax = fig.add_subplot(111, projection='3d')
+#
+# ax.plot(x_true_glued[0].numpy(), x_true_glued[1].numpy(), x_true_glued[2].numpy(), label="True x", linewidth=2)
+# ax.plot(x_rts_trueH_glued[0].numpy(), x_rts_trueH_glued[1].numpy(), x_rts_trueH_glued[2].numpy(), label="RTS TRUE H", linewidth=2)
+# ax.plot(x_emkf_glued[0].numpy(), x_emkf_glued[1].numpy(), x_emkf_glued[2].numpy(), label="EMKF learned H", linewidth=2)
+# ax.plot(x_initH_glued[0].numpy(), x_initH_glued[1].numpy(), x_initH_glued[2].numpy(), label="RTS initial H", linewidth=2)
+#
+# ax.set_title(f"3D glued trajectories - sample {sample_idx}")
+# ax.set_xlabel("x1")
+# ax.set_ylabel("x2")
+# ax.set_zlabel("x3")
+# ax.legend()
+# plt.tight_layout()
+# plt.show()
