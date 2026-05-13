@@ -269,7 +269,7 @@ class RTSNetNN(KalmanNetNN):
         hidden = weight.new(1, self.batch_size, self.d_hidden_S).zero_()
 
         self.h_S = hidden.data
-        self.h_S[0, 0, :self.m ** 2] = self.prior_S.flatten()
+        self.h_S[0, 0, :self.n ** 2] = self.prior_S.flatten()
 
         hidden = weight.new(1, self.batch_size, self.d_hidden_Sigma).zero_()
         self.h_Sigma = hidden.data

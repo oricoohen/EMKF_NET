@@ -106,7 +106,7 @@ destination_path_rtsnet_joint_h = 'RTSNet/lorenz_rotated_10/3datasets/joint/rtsn
 destination_path_mnet_joint_h = 'RTSNet/lorenz_rotated_10/3datasets/joint/2iter_mnet_mnet_30_h0.8.pt'
 destination_path_joint_mnet_diff_start= 'RTSNet/lorenz_rotated_10/1dataset/M_step_net_joint.pt'
 destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz_rotated_10/1dataset/RTSNet_partial_joint.pt'
-destination_path_jmnet_rts = 'RTSNet/lorenz_rotated_10/3datasets/Mstep_net_RTS_regular_2iters.pt'
+destination_path_jmnet_rts = 'RTSNet/lorenz_rotated_10/3datasets/old/Mstep_net_RTS_regular_2iters.pt'
 load_path_M_rts_rts = 'RTSNet/lorenz_rotated_10/1dataset/partial/m_net/Mstep_net_new_2iters_30_RTS_ANALITIC.pt'
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
