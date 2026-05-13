@@ -79,7 +79,7 @@ args.wd = 1e-3
 
 torch.manual_seed(1)
 
-cycles = 1  # Number of datasets (each represents 30 timesteps with different F)
+cycles = 10  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
 r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
