@@ -98,20 +98,20 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/10_d_RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/10_d_RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/10_d_M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/10_d_M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/10_d_RTSNet_partial_joint.pt'
+load_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/10_d_RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/10_d_RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_10/3datasets/10_d_M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/10_d_M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/10_d_RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_1/3datasets/benchmarks/bigru_smoother10_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother10_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
