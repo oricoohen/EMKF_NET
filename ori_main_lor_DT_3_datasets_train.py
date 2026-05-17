@@ -82,7 +82,7 @@ torch.manual_seed(1)
 cycles = 10  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -111,7 +111,7 @@ destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/10R
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_001/10datasets/benchmarks/bigru_smoother1_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -333,8 +333,8 @@ train_bigru_smoother(
 #     load_path=bigru_path,
 #     device=device
 # )
-
-
+q
+o
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
 RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full

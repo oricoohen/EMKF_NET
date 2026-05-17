@@ -21,7 +21,7 @@ import matplotlib.pyplot as plt
 
 
 cudnn.benchmark = True
-SEED = 0
+SEED = 1
 
 random.seed(SEED)
 torch.manual_seed(SEED)
@@ -43,7 +43,7 @@ torch.backends.cudnn.benchmark = True  # optional
 
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
-SEED = 0
+SEED = 1
 # ============================================
 # STORAGE FOR PLOTTING PREDICTED X
 # ============================================
@@ -99,9 +99,9 @@ torch.manual_seed(1)
 
 max_iter = 10
 
-cycles = 5
+cycles = 10
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -118,7 +118,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.1, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
@@ -261,22 +261,22 @@ for dataset_id in range(cycles):
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
 
-    if dataset_id == 0:
-        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-            sys_model, test_input, test_target,
-            H_list=H_initial_estimate,
-            generate_h=False,
-            init_x_list=None,
-            init_P_list=None
-        )
-    else:
-        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-            sys_model, test_input, test_target,
-            H_list=H_initial_estimate,
-            generate_h=False,
-            init_x_list=x0_last,
-            init_P_list=p0_last
-        )
+    # if dataset_id == 0:
+    #     [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+    #         sys_model, test_input, test_target,
+    #         H_list=H_initial_estimate,
+    #         generate_h=False,
+    #         init_x_list=None,
+    #         init_P_list=None
+    #     )
+    # else:
+    #     [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+    #         sys_model, test_input, test_target,
+    #         H_list=H_initial_estimate,
+    #         generate_h=False,
+    #         init_x_list=x0_last,
+    #         init_P_list=p0_last
+    #     )
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     all_initH_x.append(x_list.detach().clone())
     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]

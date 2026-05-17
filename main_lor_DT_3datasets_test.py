@@ -108,7 +108,7 @@ destination_path_M = 'RTSNet/lorenz_rotated_10/10datasets/M_step_net.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_10/10datasets/M_step_net_joint.pt'####0.3=-0.17, old_joint = -1
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/10datasets/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
-bigru_path = 'RTSNet/lorenz_rotated_10/3datasets/benchmarks/bigru_smoother10_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []
 
 initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
