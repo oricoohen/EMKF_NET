@@ -82,7 +82,7 @@ torch.manual_seed(1)
 cycles = 10  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -102,11 +102,11 @@ load_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_full.pt'
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial.pt'
 load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial_joint.pt'
 load_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_01/3datasets/1_d_M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/3datasets/RTSNet_partial_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/3datasets/10RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/10RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_01/3datasets/10_d_M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/10M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/3datasets/10RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
