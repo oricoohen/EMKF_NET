@@ -48,8 +48,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 20
-args.T_test = 20
+args.T = 30
+args.T_test = 30
 ### training parameters
 args.n_steps = 400
 args.n_batch = 30
@@ -213,12 +213,12 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
-#     sys_model_true, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+ MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
+    sys_model_true, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -241,12 +241,12 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
-#     sys_model_false, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+ MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
+    sys_model_false, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 
 
