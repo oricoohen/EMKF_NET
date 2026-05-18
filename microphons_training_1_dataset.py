@@ -67,9 +67,9 @@ r2 = 10   # measurement noise variance (R = r2 * I_n)
 # theta_true:  F per group drawn Uniform(-theta_true/2, +theta_true/2)
 # theta_false: false F = true_theta + Uniform(-theta_false/2, +theta_false/2)
 theta_true  = 0.4   # [rad]
-theta_false = 3   # [rad]
+theta_false = 0.4   # [rad]
 
-Q     = (q2 * Q_structure).to(device)
+Q     = (q2 * Q_structure).to(device) 
 R     = (r2 * R_structure).to(device)
 m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
@@ -213,12 +213,12 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
- MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
-    sys_model_true, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_true,
-    generate_f=True,
-)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
+#     sys_model_true, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -241,12 +241,12 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
- MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
-    sys_model_false, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
-    generate_f=True,
-)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
+#     sys_model_false, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 
 
