@@ -17,7 +17,6 @@ class KalmanNetNN(torch.nn.Module):
     def NNBuild(self, SysModel, args):
 
         self.F = SysModel.F
-        self.H = SysModel.H
         self.InitSystemDynamics(SysModel.f, SysModel.h, SysModel.m, SysModel.n)
 
         # Number of neurons in the 1st hidden layer
@@ -40,7 +39,7 @@ class KalmanNetNN(torch.nn.Module):
         self.prior_Q = prior_Q
         self.prior_Sigma = prior_Sigma
         self.prior_S = prior_S
-        
+
         mult = 4
 
         # GRU to track Q
@@ -50,14 +49,13 @@ class KalmanNetNN(torch.nn.Module):
         self.h_Q = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Q, device=self.dev, dtype=self.dt)
 
         # GRU to track Sigma
-        # self.d_input_Sigma = self.d_hidden_Q + self.m * args.in_mult_KNet + (self.m ** 2) * args.in_mult_KNet # (self.m ** 2) * args.in_mult_KNet is the F output
-        self.d_input_Sigma = self.d_hidden_Q + self.m * args.in_mult_KNet  # no_F
+        self.d_input_Sigma = self.d_hidden_Q + self.m * args.in_mult_KNet + (self.m ** 2) * args.in_mult_KNet # (self.m ** 2) * args.in_mult_KNet is the F output
         self.d_hidden_Sigma = (self.m ** 2) * mult
         self.GRU_Sigma = nn.GRU(self.d_input_Sigma, self.d_hidden_Sigma)
         self.h_Sigma = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_Sigma, device=self.dev, dtype=self.dt)
 
         # GRU to track S
-        self.d_input_S = self.n ** 2 + 2 * self.n * args.in_mult_KNet + (self.n * self.m) * args.in_mult_KNet  # Added H output
+        self.d_input_S = self.n ** 2 + 2 * self.n * args.in_mult_KNet
         self.d_hidden_S = (self.n ** 2)* mult
         self.GRU_S = nn.GRU(self.d_input_S, self.d_hidden_S)
         self.h_S = torch.randn(self.seq_len_input, self.batch_size, self.d_hidden_S, device=self.dev, dtype=self.dt)
@@ -114,36 +112,21 @@ class KalmanNetNN(torch.nn.Module):
                 nn.ReLU())
 
         # Fully connected F
-        # no_F
-        # self.d_input_FC8 = self.m ** 2
-        # self.d_output_FC8 = self.d_input_FC8 * args.in_mult_KNet  # latent size h
-        # # new:
-        # self.d_hidden_FC8_1 = self.d_input_FC8  * 4  # e.g. the 4 is with no reason
-        # self.d_hidden_FC8_2 = self.d_input_FC8  * 2  # e.g. the 2 is with no reason
-        # # new deeper FC8
-        # self.FC8 = nn.Sequential(nn.Linear(self.d_input_FC8, self.d_hidden_FC8_1),
-        #     nn.LayerNorm(self.d_hidden_FC8_1),
-        #     nn.ReLU(),
-        #     nn.Linear(self.d_hidden_FC8_1, self.d_hidden_FC8_2),
-        #     nn.LayerNorm(self.d_hidden_FC8_2),
-        #     nn.ReLU(),
-        #     nn.Linear(self.d_hidden_FC8_2, self.d_output_FC8),
-        #     nn.LayerNorm(self.d_output_FC8),
-        #     nn.ReLU())
 
-        # Fully connected H (similar to FC8 for F)
-        self.d_input_FC9 = self.n * self.m
-        self.d_output_FC9 = self.d_input_FC9 * args.in_mult_KNet  # latent size h
-        self.d_hidden_FC9_1 = self.d_input_FC9 * 4
-        self.d_hidden_FC9_2 = self.d_input_FC9 * 2
-        self.FC9 = nn.Sequential(nn.Linear(self.d_input_FC9, self.d_hidden_FC9_1),
-            nn.LayerNorm(self.d_hidden_FC9_1),
+        self.d_input_FC8 = self.m ** 2
+        self.d_output_FC8 = self.d_input_FC8 * args.in_mult_KNet  # latent size h
+        # new:
+        self.d_hidden_FC8_1 = self.d_input_FC8  * 4  # e.g. the 4 is with no reason
+        self.d_hidden_FC8_2 = self.d_input_FC8  * 2  # e.g. the 2 is with no reason
+        # new deeper FC8
+        self.FC8 = nn.Sequential(nn.Linear(self.d_input_FC8, self.d_hidden_FC8_1),
+            nn.LayerNorm(self.d_hidden_FC8_1),
             nn.ReLU(),
-            nn.Linear(self.d_hidden_FC9_1, self.d_hidden_FC9_2),
-            nn.LayerNorm(self.d_hidden_FC9_2),
+            nn.Linear(self.d_hidden_FC8_1, self.d_hidden_FC8_2),
+            nn.LayerNorm(self.d_hidden_FC8_2),
             nn.ReLU(),
-            nn.Linear(self.d_hidden_FC9_2, self.d_output_FC9),
-            nn.LayerNorm(self.d_output_FC9),
+            nn.Linear(self.d_hidden_FC8_2, self.d_output_FC8),
+            nn.LayerNorm(self.d_output_FC8),
             nn.ReLU())
 
 
@@ -156,13 +139,6 @@ class KalmanNetNN(torch.nn.Module):
     def update_F(self,F ):
         self.F = F
         self.f =self.f_new
-
-    def h_new(self,x):
-        return torch.matmul(self.H, x)
-
-    def update_H(self,H ):
-        self.H = H
-        self.h =self.h_new
 
 
 
@@ -198,6 +174,7 @@ class KalmanNetNN(torch.nn.Module):
     def step_prior(self):
         # Predict the 1-st moment of x
         self.m1x_prior = torch.squeeze(self.f(self.m1x_posterior))
+        # print('forst',self.m1x_prior,'second,',self.m1x_posterior)
         # print('kalmannnnnnnnnnnnnnnnnnnnnnnnnnnnnnn',self.m1x_prior)
         # Predict the 1-st moment of y
         self.m1y = torch.squeeze(self.h(self.m1x_prior))
@@ -223,7 +200,7 @@ class KalmanNetNN(torch.nn.Module):
         fw_update_diff = self.standardize(fw_update_diff)
         # Kalman Gain Network Step
         KG = self.KGain_step(obs_diff, obs_innov_diff, fw_evol_diff, fw_update_diff)
-
+        # print(KG.mean(), KG.std())
         # Reshape Kalman Gain to a Matrix
         self.KGain = torch.reshape(KG, (self.m, self.n))
 
@@ -284,15 +261,11 @@ class KalmanNetNN(torch.nn.Module):
         ### Forward Flow ###
         ####################
 
-        # in_FC8 = self.F.flatten().unsqueeze(0).unsqueeze(0)  # [1,1,m²] ori change it + it works just on linear f #no_F
-        # in_FC8 = self.standardize(in_FC8)  # NEW ← match FC5/6
-        # out_FC8 = self.FC8(in_FC8)  # [1,1,h]
+        in_FC8 = self.F.flatten().unsqueeze(0).unsqueeze(0)  # [1,1,m²] ori change it + it works just on linear f
+        # in_FC8 = self.standardize(in_FC8)  # disabled: double-norm kills F distinguishability
+        out_FC8 = self.FC8(in_FC8)  # [1,1,h]
 
-        # FC9 for H matrix
-        in_FC9 = self.H.flatten().unsqueeze(0).unsqueeze(0)  # [1,1,n*m]
-        # in_FC9 = self.standardize(in_FC9)
-        out_FC9 = self.FC9(in_FC9)  # [1,1,h]
-
+        # print('F', self.F)
         # FC 5
         in_FC5 = fw_evol_diff
         out_FC5 = self.FC5(in_FC5)
@@ -307,8 +280,7 @@ class KalmanNetNN(torch.nn.Module):
         out_FC6 = self.FC6(in_FC6)
 
         # Sigma_GRU
-        # in_Sigma = torch.cat((out_Q, out_FC6, out_FC8), 2)##no_F
-        in_Sigma = torch.cat((out_Q, out_FC6), 2)
+        in_Sigma = torch.cat((out_Q, out_FC6, out_FC8), 2)#ori changed
         out_Sigma, self.h_Sigma = self.GRU_Sigma(in_Sigma, self.h_Sigma)
 
 
@@ -322,7 +294,7 @@ class KalmanNetNN(torch.nn.Module):
 
 
         # S-GRU
-        in_S = torch.cat((out_FC1, out_FC7, out_FC9), 2)  # Added out_FC9 for H
+        in_S = torch.cat((out_FC1, out_FC7), 2)
         out_S, self.h_S = self.GRU_S(in_S, self.h_S)
 
 
@@ -369,4 +341,3 @@ class KalmanNetNN(torch.nn.Module):
         hidden = weight.new(1, self.batch_size, self.d_hidden_Q).zero_()
         self.h_Q = hidden.data
         self.h_Q[0, 0, :] = self.prior_Q.flatten()
-

@@ -1,0 +1,11 @@
+project-includes = ["**/*.py"]
+project-excludes = [
+  "**/.git/**",
+  "**/.idea/**",
+  "**/__pycache__/**",
+  "**/venv/**",
+]
+
+search-path = ["."]
+python-interpreter-path = "venv/Scripts/python.exe"
+disable-type-errors-in-ide = true

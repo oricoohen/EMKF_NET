@@ -5,7 +5,7 @@ from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_H
-from Smoothers.Extended_RTS_Smoother_test import S_Test_ext
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_old as S_Test_ext
 import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
 
@@ -218,7 +218,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
 
 
 
-def E_EMKF_F_analitic(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None):
+def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:

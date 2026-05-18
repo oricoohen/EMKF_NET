@@ -2,8 +2,13 @@
 Theoretical Non Linear Kalman
 """
 import torch
+from torch import autograd
 
-from Simulations.Lorenz_Atractor.parameters import getJacobian
+def getJacobian(x, g):
+    y = x.reshape(-1)
+    m = y.size(0)
+    Jac = autograd.functional.jacobian(g, y)
+    return Jac.view(-1, m)
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class ExtendedKalmanFilter:

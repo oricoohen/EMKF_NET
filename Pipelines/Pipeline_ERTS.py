@@ -11408,7 +11408,7 @@ class Pipeline_ERTS:
                         weight = alpha[1]  # Second EM iteration
                     else:
                         weight = alpha[2]  # Third EM iteration (rest)
-                    total_loss_seq_backward += weight*(0.1*h_loss_em + x_loss_em)
+                    total_loss_seq_backward += weight*(5*h_loss_em + x_loss_em)
                 loss_seq_avarage = total_loss_seq_backward
                 total_loss_batch += loss_seq_avarage
             total_loss_batch = total_loss_batch / float(self.N_B)
@@ -11551,7 +11551,7 @@ class Pipeline_ERTS:
                                 weight = alpha[0]
                         elif em_iter == 1:
                                 weight = alpha[1]
-                        total_loss_seq_cv += weight*(x_loss_cv + 0.1*h_loss_cv.item() + 0.1*reg_cv.item())
+                        total_loss_seq_cv += weight*(x_loss_cv + 5*h_loss_cv.item() + 0.1*reg_cv.item())
                     cv_loss_seq_mean = total_loss_seq_cv
                     total_loss_cv += cv_loss_seq_mean.item()
 
@@ -11781,7 +11781,7 @@ class Pipeline_ERTS:
                         weight = alpha[1]  # Second EM iteration
                     else:
                         weight = alpha[2]  # Third EM iteration (rest)
-                    total_loss_seq_backward += weight * (0.5 * h_loss_em + x_loss_em)
+                    total_loss_seq_backward += weight * (2 * h_loss_em + x_loss_em)
                 loss_seq_avarage = total_loss_seq_backward
                 total_loss_batch += loss_seq_avarage
             total_loss_batch = total_loss_batch / float(self.N_B)
@@ -11927,7 +11927,7 @@ class Pipeline_ERTS:
                             weight = alpha[1]
                         else:
                             weight = alpha[2]
-                        total_loss_seq_cv += weight * (x_loss_cv + 0.5*h_loss_cv.item() + 0.25 * reg_cv.item())
+                        total_loss_seq_cv += weight * (x_loss_cv + 2*h_loss_cv.item() + 0.5 * reg_cv.item())
                     cv_loss_seq_mean = total_loss_seq_cv
                     total_loss_cv += cv_loss_seq_mean.item()
 

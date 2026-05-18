@@ -2,7 +2,13 @@
 Theoretical Non-linear Linear RTS Smoother
 """
 import torch
-from Simulations.Lorenz_Atractor.parameters import getJacobian
+from torch import autograd
+
+def getJacobian(x, g):
+    y = x.reshape(-1)
+    m = y.size(0)
+    Jac = autograd.functional.jacobian(g, y)
+    return Jac.view(-1, m)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class Extended_rts_smoother:
 
