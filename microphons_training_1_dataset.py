@@ -77,11 +77,11 @@ m2x_0 = m2x_0.to(device)
 ### paths
 save_dir = "RTSNet/tdoa_2d/10/"
 os.makedirs(save_dir, exist_ok=True)
-destination_path_rtsnet_true  = save_dir + "RTSNet_trueF.pt"
-destination_path_rtsnet_false = save_dir + "RTSNet_falseF.pt"
-destination_path_M_F = save_dir + "M_step_F_net.pt"
-destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_jointF.pt"
-destination_path_M_F_joint = save_dir + "M_step_F_net_jointF.pt"
+destination_path_rtsnet_true  = save_dir + "RTSNet_trueF21.pt"
+destination_path_rtsnet_false = save_dir + "RTSNet_falseF2.pt"
+destination_path_M_F = save_dir + "M_step_F_net2.pt"
+destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_jointF2.pt"
+destination_path_M_F_joint = save_dir + "M_step_F_net_jointF2.pt"
 
 print("=" * 70)
 print("2D TDOA RTSNet experiment — true-F and false-F models")
@@ -213,12 +213,12 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
-#     sys_model_true, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+ MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
+    sys_model_true, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -241,12 +241,12 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
-#     sys_model_false, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+ MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
+    sys_model_false, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 
 
