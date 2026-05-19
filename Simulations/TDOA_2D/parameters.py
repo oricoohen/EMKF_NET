@@ -144,10 +144,10 @@ def generate_single_traj(
     thetas_rad: list,
     Q_gen: torch.Tensor = None,
     R_gen: torch.Tensor = None,
+    x_init: torch.Tensor = None,
 ) -> tuple:
     """
     One trajectory of length T with equal-size blocks.
-    All sequences start from the same fixed m1x_0 (no randomness in init).
 
     Returns
     -------
@@ -167,7 +167,7 @@ def generate_single_traj(
 
     states = torch.zeros(m, T, device=device)
     obs    = torch.zeros(n,   T, device=device)
-    x      = m1x_0.reshape(-1).clone()   # [4]
+    x      = x_init.reshape(-1).clone() if x_init is not None else m1x_0.reshape(-1).clone()  # [4]
 
     for t in range(T):
         k   = min(t // block_size, n_blocks - 1)
@@ -255,11 +255,14 @@ def make_get_F_from_matrix(F_matrix: torch.Tensor):
 
 def generate_dataset_random_theta(N: int, T: int, theta_true_max: float,
                                   Q_gen: torch.Tensor = None,
-                                  R_gen: torch.Tensor = None):
+                                  R_gen: torch.Tensor = None,
+                                  x_init: torch.Tensor = None,
+                                  theta_base: float = 0.0):
     """
     Generate N trajectories in groups of 10.
-    Each group uses ONE random theta ~ Uniform(-theta_true_max/2, +theta_true_max/2)
+    Each group uses ONE random theta ~ theta_base + Uniform(-theta_true_max/2, +theta_true_max/2)
     as a constant F for all T time steps of those 10 sequences.
+    All trajectories start from x_init (defaults to m1x_0 if None).
     N must be a multiple of 10.
 
     Returns
@@ -282,15 +285,14 @@ def generate_dataset_random_theta(N: int, T: int, theta_true_max: float,
     F_list     = []
 
     for g in range(n_groups):
-        theta = (_random.random() - 0.5) * theta_true_max   # Uniform(-max/2, +max/2)
+        theta = theta_base + (_random.random() - 0.5) * theta_true_max   # theta_base + Uniform(-max/2, +max/2)
         theta_list.append(theta)
         F_list.append(make_F_block(theta))
         for s in range(10):
             idx = g * 10 + s
-            # generate_single_traj with [theta] → single block → constant F
-            states, obs = generate_single_traj(T, [theta], Q_gen, R_gen)
+            states, obs = generate_single_traj(T, [theta], Q_gen, R_gen, x_init=x_init)
             targets[idx] = states
-            inputs[idx]  = obs  
+            inputs[idx]  = obs
 
     return inputs, targets, theta_list, F_list
 

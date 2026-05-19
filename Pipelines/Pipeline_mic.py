@@ -343,6 +343,7 @@ class Pipeline_mic:
             for _ in range(self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
                 sample_loss = 0.0
+                x_0 = SysModel.m1x_0.clone().detach()
 
                 for data in range(datasets):
                     y_seq      = train_input[data][n_e]
@@ -355,7 +356,7 @@ class Pipeline_mic:
                         F_k = SysModel.F_train[data][n_e]
 
                     self.model.update_F(F_k)
-                    self.model.InitSequence(SysModel.m1x_0, T)
+                    self.model.InitSequence(x_0, T)
                     self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
                     self.model.init_hidden()
 
@@ -372,6 +373,7 @@ class Pipeline_mic:
                         x_smo[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smo[:, t + 2])
 
                     sample_loss += torch.mean((x_smo - x_true_seq) ** 2)
+                    x_0 = x_smo[:, T - 1].detach()
 
                 batch_loss += sample_loss / datasets
 
@@ -386,6 +388,7 @@ class Pipeline_mic:
             with torch.no_grad():
                 for j in range(self.N_CV):
                     sample_loss_cv = 0.0
+                    x_0_cv = SysModel.m1x_0.clone().detach()
                     for data in range(datasets):
                         y_cv      = cv_input[data][j]
                         x_true_cv = cv_target[data][j]
@@ -397,7 +400,7 @@ class Pipeline_mic:
                             F_k_cv = SysModel.F_valid[data][j]
 
                         self.model.update_F(F_k_cv)
-                        self.model.InitSequence(SysModel.m1x_0, T_cv)
+                        self.model.InitSequence(x_0_cv, T_cv)
                         self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
                         self.model.init_hidden()
 
@@ -414,6 +417,7 @@ class Pipeline_mic:
                             x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
 
                         sample_loss_cv += torch.mean((x_s_cv - x_true_cv) ** 2).item()
+                        x_0_cv = x_s_cv[:, T_cv - 1].detach()
 
                     cv_loss_sum += sample_loss_cv / datasets
 
@@ -580,7 +584,7 @@ class Pipeline_mic:
                         weight = alpha[1]
                     else:
                         weight = alpha[2]
-                    total_loss_seq += weight * (0.1 * f_loss + 4*x_loss + reg)
+                    total_loss_seq += weight * (f_loss + reg)
 
                 total_loss_batch += total_loss_seq
 
@@ -874,7 +878,7 @@ class Pipeline_mic:
                         weight = alpha[1]
                     else:
                         weight = alpha[2]
-                    total_loss_seq += weight * (0.1 * f_loss + 4*x_loss + reg)
+                    total_loss_seq += weight * (10 * f_loss + 0.5*x_loss + reg)
 
                 total_loss_batch += total_loss_seq
 
@@ -1010,7 +1014,7 @@ class Pipeline_mic:
                             weight_cv = alpha[1]
                         else:
                             weight_cv = alpha[2]
-                        total_loss_seq_cv += weight_cv * (0.1 * f_loss_cv.item() + 4*x_loss_cv.item()
+                        total_loss_seq_cv += weight_cv * (10 * f_loss_cv.item() + 0.5*x_loss_cv.item()
                                                           +  reg_cv.item())
 
                     total_loss_cv += total_loss_seq_cv

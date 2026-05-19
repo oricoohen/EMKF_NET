@@ -48,25 +48,25 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 20
-args.T_test = 20
+args.T = 30
+args.T_test = 30
 ### training parameters
 args.n_steps = 400
 args.n_batch = 30
-args.lr = 1e-3
+args.lr = 1e-4
 args.wd = 1e-3
 
 T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 1e-4
-r2 = 1e-3
+q2 = 0.1
+r2 = 10
 
 ### cycle: number of datasets
 cycle = 5
 # Max theta per dataset [rad] — each group of 10 sequences draws theta ~ Uniform(-max/2, +max/2)
-theta_changed_list = [0.2, 0.2, 0.2,0.2,0.2]
+theta_changed_list = [0.3, 0.3, 0.3,0.3,0.3]
 assert len(theta_changed_list) == cycle
 
 ### false F mismatch
@@ -129,13 +129,24 @@ all_F_train_false = []
 all_F_cv_false    = []
 all_F_test_false  = []
 
+# Carry state between datasets: last state of last trajectory and last group theta
+carry_x_train  = None;  carry_theta_train  = 0.0
+carry_x_cv     = None;  carry_theta_cv     = 0.0
+carry_x_test   = None;  carry_theta_test   = 0.0
+
 for k in range(cycle):
     theta_changed = theta_changed_list[k]
-    print(f"  Dataset {k}: theta ~ Uniform(-{theta_changed/2:.3f}, +{theta_changed/2:.3f}) rad per group")
+    print(f"  Dataset {k}: theta ~ theta_prev + Uniform(-{theta_changed/2:.3f}, +{theta_changed/2:.3f}) rad per group")
+    print(f"            theta_base: train={carry_theta_train:.4f}  cv={carry_theta_cv:.4f}  test={carry_theta_test:.4f}")
 
-    ti, tt, th_tr, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_changed, Q, R)
-    ci, ct, th_cv, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_changed, Q, R)
-    xi, xt, th_te, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_changed, Q, R)
+    ti, tt, th_tr, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_changed, Q, R, x_init=carry_x_train, theta_base=carry_theta_train)
+    ci, ct, th_cv, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_changed, Q, R, x_init=carry_x_cv,    theta_base=carry_theta_cv)
+    xi, xt, th_te, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_changed, Q, R, x_init=carry_x_test,  theta_base=carry_theta_test)
+
+    # Update carry: last state of last trajectory, last group's theta
+    carry_x_train  = tt[-1, :, -1];  carry_theta_train  = th_tr[-1]
+    carry_x_cv     = ct[-1, :, -1];  carry_theta_cv     = th_cv[-1]
+    carry_x_test   = xt[-1, :, -1];  carry_theta_test   = th_te[-1]
 
     F_tr_f = generate_false_F_list(th_tr, theta_false)
     F_cv_f = generate_false_F_list(th_cv, theta_false)

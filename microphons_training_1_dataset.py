@@ -67,7 +67,7 @@ r2 = 10   # measurement noise variance (R = r2 * I_n)
 # theta_true:  F per group drawn Uniform(-theta_true/2, +theta_true/2)
 # theta_false: false F = true_theta + Uniform(-theta_false/2, +theta_false/2)
 theta_true  = 0.4   # [rad]
-theta_false = 0.4   # [rad]
+theta_false = 2   # [rad]
 
 Q     = (q2 * Q_structure).to(device) 
 R     = (r2 * R_structure).to(device)
@@ -77,11 +77,11 @@ m2x_0 = m2x_0.to(device)
 ### paths
 save_dir = "RTSNet/tdoa_2d/10/"
 os.makedirs(save_dir, exist_ok=True)
-destination_path_rtsnet_true  = save_dir + "RTSNet_trueF21.pt"
-destination_path_rtsnet_false = save_dir + "RTSNet_falseF2.pt"
-destination_path_M_F = save_dir + "M_step_F_net2.pt"
-destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_jointF2.pt"
-destination_path_M_F_joint = save_dir + "M_step_F_net_jointF2.pt"
+destination_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
+destination_path_rtsnet_false = save_dir + "RTSNet_false.pt"
+destination_path_M_F = save_dir + "M_step_F_net.pt"
+destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint_arge_f_loss.pt"
+destination_path_M_F_joint = save_dir + "M_step_F_net_joint_large_f_loss.pt"
 
 print("=" * 70)
 print("2D TDOA RTSNet experiment — true-F and false-F models")
@@ -178,25 +178,31 @@ sys_model_false.F_valid_TRUE = F_cv_true
 sys_model_false.F_test_TRUE  = F_test_true
 
 ########################################
-### Analytic baselines (one sequence) ###
+### Analytic baselines (all test seqs) ###
 ########################################
-print("\nRunning analytic baselines on test sequence 0 ...")
+print("\nRunning analytic baselines averaged over all test sequences ...")
+mse_erts_true_sum  = 0.0
+mse_erts_false_sum = 0.0
+for i in range(args.N_T):
+    g        = i // 10
+    states_i = test_target[i]
+    obs_i    = test_input[i]
+    x_et, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_true[g]),  Q_in=Q, R_in=R)
+    x_ef, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_false[g]), Q_in=Q, R_in=R)
+    mse_erts_true_sum  += loss_fn(x_et, states_i).item()
+    mse_erts_false_sum += loss_fn(x_ef, states_i).item()
+
+mse_erts_true  = mse_erts_true_sum  / args.N_T
+mse_erts_false = mse_erts_false_sum / args.N_T
+
+print(f"  ERTS TRUE-F  MSE (avg): {10 * math.log10(mse_erts_true):.2f} dB")
+print(f"  ERTS FALSE-F MSE (avg): {10 * math.log10(mse_erts_false):.2f} dB")
+
+# keep seq-0 outputs for the plot
 states = test_target[0]
 obs    = test_input[0]
-
-# F_test_true[0]  is the F that generated sequences 0-9
-# F_test_false[0] is the corresponding wrong F for that group
-get_F_true_fn  = make_get_F_from_matrix(F_test_true[0])
-get_F_false_fn = make_get_F_from_matrix(F_test_false[0])
-
-x_erts_true,  *_ = run_ekf_erts(obs, get_F_true_fn,  Q_in=Q, R_in=R)
-x_erts_false, *_ = run_ekf_erts(obs, get_F_false_fn, Q_in=Q, R_in=R)
-
-mse_erts_true  = loss_fn(x_erts_true,  states).item()
-mse_erts_false = loss_fn(x_erts_false, states).item()
-
-print(f"  ERTS TRUE-F  MSE: {10 * math.log10(mse_erts_true):.2f} dB")
-print(f"  ERTS FALSE-F MSE: {10 * math.log10(mse_erts_false):.2f} dB")
+x_erts_true,  *_ = run_ekf_erts(obs, make_get_F_from_matrix(F_test_true[0]),  Q_in=Q, R_in=R)
+x_erts_false, *_ = run_ekf_erts(obs, make_get_F_from_matrix(F_test_false[0]), Q_in=Q, R_in=R)
 
 #######################
 ### RTSNet true-F   ###
@@ -213,12 +219,12 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
- MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
-    sys_model_true, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_true,
-    generate_f=True,
-)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
+#     sys_model_true, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -241,12 +247,12 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-[MSE_cv_linear_epoch, MSE_cv_dB_epoch,
- MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
-    sys_model_false, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
-    generate_f=True,
-)
+# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
+#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
+#     sys_model_false, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 
 
@@ -261,22 +267,30 @@ print("Number of trainable parameters for RTSNet:",
 #############################
 print("\nEMKalmanNet: training MNet to update F")
 
+# DELETE
+diff = sys_model_false.F_train[0] - sys_model_false.F_train_TRUE[0]
+print("F_false[0]:\n", sys_model_false.F_train[0])
+print("F_true[0]:\n",  sys_model_false.F_train_TRUE[0])
+print("||F_false - F_true||^2 =", diff.pow(2).mean().item(),
+      f"({10*math.log10(max(diff.pow(2).mean().item(), 1e-10)):.2f} dB)")
+# DELETE
+
 num_em_iters = 2
 
-RTSNet_Pipeline_false.train_F_mstep_net(
-    sys_model_false,
-    cv_input,
-    cv_target,
-    train_input,
-    train_target,
-    destination_path_M=destination_path_M_F,
-    destination_path_RTS=destination_path_rtsnet_false,
-    load_destination_path_M=None,
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-)
+# RTSNet_Pipeline_false.train_F_mstep_net(
+#     sys_model_false,
+#     cv_input,
+#     cv_target,
+#     train_input,
+#     train_target,
+#     destination_path_M=destination_path_M_F,
+#     destination_path_RTS=destination_path_rtsnet_false,
+#     load_destination_path_M=None,
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0, 0.85),
+#     lambda_F=1e-3,
+#     generate_f=True,
+# )
 
 [MSE_test_arr_mnet, MSE_test_avg_mnet, MSE_test_dB_avg_mnet,
  rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net(
@@ -306,7 +320,7 @@ RTSNet_Pipeline_false.train_joint_F_mstep_net(
     load_destination_path_RTS=destination_path_rtsnet_false,
     load_destination_path_M=destination_path_M_F,
     num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
+    alpha=(0.3, 1.0),
     lambda_F=1e-3,
     generate_f=True,
 )
@@ -354,8 +368,8 @@ print("  Saved:", save_dir + "tdoa_rtsnet_y_position.png")
 print("\n" + "=" * 70)
 print("RESULTS SUMMARY")
 print("=" * 70)
-print(f"  ERTS TRUE-F  (seq 0)      : {10 * math.log10(mse_erts_true):.2f} dB")
-print(f"  ERTS FALSE-F (seq 0)      : {10 * math.log10(mse_erts_false):.2f} dB")
+print(f"  ERTS TRUE-F  (avg)        : {10 * math.log10(mse_erts_true):.2f} dB")
+print(f"  ERTS FALSE-F (avg)        : {10 * math.log10(mse_erts_false):.2f} dB")
 print(f"  RTSNet TRUE-F  (avg)      : {MSE_test_dB_avg_true.item():.2f} dB")
 print(f"  RTSNet FALSE-F (avg)      : {MSE_test_dB_avg_false.item():.2f} dB")
 print(f"  EMKalmanNet F-MNet        : {MSE_test_dB_avg_mnet.item():.2f} dB")
