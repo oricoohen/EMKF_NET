@@ -397,6 +397,9 @@ class Pipeline_mic:
         optimizer = torch.optim.Adam(
             self.model.parameters(), lr=self.learningRate, weight_decay=self.weightDecay
         )
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode='min', factor=0.5, patience=10, min_lr=1e-6
+        )
 
         self.MSE_cv_dB_opt  = 1000
         self.MSE_cv_idx_opt = 0
@@ -489,7 +492,13 @@ class Pipeline_mic:
 
             cv_epoch = cv_loss_sum / self.N_CV
             cv_dB    = 10 * math.log10(cv_epoch) if cv_epoch > 0 else float('inf')
-            print(f"[epoch {epoch:03d}] train={loss.item():.6f}  cv={cv_epoch:.6f}  cv_dB={cv_dB:.2f} dB")
+
+            prev_lr = optimizer.param_groups[0]['lr']
+            scheduler.step(cv_epoch)
+            curr_lr = optimizer.param_groups[0]['lr']
+            lr_str  = f"  lr={curr_lr:.2e}" if curr_lr != prev_lr else ""
+
+            print(f"[epoch {epoch:03d}] train={loss.item():.6f}  cv={cv_epoch:.6f}  cv_dB={cv_dB:.2f} dB{lr_str}")
 
             if cv_epoch < self.MSE_cv_dB_opt:
                 self.MSE_cv_dB_opt  = cv_epoch

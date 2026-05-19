@@ -64,16 +64,20 @@ def compute_cross_covariances(
 
 def run_ekf_erts(y_seq: torch.Tensor, get_F,
                  Q_in: torch.Tensor = None,
-                 R_in: torch.Tensor = None) -> tuple:
+                 R_in: torch.Tensor = None,
+                 x_init: torch.Tensor = None,
+                 P_init: torch.Tensor = None) -> tuple:
     """
     One EKF forward pass followed by one ERTS backward pass.
 
     Parameters
     ----------
-    y_seq : [n_obs, T_len]   noisy observations
-    get_F : callable(t: int) -> [m_state, m_state]
-    Q_in  : [m, m]  process noise covariance (defaults to module-level Q)
-    R_in  : [n, n]  measurement noise covariance (defaults to module-level R)
+    y_seq  : [n_obs, T_len]   noisy observations
+    get_F  : callable(t: int) -> [m_state, m_state]
+    Q_in   : [m, m]  process noise covariance (defaults to module-level Q)
+    R_in   : [n, n]  measurement noise covariance (defaults to module-level R)
+    x_init : [m] or [m,1]  initial state mean   (defaults to m1x_0)
+    P_init : [m, m]        initial state covariance (defaults to m2x_0)
 
     Returns
     -------
@@ -85,8 +89,9 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
     H_last   : [n, m]
     K_last   : [m, n]
     """
-    Q_use = Q if Q_in is None else Q_in
-    R_use = R if R_in is None else R_in
+    Q_use  = Q if Q_in is None else Q_in
+    R_use  = R if R_in is None else R_in
+    P0_use = m2x_0.to(device) if P_init is None else P_init.to(device)
 
     T_len = y_seq.shape[1]
 
@@ -95,8 +100,8 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
     F_seq = torch.zeros(m, m, T_len, device=device)
     I_m   = torch.eye(m, device=device)
 
-    x_p    = m1x_0.reshape(-1).clone().to(device)
-    P_p    = m2x_0.clone().to(device)
+    x_p = m1x_0.reshape(-1).clone().to(device) if x_init is None else x_init.reshape(-1).clone().to(device)
+    P_p = P0_use.clone()
     H_last = None
     K_last = None
 
@@ -142,8 +147,8 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
 
     # Extra smoother gain for cross-covariance recursion at t = -1
     F_0   = F_seq[:, :, 0]
-    Ppr_0 = F_0 @ m2x_0.to(device) @ F_0.T + Q_use
-    J_m1  = m2x_0.to(device) @ F_0.T @ torch.linalg.inv(Ppr_0)
+    Ppr_0 = F_0 @ P0_use @ F_0.T + Q_use
+    J_m1  = P0_use @ F_0.T @ torch.linalg.inv(Ppr_0)
     sgains.append(J_m1.clone())
 
     return x_s, P_s, P_f, sgains, H_last, K_last
