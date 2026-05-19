@@ -102,16 +102,16 @@ load_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_full.pt'
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_partial.pt'
 load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_0001/3datasets/RTSNet_partial_joint.pt'
 load_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/10RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/10RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/3datasets/10_d_M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/10M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/10RTSNet_partial_joint.pt'
-# destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'
-# destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/10datasets/10RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/10datasets/10RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/10datasets/10_M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/10datasets/10M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/10datasets/10RTSNet_partial_joint.pt'
+# destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_jointb.pt'
+# destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
-# destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
-bigru_path = 'RTSNet/lorenz_rotated_0001/10datasets/benchmarks/bigru_smoother1_datasets.pt'
+# destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
+bigru_path = 'RTSNet/lorenz_rotated_001/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -311,21 +311,21 @@ print("\nStarting training...")
 #########################base lines###########################
 
 
-train_bigru_smoother(
-    train_input=all_train_inputs,
-    train_target=all_train_targets,
-    cv_input=all_cv_inputs,
-    cv_target=all_cv_targets,
-    n=n,
-    m=m,
-    save_path=bigru_path,
-    device=device,
-    epochs=300,
-    batch_size=32,
-    lr=1e-3,
-    hidden_size=128,
-    num_layers=2
-)
+# train_bigru_smoother(
+#     train_input=all_train_inputs,
+#     train_target=all_train_targets,
+#     cv_input=all_cv_inputs,
+#     cv_target=all_cv_targets,
+#     n=n,
+#     m=m,
+#     save_path=bigru_path,
+#     device=device,
+#     epochs=300,
+#     batch_size=32,
+#     lr=1e-3,
+#     hidden_size=128,
+#     num_layers=2
+# )
 
 # mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
 #     test_input=all_test_inputs,
@@ -337,12 +337,12 @@ train_bigru_smoother(
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
 RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
-                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=3)
+                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=cycles)
 
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
 RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
-                        , load_path_RTS = load_path_rtsnet_partial_joint, H_init=H_Rotate, datasets=3)
+                        , load_path_RTS = load_path_rtsnet_partial_joint, H_init=H_Rotate, datasets=cycles)
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
@@ -360,7 +360,7 @@ print('MNETl Training - H Estimation')
 #     lambda_H=1e-3,                    # Regularization on ΔH
 #     generate_h=True,                  # Use grouped H (h_index = n_e // 10)
 #     H_init=H_Rotate,                   # Start from the rotated H
-#     datasets=3                        # Number of datasets
+#     datasets=cycles                        # Number of datasets
 # )
 print('MNET AND RTSNET JOINT Training - H Estimation')
 RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(

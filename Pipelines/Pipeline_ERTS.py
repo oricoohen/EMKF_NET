@@ -10114,7 +10114,6 @@ class Pipeline_ERTS:
                             weight = alpha[2]
                         sample_total_loss += weight * loss_em
 
-                    H_base = H_current.detach()
                     x_0 = x_curr[:, -1].detach()
                 sample_total_loss = sample_total_loss / float(datasets)
                 batch_total_loss += sample_total_loss

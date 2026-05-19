@@ -21,14 +21,14 @@ import matplotlib.pyplot as plt
 
 
 cudnn.benchmark = True
-SEED = 1
-
-random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
-
-torch.backends.cudnn.benchmark = False
-torch.backends.cudnn.deterministic = True
+# SEED = 1
+#
+# random.seed(SEED)
+# torch.manual_seed(SEED)
+# torch.cuda.manual_seed_all(SEED)
+#
+# torch.backends.cudnn.benchmark = False
+# torch.backends.cudnn.deterministic = True
 
 
 
@@ -43,7 +43,7 @@ torch.backends.cudnn.benchmark = True  # optional
 
 import torch.backends.cudnn as cudnn
 cudnn.benchmark = True
-SEED = 1
+# SEED = 1
 # ============================================
 # STORAGE FOR PLOTTING PREDICTED X
 # ============================================
@@ -51,9 +51,9 @@ all_true_x = []
 all_rts_trueH_x = []
 all_emkf_x = []
 all_initH_x = []
-random.seed(SEED)
-torch.manual_seed(SEED)
-torch.cuda.manual_seed_all(SEED)
+# random.seed(SEED)
+# torch.manual_seed(SEED)
+# torch.cuda.manual_seed_all(SEED)
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
@@ -101,7 +101,7 @@ max_iter = 10
 
 cycles = 10
 
-r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -118,7 +118,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.1, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.9, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
