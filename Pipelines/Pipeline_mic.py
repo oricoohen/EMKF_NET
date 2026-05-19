@@ -1237,13 +1237,13 @@ class Pipeline_mic:
 
     def test_F_mstep_net_3_datasets(self, SysModel, all_test_inputs, all_test_targets,
                                      destination_path_RTS, destination_path_M,
-                                     num_em_iters=1, lambda_F=1e-3, generate_f=True, datasets=3):
+                                     num_em_iters=1, generate_f=True, datasets=3):
         """
         Test MNet across `datasets` sequential datasets.
         For each test sequence j, datasets are processed in order 0→datasets-1.
         x_0 and F carry forward from dataset k to dataset k+1.
-        SysModel.F_test       must be [datasets][group_idx]  (false F)
-        SysModel.F_test_TRUE  must be [datasets][group_idx]  (true F, for loss only)
+        F is seeded from SysModel.F_test[0] (false F of dataset 0) then carried.
+        SysModel.F_test must be [datasets][group_idx].
         Outputs are ordered [data * N_T + j].
         """
         N_T = len(all_test_inputs[0])
@@ -1265,8 +1265,8 @@ class Pipeline_mic:
         start = time.time()
         with torch.no_grad():
             for j in range(N_T):
-                x_0       = SysModel.m1x_0.clone().detach()
-                F_carried = SysModel.F.clone().detach()
+                x_0 = SysModel.m1x_0.clone().detach()
+                F_carried = (SysModel.F_test[0][j // 10] if generate_f else SysModel.F_test[0][j]).clone().detach()
 
                 for data in range(datasets):
                     y_seq  = all_test_inputs[data][j]

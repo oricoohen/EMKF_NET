@@ -81,7 +81,7 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir  = "RTSNet/tdoa_2d/"
+save_dir  = "RTSNet/tdoa_2d/10/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
@@ -323,7 +323,7 @@ print("\nTesting MNet ...")
  rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
     sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_false, destination_path_M_F,
-    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True, datasets=cycle,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
 )
 
 print("\nTesting joint ...")
@@ -331,7 +331,7 @@ print("\nTesting joint ...")
  rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
     sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_jointF, destination_path_M_F_joint,
-    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True, datasets=cycle,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
 )
 
 ########################################
