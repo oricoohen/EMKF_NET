@@ -309,6 +309,72 @@ class Pipeline_mic:
             t,
         ]
 
+    def NNTest_3_datasets(self, SysModel, all_test_inputs, all_test_targets,
+                          load_model_path, generate_f=True, datasets=3):
+        """
+        Test RTSNet across `datasets` sequential datasets.
+        x_0 carries from the last smoothed state of dataset k into dataset k+1.
+        SysModel.F_test must be structured as [datasets][group_idx].
+        Outputs are ordered [data * N_T + j]: dataset 0 first, then dataset 1, etc.
+        """
+        N_T = len(all_test_inputs[0])
+        m   = SysModel.m
+
+        self.model = torch.load(load_model_path, map_location=self.device, weights_only=False)
+        self.model.to(self.device).eval()
+
+        loss_fn = nn.MSELoss(reduction='mean')
+        MSE_arr  = torch.empty(N_T * datasets, device=self.device)
+        x_out_list = []
+
+        start = time.time()
+        with torch.no_grad():
+            for j in range(N_T):
+                x_0 = SysModel.m1x_0.clone().detach()
+                for data in range(datasets):
+                    y_seq  = all_test_inputs[data][j]
+                    x_true = all_test_targets[data][j]
+                    T      = y_seq.size(-1)
+
+                    if generate_f:
+                        F_k = SysModel.F_test[data][j // 10]
+                    else:
+                        F_k = SysModel.F_test[data][j]
+
+                    self.model.update_F(F_k)
+                    self.model.InitSequence(x_0, T)
+                    self.model.init_hidden()
+
+                    x_fwd = torch.empty(m, T, device=self.device)
+                    x_smo = torch.empty(m, T, device=self.device)
+
+                    for t in range(T):
+                        x_fwd[:, t] = self.model(y_seq[:, t], None, None, None)
+
+                    x_smo[:, T - 1] = x_fwd[:, T - 1]
+                    self.model.InitBackward(x_smo[:, T - 1])
+                    x_smo[:, T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_smo[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smo[:, t + 2])
+
+                    MSE_arr[data * N_T + j] = loss_fn(x_smo, x_true).item()
+                    x_out_list.append(x_smo)
+                    x_0 = x_smo[:, T - 1].detach()
+
+        end = time.time()
+        t = end - start
+
+        MSE_avg    = torch.mean(MSE_arr)
+        MSE_dB_avg = 10 * torch.log10(MSE_avg)
+        MSE_std    = torch.std(MSE_arr, unbiased=True)
+        std_dB     = 10 * torch.log10(MSE_std + MSE_avg) - MSE_dB_avg
+
+        print(self.modelName + f" MSE Test ({datasets}-datasets):", MSE_dB_avg.item(), "[dB]")
+        print(self.modelName + f" STD Test ({datasets}-datasets):", std_dB.item(), "[dB]")
+        print("Inference Time:", t)
+
+        return [MSE_arr, MSE_avg, MSE_dB_avg, torch.stack(x_out_list), t]
+
     def train_RTS_net_3_datasets(self, SysModel, cv_input, cv_target,
                                 train_input, train_target,
                                 destination_path_RTS, load_path_RTS,
@@ -1168,6 +1234,132 @@ class Pipeline_mic:
             t,
         ]
 
+
+    def test_F_mstep_net_3_datasets(self, SysModel, all_test_inputs, all_test_targets,
+                                     destination_path_RTS, destination_path_M,
+                                     num_em_iters=1, lambda_F=1e-3, generate_f=True, datasets=3):
+        """
+        Test MNet across `datasets` sequential datasets.
+        For each test sequence j, datasets are processed in order 0→datasets-1.
+        x_0 and F carry forward from dataset k to dataset k+1.
+        SysModel.F_test       must be [datasets][group_idx]  (false F)
+        SysModel.F_test_TRUE  must be [datasets][group_idx]  (true F, for loss only)
+        Outputs are ordered [data * N_T + j].
+        """
+        N_T = len(all_test_inputs[0])
+        m   = SysModel.m
+
+        self.model = torch.load(destination_path_RTS, map_location=self.device, weights_only=False)
+        self.model.to(self.device).eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+
+        model_mstep = torch.load(destination_path_M, map_location=self.device, weights_only=False)
+        model_mstep.to(self.device).eval()
+
+        loss_fn         = nn.MSELoss(reduction='mean')
+        MSE_arr         = torch.empty(N_T * datasets, device=self.device)
+        x_out_list      = []
+        x_loss_per_iter = torch.zeros(num_em_iters + 1, device=self.device)
+
+        start = time.time()
+        with torch.no_grad():
+            for j in range(N_T):
+                x_0       = SysModel.m1x_0.clone().detach()
+                F_carried = SysModel.F.clone().detach()
+
+                for data in range(datasets):
+                    y_seq  = all_test_inputs[data][j]
+                    x_true = all_test_targets[data][j]
+                    T      = y_seq.size(-1)
+
+                    F_current = F_carried
+
+                    # ── Initial E-step ───────────────────────────────────────
+                    self.model.update_F(F_current)
+                    self.model.InitSequence(x_0, T)
+                    self.model.init_hidden()
+
+                    x_fwd = torch.empty(m, T, device=self.device)
+                    x_s   = torch.empty(m, T, device=self.device)
+
+                    for t in range(T):
+                        x_fwd[:, t] = self.model(y_seq[:, t], None, None, None)
+                    x_s[:, T - 1] = x_fwd[:, T - 1]
+                    self.model.InitBackward(x_s[:, T - 1])
+                    x_s[:, T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
+                    for t in range(T - 3, -1, -1):
+                        x_s[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_s[:, t + 2])
+
+                    x_loss_per_iter[0] += loss_fn(x_s, x_true).item()
+
+                    # ── EM iterations ────────────────────────────────────────
+                    for em_iter in range(num_em_iters):
+                        x_prev        = torch.empty_like(x_s)
+                        x_prev[:, 0]  = x_0.view(-1)
+                        x_prev[:, 1:] = x_s[:, :-1]
+
+                        A1 = (x_s @ x_prev.T) / T
+                        A2 = (x_prev @ x_prev.T) / T
+
+                        x_minus  = F_current @ x_prev
+                        delta_x  = x_s - x_minus
+                        delta_c  = delta_x - delta_x.mean(dim=1, keepdim=True)
+                        S_delta_x        = (delta_c @ delta_c.T) / T
+                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                        nu_y   = torch.stack([y_seq[:, t] - SysModel.h(x_s[:, t]) for t in range(T)], dim=1)
+                        nu_c   = nu_y - nu_y.mean(dim=1, keepdim=True)
+                        S_nu_y = (nu_c @ nu_c.T) / T
+
+                        z_in = torch.cat([
+                            A1.reshape(-1),
+                            A2.reshape(-1),
+                            S_delta_x.reshape(-1),
+                            S_nu_y.reshape(-1),
+                            C_delta_x_xminus.reshape(-1),
+                            F_current.detach().reshape(-1),
+                        ], dim=0).reshape(1, -1)
+
+                        deltaF     = model_mstep(z_in)
+                        F_current  = F_current + deltaF.view(m, m)
+
+                        self.model.update_F(F_current)
+                        self.model.InitSequence(x_0, T)
+                        self.model.init_hidden()
+
+                        x_fwd = torch.empty(m, T, device=self.device)
+                        x_s   = torch.empty(m, T, device=self.device)
+
+                        for t in range(T):
+                            x_fwd[:, t] = self.model(y_seq[:, t], None, None, None)
+                        x_s[:, T - 1] = x_fwd[:, T - 1]
+                        self.model.InitBackward(x_s[:, T - 1])
+                        x_s[:, T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
+                        for t in range(T - 3, -1, -1):
+                            x_s[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_s[:, t + 2])
+
+                        x_loss_per_iter[em_iter + 1] += loss_fn(x_s, x_true).item()
+
+                    MSE_arr[data * N_T + j] = loss_fn(x_s, x_true).item()
+                    x_out_list.append(x_s)
+                    x_0       = x_s[:, T - 1].detach()
+                    F_carried = F_current.detach()
+
+        end = time.time()
+        t = end - start
+
+        MSE_avg    = torch.mean(MSE_arr)
+        MSE_dB_avg = 10 * torch.log10(MSE_avg)
+        x_loss_per_iter /= (N_T * datasets)
+
+        print(f"[F M-step TEST {datasets}-datasets] MSE avg: {MSE_dB_avg.item():.2f} dB  time: {t:.1f}s")
+        for k in range(num_em_iters + 1):
+            v   = x_loss_per_iter[k].item()
+            tag = "init" if k == 0 else f"EM {k}"
+            print(f"  {tag}: {v:.6e}  ({10 * math.log10(v):.2f} dB)")
+
+        return [MSE_arr, MSE_avg, MSE_dB_avg, torch.stack(x_out_list), t]
 
     def train_F_mstep_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
                         destination_path_M, load_path_RTS, load_mnet, num_em_iters=3, F_init=None,

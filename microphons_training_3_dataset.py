@@ -230,15 +230,15 @@ RTSNet_Pipeline_true.train_RTS_net_3_datasets(
     datasets=cycle,
 )
 
-# NNTest expects flat [N*cycle, n, T] — concatenate inline
-sys_model_true.F_test = [F for Fs in all_F_test_true for F in Fs]
+sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
- rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
+ rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
     sys_model_true,
-    torch.cat(all_test_inputs,  dim=0),
-    torch.cat(all_test_targets, dim=0),
+    all_test_inputs,
+    all_test_targets,
     destination_path_rtsnet_true,
     generate_f=True,
+    datasets=cycle,
 )
 
 #######################
@@ -262,14 +262,15 @@ RTSNet_Pipeline_false.train_RTS_net_3_datasets(
     datasets=cycle,
 )
 
-sys_model_false.F_test = [F for Fs in all_F_test_false for F in Fs]
+sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
- rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest(
+ rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
     sys_model_false,
-    torch.cat(all_test_inputs,  dim=0),
-    torch.cat(all_test_targets, dim=0),
+    all_test_inputs,
+    all_test_targets,
     destination_path_rtsnet_false,
     generate_f=True,
+    datasets=cycle,
 )
 
 #############################
@@ -314,26 +315,23 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
 ###############################
 ### Test MNet + Joint       ###
 ###############################
-# test_F_mstep_net / test_joint_F_mstep_net expect flat format — flatten inline
-sys_model_false.F_test      = [F for Fs in all_F_test_false for F in Fs]
-sys_model_false.F_test_TRUE = [F for Fs in all_F_test_true  for F in Fs]
-test_input_flat  = torch.cat(all_test_inputs,  dim=0)
-test_target_flat = torch.cat(all_test_targets, dim=0)
+sys_model_false.F_test      = all_F_test_false   # [cycle][group_idx]
+sys_model_false.F_test_TRUE = all_F_test_true     # [cycle][group_idx]
 
 print("\nTesting MNet ...")
 [MSE_test_arr_mnet, MSE_test_avg_mnet, MSE_test_dB_avg_mnet,
- rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net(
-    sys_model_false, test_input_flat, test_target_flat,
+ rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_false, destination_path_M_F,
-    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True,
+    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True, datasets=cycle,
 )
 
 print("\nTesting joint ...")
 [MSE_test_arr_joint, MSE_test_avg_joint, MSE_test_dB_avg_joint,
- rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net(
-    sys_model_false, test_input_flat, test_target_flat,
+ rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_jointF, destination_path_M_F_joint,
-    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True,
+    num_em_iters=num_em_iters, lambda_F=1e-3, generate_f=True, datasets=cycle,
 )
 
 ########################################
