@@ -21,8 +21,9 @@ def generate_random_F_matrices(num_F: int, delta_ = 0.5, F_init=None):
     F_mats = []
     # base = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]],device = DEVICE, dtype=torch.float32)
     if F_init ==None:
-        F = torch.tensor([[0.83, 0.2],
-                        [0.2, 0.83]], device=DEVICE)
+        # F = torch.tensor([[0.83, 0.2],
+        #                 [0.2, 0.83]], device=DEVICE)
+        F=None
     else:
         F = F_init
     for k in range(num_F):

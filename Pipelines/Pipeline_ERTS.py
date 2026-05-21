@@ -9250,11 +9250,12 @@ class Pipeline_ERTS:
             avg_dataset_losses = [x / self.N_B for x in batch_dataset_losses]
             # Average losses for this batch
             Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
-            print(f"[epoch {ti:03d}] "
-                  f"loss_d0={avg_dataset_losses[0]:.6f} "
-                  f"loss_d1={avg_dataset_losses[1]:.6f} "
-                  f"loss_d2={avg_dataset_losses[2]:.6f} "
-                  f"loss_all={Batch_Optimizing_LOSS_mean.item():.6f}")
+            loss_msg = " ".join([
+                f"loss_d{k}={avg_dataset_losses[k]:.6f}"
+                for k in range(datasets)
+            ])
+
+            print(f"[epoch {ti:03d}] {loss_msg} loss_all={Batch_Optimizing_LOSS_mean.item():.6f}")
             # Train RTSNet first
             Batch_Optimizing_LOSS_mean.backward()
             # 1) check every gradient tensor ori 2 blocks
@@ -9345,11 +9346,12 @@ class Pipeline_ERTS:
                 avg_cv_dataset_losses = [x / self.N_CV for x in batch_cv_dataset_losses]
                 # Average
                 self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_linear_batch)
-                print(f"[epoch {ti:03d}] "
-                      f"cv_d0={avg_cv_dataset_losses[0]:.6f} "
-                      f"cv_d1={avg_cv_dataset_losses[1]:.6f} "
-                      f"cv_d2={avg_cv_dataset_losses[2]:.6f} "
-                      f"cv_all={self.MSE_cv_linear_epoch[ti].item():.6f}")
+                cv_msg = " ".join([
+                    f"cv_d{k}={avg_cv_dataset_losses[k]:.6f}"
+                    for k in range(datasets)
+                ])
+
+                print(f"[epoch {ti:03d}] {cv_msg} cv_all={self.MSE_cv_linear_epoch[ti].item():.6f}")
 
                 self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
 

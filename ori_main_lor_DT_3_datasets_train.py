@@ -74,7 +74,7 @@ args.T_test = 30
 ### training parameters
 args.n_steps = 400
 args.n_batch = 15
-args.lr = 1e-4
+args.lr = 1e-3
 args.wd = 1e-3
 
 torch.manual_seed(1)
@@ -106,7 +106,7 @@ destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_
 destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial.pt'
 destination_path_M_reg = 'RTSNet/lorenz_rotated_001/10datasets/ori_M_step_net.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/ori_datasets/10RTSNet_partial_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
@@ -184,9 +184,9 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    train_rotate =rotate_H(H_train_mat, theta=0.3, many=True, randomit=True)
-    val_rotate = rotate_H(H_val_mat, theta=0.3, many=True, randomit=True)
-    test_rotate = rotate_H(H_test_mat_list, theta=0.3, many=True, randomit=True)
+    train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
+    val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
+    test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
 
     H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
@@ -232,7 +232,27 @@ print(f"  CV sequences per dataset: {all_cv_inputs[0].shape[0]}")
 print(f"  Test sequences per dataset: {all_test_inputs[0].shape[0]}")
 print(f"  Timesteps per sequence: {all_train_inputs[0].shape[2]}")
 print(f"  Total effective sequence length: {cycles * args.T} timesteps")
+# Add this right after data generation, before any training
+print("=== DIAGNOSIS ===")
+print(f"r2={r2.item():.6f}, q2={q2.item():.6f}")
+print(f"Q[0,0]={Q[0,0].item():.6f}, R[0,0]={R[0,0].item():.6f}")
 
+# Check data scale
+print(f"\nTrain input  - mean:{all_train_inputs[0].mean():.4f}, std:{all_train_inputs[0].std():.4f}, max:{all_train_inputs[0].abs().max():.4f}")
+print(f"Train target - mean:{all_train_targets[0].mean():.4f}, std:{all_train_targets[0].std():.4f}, max:{all_train_targets[0].abs().max():.4f}")
+
+# Check H matrices - true vs rotated
+print(f"\nTrue H[0]:\n{all_H_matrices_train[0][0]}")
+print(f"Rotated H[0]:\n{all_H_matrices_train_rotate[0][0]}")
+print(f"H deviation (rotated - true) norm: {(all_H_matrices_train_rotate[0][0] - all_H_matrices_train[0][0]).norm():.6f}")
+
+# Check load paths exist
+import os
+for name, p in [("rtsnet_full", load_path_rtsnet_full),
+                ("rtsnet_partial", load_path_rtsnet_partial),
+                ("rtsnet_partial_joint", load_path_rtsnet_partial_joint),
+                ("M_joint", load_path_M_joint)]:
+    print(f"load {name}: {'EXISTS' if os.path.exists(p) else 'MISSING'} -> {p}")
 # Verify structure
 # assert len(all_train_inputs) == 3, "Should have 3 datasets"
 assert all_train_inputs[0].shape[0] == args.N_E, f"Train should have {args.N_E} sequences"
@@ -342,7 +362,7 @@ RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_t
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
 RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
-                        , load_path_RTS = load_path_rtsnet_partial_joint, H_init=H_Rotate, datasets=cycles)
+                        , load_path_RTS = load_path_rtsnet_partial, H_init=H_Rotate, datasets=cycles)
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
