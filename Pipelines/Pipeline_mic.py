@@ -87,7 +87,7 @@ class Pipeline_mic:
             for j in range(self.N_B):
                 n_e        = random.randint(0, self.N_E - 1)
                 if generate_f:
-                    index = n_e // 10
+                    index = n_e
                     SysModel.F = SysModel.F_train[index]
                     self.model.update_F(SysModel.F)
                 y_training = train_input[n_e]          # [n, T]
@@ -159,7 +159,7 @@ class Pipeline_mic:
             with torch.no_grad():
                 for j in range(self.N_CV):
                     if generate_f:
-                        index = j // 10
+                        index = j
                         SysModel.F = SysModel.F_valid[index]
                         self.model.update_F(SysModel.F)
                     y_cv = cv_input[j]
@@ -252,7 +252,7 @@ class Pipeline_mic:
         with torch.no_grad():
             for j in range(self.N_T):
                 if generate_f:
-                    index = j // 10
+                    index = j
                     SysModel.F = SysModel.F_test[index]
                     self.model.update_F(SysModel.F)
                 y_tst = test_input[j]
@@ -336,10 +336,7 @@ class Pipeline_mic:
                     x_true = all_test_targets[data][j]
                     T      = y_seq.size(-1)
 
-                    if generate_f:
-                        F_k = SysModel.F_test[data][j // 10]
-                    else:
-                        F_k = SysModel.F_test[data][j]
+                    F_k = SysModel.F_test[data][j]
 
                     self.model.update_F(F_k)
                     self.model.InitSequence(x_0, T)
@@ -372,6 +369,9 @@ class Pipeline_mic:
         print(self.modelName + f" MSE Test ({datasets}-datasets):", MSE_dB_avg.item(), "[dB]")
         print(self.modelName + f" STD Test ({datasets}-datasets):", std_dB.item(), "[dB]")
         print("Inference Time:", t)
+        for data in range(datasets):
+            ds_mse = torch.mean(MSE_arr[data * N_T : (data + 1) * N_T])
+            print(f"  Dataset {data}: {10 * torch.log10(ds_mse).item():.2f} dB")
 
         return [MSE_arr, MSE_avg, MSE_dB_avg, torch.stack(x_out_list), t]
 
@@ -408,6 +408,7 @@ class Pipeline_mic:
             self.model.train()
             optimizer.zero_grad()
             batch_loss = 0.0
+            ds_train_loss = [0.0] * datasets
 
             for _ in range(self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
@@ -419,10 +420,7 @@ class Pipeline_mic:
                     x_true_seq = train_target[data][n_e]
                     T = y_seq.size(-1)
 
-                    if generate_f:
-                        F_k = SysModel.F_train[data][n_e // 10]
-                    else:
-                        F_k = SysModel.F_train[data][n_e]
+                    F_k = SysModel.F_train[data][n_e]
 
                     self.model.update_F(F_k)
                     self.model.InitSequence(x_0, T)
@@ -441,12 +439,15 @@ class Pipeline_mic:
                     for t in range(T - 3, -1, -1):
                         x_smo[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smo[:, t + 2])
 
-                    sample_loss += torch.mean((x_smo - x_true_seq) ** 2)
+                    seq_loss = torch.mean((x_smo - x_true_seq) ** 2)
+                    sample_loss += seq_loss
+                    ds_train_loss[data] += seq_loss.item()
                     x_0 = x_smo[:, T - 1].detach()
 
                 batch_loss += sample_loss / datasets
 
             loss = batch_loss / self.N_B
+            ds_train_loss = [l / self.N_B for l in ds_train_loss]
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -454,6 +455,7 @@ class Pipeline_mic:
             # Validation
             self.model.eval()
             cv_loss_sum = 0.0
+            ds_cv_loss = [0.0] * datasets
             with torch.no_grad():
                 for j in range(self.N_CV):
                     sample_loss_cv = 0.0
@@ -463,10 +465,7 @@ class Pipeline_mic:
                         x_true_cv = cv_target[data][j]
                         T_cv = y_cv.size(-1)
 
-                        if generate_f:
-                            F_k_cv = SysModel.F_valid[data][j // 10]
-                        else:
-                            F_k_cv = SysModel.F_valid[data][j]
+                        F_k_cv = SysModel.F_valid[data][j]
 
                         self.model.update_F(F_k_cv)
                         self.model.InitSequence(x_0_cv, T_cv)
@@ -485,12 +484,15 @@ class Pipeline_mic:
                         for t in range(T_cv - 3, -1, -1):
                             x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
 
-                        sample_loss_cv += torch.mean((x_s_cv - x_true_cv) ** 2).item()
+                        seq_loss_cv = torch.mean((x_s_cv - x_true_cv) ** 2).item()
+                        sample_loss_cv += seq_loss_cv
+                        ds_cv_loss[data] += seq_loss_cv
                         x_0_cv = x_s_cv[:, T_cv - 1].detach()
 
                     cv_loss_sum += sample_loss_cv / datasets
 
             cv_epoch = cv_loss_sum / self.N_CV
+            ds_cv_loss = [l / self.N_CV for l in ds_cv_loss]
             cv_dB    = 10 * math.log10(cv_epoch) if cv_epoch > 0 else float('inf')
 
             prev_lr = optimizer.param_groups[0]['lr']
@@ -498,7 +500,16 @@ class Pipeline_mic:
             curr_lr = optimizer.param_groups[0]['lr']
             lr_str  = f"  lr={curr_lr:.2e}" if curr_lr != prev_lr else ""
 
-            print(f"[epoch {epoch:03d}] train={loss.item():.6f}  cv={cv_epoch:.6f}  cv_dB={cv_dB:.2f} dB{lr_str}")
+            train_dB  = 10 * math.log10(max(loss.item(), 1e-10))
+            ds_tr_str = "  ".join(
+                f"ds{d}={10*math.log10(max(ds_train_loss[d],1e-10)):.2f}dB" for d in range(datasets)
+            )
+            ds_cv_str = "  ".join(
+                f"ds{d}={10*math.log10(max(ds_cv_loss[d],1e-10)):.2f}dB" for d in range(datasets)
+            )
+            print(f"[epoch {epoch:03d}] train={train_dB:.2f}dB  cv_dB={cv_dB:.2f}dB{lr_str}")
+            print(f"  train/ds: {ds_tr_str}")
+            print(f"  cv/ds:    {ds_cv_str}")
 
             if cv_epoch < self.MSE_cv_dB_opt:
                 self.MSE_cv_dB_opt  = cv_epoch
@@ -562,7 +573,7 @@ class Pipeline_mic:
                 T_seq  = y_seq.size(-1)
 
                 if generate_f:
-                    f_index = n_e // 10
+                    f_index = n_e
                     F_base = SysModel.F_train[f_index]
                     F_true = SysModel.F_train_TRUE[f_index]
                 else:
@@ -659,7 +670,7 @@ class Pipeline_mic:
                         weight = alpha[1]
                     else:
                         weight = alpha[2]
-                    total_loss_seq += weight * (f_loss + reg)
+                    total_loss_seq += weight * (0.1*f_loss + reg + 4 * x_loss)
 
                 total_loss_batch += total_loss_seq
 
@@ -692,7 +703,7 @@ class Pipeline_mic:
                     T_cv      = y_cv.size(-1)
 
                     if generate_f:
-                        f_idx_cv  = j // 10
+                        f_idx_cv  = j
                         F_base_cv = SysModel.F_valid[f_idx_cv]
                         F_true_cv = SysModel.F_valid_TRUE[f_idx_cv]
                     else:
@@ -857,7 +868,7 @@ class Pipeline_mic:
                 T_seq  = y_seq.size(-1)
 
                 if generate_f:
-                    f_index = n_e // 10
+                    f_index = n_e
                     F_base = SysModel.F_train[f_index]
                     F_true = SysModel.F_train_TRUE[f_index]
                 else:
@@ -1004,7 +1015,7 @@ class Pipeline_mic:
                     T_cv      = y_cv.size(-1)
 
                     if generate_f:
-                        f_idx_cv  = j // 10
+                        f_idx_cv  = j
                         F_base_cv = SysModel.F_valid[f_idx_cv]
                         F_true_cv = SysModel.F_valid_TRUE[f_idx_cv]
                     else:
@@ -1140,7 +1151,7 @@ class Pipeline_mic:
                 T_seq  = y_seq.size(-1)
 
                 if generate_f:
-                    f_index = j // 10
+                    f_index = j
                     F_base  = SysModel.F_test[f_index]
                 else:
                     F_base  = SysModel.F_test[j]
@@ -1275,7 +1286,7 @@ class Pipeline_mic:
         with torch.no_grad():
             for j in range(N_T):
                 x_0 = SysModel.m1x_0.clone().detach()
-                F_carried = (SysModel.F_test[0][j // 10] if generate_f else SysModel.F_test[0][j]).clone().detach()
+                F_carried = SysModel.F.clone().detach()   # theta=0, matches training
 
                 for data in range(datasets):
                     y_seq  = all_test_inputs[data][j]
@@ -1367,6 +1378,9 @@ class Pipeline_mic:
             v   = x_loss_per_iter[k].item()
             tag = "init" if k == 0 else f"EM {k}"
             print(f"  {tag}: {v:.6e}  ({10 * math.log10(v):.2f} dB)")
+        for data in range(datasets):
+            ds_mse = torch.mean(MSE_arr[data * N_T : (data + 1) * N_T])
+            print(f"  Dataset {data}: {10 * torch.log10(ds_mse).item():.2f} dB")
 
         return [MSE_arr, MSE_avg, MSE_dB_avg, torch.stack(x_out_list), t]
 
@@ -1419,7 +1433,7 @@ class Pipeline_mic:
                     T = y_seq.size(-1)
 
                     if generate_f is True:
-                        f_index = n_e // 10
+                        f_index = n_e
                         F_true = SysModel.F_train_TRUE[data][f_index]
                     else:
                         F_true = SysModel.F_train_TRUE[data][n_e]
@@ -1566,7 +1580,7 @@ class Pipeline_mic:
                         T_cv = y_cv.size(-1)
 
                         if generate_f is True:
-                            f_index_cv = j // 10
+                            f_index_cv = j
                             F_true_cv = SysModel.F_valid_TRUE[data][f_index_cv]
                         else:
                             F_true_cv = SysModel.F_valid_TRUE[data][j]
@@ -1750,7 +1764,7 @@ class Pipeline_mic:
 
                 if F_init is None:
                     if generate_f:
-                        f_index = n_e // 10
+                        f_index = n_e
                         F_current = SysModel.F_train[0][f_index].clone().detach().to(self.device)
                     else:
                         F_current = SysModel.F_train[0][n_e].clone().detach().to(self.device)
@@ -1763,7 +1777,7 @@ class Pipeline_mic:
                     T = y_seq.size(-1)
 
                     if generate_f is True:
-                        f_index = n_e // 10
+                        f_index = n_e
                         F_true = SysModel.F_train_TRUE[data][f_index]
                     else:
                         F_true = SysModel.F_train_TRUE[data][n_e]
@@ -1917,7 +1931,7 @@ class Pipeline_mic:
 
                     if F_init is None:
                         if generate_f:
-                            f_index = j // 10
+                            f_index = j
                             F_base_cv = SysModel.F_valid[0][f_index].clone().detach().to(self.device)
                         else:
                             F_base_cv = SysModel.F_valid[0][j].clone().detach().to(self.device)
@@ -1932,7 +1946,7 @@ class Pipeline_mic:
                         T_cv = y_cv.size(-1)
 
                         if generate_f is True:
-                            f_index_cv = j // 10
+                            f_index_cv = j
                             F_true_cv = SysModel.F_valid_TRUE[data][f_index_cv]
                         else:
                             F_true_cv = SysModel.F_valid_TRUE[data][j]

@@ -33,19 +33,19 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 loss_fn = nn.MSELoss(reduction='mean')
 
 # ─── Experiment settings ──────────────────────────────────────────────────────
-T           = 20
+T           = 30
 N_T         = 100          # number of test sequences
 max_em_iter = 10
 
 theta_true_max  = 0.4      # true  F drawn Uniform(-theta_true_max/2,  +theta_true_max/2)
-theta_false_max = 3.0      # false F = true_theta + Uniform(-theta_false_max/2, +theta_false_max/2)
+theta_false_max = 2.0      # false F = true_theta + Uniform(-theta_false_max/2, +theta_false_max/2)
 
 # ── Noise covariances ─────────────────────────────────────────────────────────
 Q_structure = torch.eye(m, dtype=torch.float32, device=device)
 R_structure = torch.eye(n, dtype=torch.float32, device=device)
 
-q2 = 1
-r2 = 10
+q2 = 0.01
+r2 = 1
 Q  = q2 * Q_structure
 R  = r2 * R_structure
 
@@ -71,8 +71,7 @@ F_false_list = generate_false_F_list(theta_list, theta_false_max)
 # targets: [N_T, m, T]
 # F_true_list / F_false_list: one per group of 10
 
-n_groups = N_T // 10
-print(f"  {n_groups} groups of 10 sequences each.")
+print(f"  {N_T} sequences, one theta per sequence.")
 
 # ─── Steps 2–4: Loop over all sequences ──────────────────────────────────────
 print("\n[2-4/4] Running ERTS (true/false) and EMKF on each sequence ...")
@@ -82,12 +81,11 @@ mse_erts_false_list = []
 mse_emkf_false_list = []
 
 for i in range(N_T):
-    g      = i // 10
     states = targets[i]   # [m, T]
     obs    = inputs[i]    # [n, T]
 
-    F_true  = F_true_list[g]
-    F_false = F_false_list[g]
+    F_true  = F_true_list[i]
+    F_false = F_false_list[i]
 
     get_F_true_fn  = lambda _t, _F=F_true:  _F
     get_F_false_fn = lambda _t, _F=F_false: _F
@@ -148,16 +146,15 @@ import numpy as np
 
 states0 = targets[0]
 obs0    = inputs[0]
-g0      = 0
-get_F_t0 = lambda _t, _F=F_true_list[g0]:  _F
-get_F_f0 = lambda _t, _F=F_false_list[g0]: _F
+get_F_t0 = lambda _t, _F=F_true_list[0]:  _F
+get_F_f0 = lambda _t, _F=F_false_list[0]: _F
 
 x_plot_true,  *_ = run_ekf_erts(obs0, get_F_t0, Q_in=Q, R_in=R)
 x_plot_false, *_ = run_ekf_erts(obs0, get_F_f0, Q_in=Q, R_in=R)
 
 F_mat0, *_ = E_EMKF_F_analitic_non_linear_h(
     sys_model=sys_model,
-    F_0_matrices=[F_false_list[g0].clone()],
+    F_0_matrices=[F_false_list[0].clone()],
     h=h, Q=Q, R=R,
     Y=obs0.unsqueeze(0),
     x_0=m1x_0, P_0=m2x_0,

@@ -73,10 +73,9 @@ def S_Test_ext(args, SysModel, test_input, test_target, randomInit = False,test_
     # Confidence interval
     ERTS_std_dB = 10 * torch.log10(MSE_ERTS_linear_std + MSE_ERTS_linear_avg) - MSE_ERTS_dB_avg
 
-    print("Extended RTS Smoother - MSE LOSS:", MSE_ERTS_dB_avg, "[dB]")
-    print("Extended RTS Smoother - STD:", ERTS_std_dB, "[dB]")
-    # Print Run Time
-    print("Inference Time:", t)
+    # print("Extended RTS Smoother - MSE LOSS:", MSE_ERTS_dB_avg, "[dB]")
+    # print("Extended RTS Smoother - STD:", ERTS_std_dB, "[dB]")
+    # print("Inference Time:", t)
 
     return [MSE_ERTS_linear_arr, MSE_ERTS_linear_avg, MSE_ERTS_dB_avg, ERTS_out]
 
@@ -124,6 +123,8 @@ def S_Test_ext_old(SysModel, test_input, test_target, F_list, generate_f=True, r
             if init_x_list is not None:
                 SysModel.m1x_0 = init_x_list[j]
                 SysModel.m2x_0 = init_P_list[j]
+                ERTS.m1x_0 = init_x_list[j]
+                ERTS.m2x_0 = init_P_list[j]
             EKF.InitSequence(SysModel.m1x_0, SysModel.m2x_0)
 
         EKF.GenerateSequence(sequence_input, sequence_input.size()[-1])
@@ -156,10 +157,9 @@ def S_Test_ext_old(SysModel, test_input, test_target, F_list, generate_f=True, r
     # Confidence interval
     ERTS_std_dB = 10 * torch.log10(MSE_ERTS_linear_std + MSE_ERTS_linear_avg) - MSE_ERTS_dB_avg
 
-    print("Extended RTS Smoother - MSE LOSS:", MSE_ERTS_dB_avg, "[dB]")
-    print("Extended RTS Smoother - STD:", ERTS_std_dB, "[dB]")
-    # Print Run Time
-    print("Inference Time:", t)
+    # print("Extended RTS Smoother - MSE LOSS:", MSE_ERTS_dB_avg, "[dB]")
+    # print("Extended RTS Smoother - STD:", ERTS_std_dB, "[dB]")
+    # print("Inference Time:", t)
 
     return [MSE_ERTS_linear_arr, MSE_ERTS_linear_avg, MSE_ERTS_dB_avg, ERTS_out, P_smooth, V_test]
 

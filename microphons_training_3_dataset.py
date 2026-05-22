@@ -22,6 +22,7 @@ from Simulations.TDOA_2D.parameters import (
     generate_false_F_list,
     make_f,
     make_get_F_from_matrix,
+    PX_MIN, PX_MAX, PY_MIN, PY_MAX,
 )
 from Simulations.TDOA_2D.ekf_erts import run_ekf_erts
 
@@ -53,24 +54,24 @@ args.T_test = 30
 ### training parameters
 args.n_steps = 400
 args.n_batch = 30
-args.lr = 1e-4
+args.lr = 1e-3
 args.wd = 1e-3
 
 T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.1
-r2 = 10
+q2 = 0.001
+r2 = 1
 
 ### cycle: number of datasets
 cycle = 5
 # Max theta per dataset [rad] — each group of 10 sequences draws theta ~ Uniform(-max/2, +max/2)
-theta_changed_list = [0.3, 0.3, 0.3,0.3,0.3]
+theta_changed_list = [0.2, 0.2, 0.2,0.2,0.2]
 assert len(theta_changed_list) == cycle
 
-### false F mismatch
-theta_false = 0.2   # [rad]
+### false F mismatch 
+theta_false = 0.7   # [rad]
 
 ### EM iterations
 num_em_iters = 2
@@ -81,24 +82,30 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir  = "RTSNet/tdoa_2d/10/"
+save_dir  = "RTSNet/tdoa_2d/1/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Load paths: pre-trained networks from the 1-dataset experiment
-load_path_rtsnet_true  = save_dir + "RTSNet_trueF.pt"
-load_path_rtsnet_false = save_dir + "RTSNet_falseF.pt"
-load_path_M_F          = save_dir + "M_step_F_net.pt"
-load_path_M_F_joint    = save_dir + "M_step_F_net_jointF.pt"
+
+load_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
+load_path_rtsnet_false = save_dir + "RTSNet_false.pt"
+load_path_M_F = save_dir + "M_step_F_net.pt"
+load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint_arge_f_loss.pt"
+load_path_M_F_joint = save_dir + "M_step_F_net_joint_large_f_loss.pt"
 
 # Cycle-dataset experiment outputs
-destination_path_rtsnet_true   = cycle_dir + "RTSNet_trueF.pt"
-destination_path_rtsnet_false  = cycle_dir + "RTSNet_falseF.pt"
+destination_path_rtsnet_true   = cycle_dir + "RTSNet_true.pt"
+destination_path_rtsnet_false  = cycle_dir + "RTSNet_false.pt"
 destination_path_M_F           = cycle_dir + "M_step_F_net.pt"
-destination_path_rtsnet_jointF = cycle_dir + "RTSNet_falseF_jointF.pt"
-destination_path_M_F_joint     = cycle_dir + "M_step_F_net_jointF.pt"
-
+destination_path_rtsnet_jointF = cycle_dir + "RTSNet_falseF_joint.pt"
+destination_path_M_F_joint     = cycle_dir + "M_step_F_net_joint.pt"
+# destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
+# destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
+# destination_path_M_F           = save_dir + "M_step_F_net.pt"
+# destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint.pt"
+# destination_path_M_F_joint     = save_dir + "M_step_F_net_joint.pt"
 print("=" * 70)
 print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment")
 print(f"  T={T}  T_test={T_test}  q2={q2}  r2={r2}")
@@ -130,27 +137,41 @@ all_F_cv_false    = []
 all_F_test_false  = []
 
 # Carry state between datasets: last state of last trajectory and last group theta
-carry_x_train  = None;  carry_theta_train  = 0.0
-carry_x_cv     = None;  carry_theta_cv     = 0.0
-carry_x_test   = None;  carry_theta_test   = 0.0
+carry_x_train  = None;  carry_theta_train  = None
+carry_x_cv     = None;  carry_theta_cv     = None
+carry_x_test   = None;  carry_theta_test   = None
 
 for k in range(cycle):
     theta_changed = theta_changed_list[k]
     print(f"  Dataset {k}: theta ~ theta_prev + Uniform(-{theta_changed/2:.3f}, +{theta_changed/2:.3f}) rad per group")
-    print(f"            theta_base: train={carry_theta_train:.4f}  cv={carry_theta_cv:.4f}  test={carry_theta_test:.4f}")
+    _tr0 = carry_theta_train[0] if isinstance(carry_theta_train, list) else 0.0
+    _cv0 = carry_theta_cv[0]    if isinstance(carry_theta_cv,    list) else 0.0
+    _te0 = carry_theta_test[0]  if isinstance(carry_theta_test,  list) else 0.0
+    print(f"            theta_base[0]: train={_tr0:.4f}  cv={_cv0:.4f}  test={_te0:.4f}")
 
     ti, tt, th_tr, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_changed, Q, R, x_init=carry_x_train, theta_base=carry_theta_train)
     ci, ct, th_cv, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_changed, Q, R, x_init=carry_x_cv,    theta_base=carry_theta_cv)
     xi, xt, th_te, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_changed, Q, R, x_init=carry_x_test,  theta_base=carry_theta_test)
 
-    # Update carry: last state of last trajectory, last group's theta
-    carry_x_train  = tt[-1, :, -1];  carry_theta_train  = th_tr[-1]
-    carry_x_cv     = ct[-1, :, -1];  carry_theta_cv     = th_cv[-1]
-    carry_x_test   = xt[-1, :, -1];  carry_theta_test   = th_te[-1]
+    # Update carry: last state of EVERY sequence, last group's theta
+    carry_x_train  = tt[:, :, -1];  carry_theta_train  = th_tr   # [N_E,  m]
+    carry_x_cv     = ct[:, :, -1];  carry_theta_cv     = th_cv   # [N_CV, m]
+    carry_x_test   = xt[:, :, -1];  carry_theta_test   = th_te   # [N_T,  m]
 
-    F_tr_f = generate_false_F_list(th_tr, theta_false)
-    F_cv_f = generate_false_F_list(th_cv, theta_false)
-    F_te_f = generate_false_F_list(th_te, theta_false)
+    # False F is fixed at cycle 0 and reused for all subsequent cycles
+    # so RTSNet-false and MNet always see the same wrong F regardless of how
+    # the true F evolves.
+    if k == 0:
+        F_tr_f = generate_false_F_list(th_tr, theta_false)
+        F_cv_f = generate_false_F_list(th_cv, theta_false)
+        _F_tr_f_fixed = F_tr_f
+        _F_cv_f_fixed = F_cv_f
+    else:
+        F_tr_f = _F_tr_f_fixed
+        F_cv_f = _F_cv_f_fixed
+
+    # test always starts from theta=0 (matches MNet training starting point)
+    F_te_f = [make_F_block(0.0).to(device) for _ in range(args.N_T)]
 
     all_train_inputs.append(ti);   all_train_targets.append(tt)
     all_cv_inputs.append(ci);      all_cv_targets.append(ct)
@@ -163,6 +184,100 @@ for k in range(cycle):
 print(f"  Train per dataset: {all_train_targets[0].size()}")
 print(f"  CV per dataset:    {all_cv_targets[0].size()}")
 print(f"  Test per dataset:  {all_test_targets[0].size()}")
+
+#########################################
+###  Data sanity check                 ###
+#########################################
+# Verify x_0 carry: last state of seq-0 in dataset k-1 must equal
+# the x_0 used to start seq-0 in dataset k.
+print("\nData sanity check — x_0 carry for sequence 0 (train):")
+print(f"  ds0 x_0 (fixed start): {m1x_0.reshape(-1).cpu().numpy().round(3)}")
+for k in range(cycle):
+    x_end = all_train_targets[k][0, :, -1].cpu()
+    print(f"  ds{k} last state : [{x_end[0]:.3f}, {x_end[1]:.3f}, {x_end[2]:.3f}, {x_end[3]:.3f}]", end="")
+    if k < cycle - 1:
+        x_next_0 = carry_x_train[0].cpu() if k == cycle - 1 else all_train_targets[k][0, :, -1].cpu()
+        print(f"  ← x_0 for ds{k+1}", end="")
+    print()
+
+print("\nData sanity check — theta per sequence (train, first 5 sequences, all datasets):")
+for k in range(cycle):
+    thetas_k = [f"{all_F_train_true[k][s][2,2].item():.3f}" for s in range(min(5, args.N_E))]
+    print(f"  ds{k} F[2,2] (cos θ) seq0-4: {thetas_k}")
+
+# Plot sequences 0-3 across all datasets — 4 panels each
+import matplotlib.patches as mpatches
+from Simulations.TDOA_2D.parameters import mic_positions
+_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+           'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+
+print("\nPlotting sequences 0-3 across all datasets ...")
+for seq_idx in range(4):
+    fig = plt.figure(figsize=(16, 12))
+    ax_traj = fig.add_subplot(2, 2, 1)
+    ax_pos  = fig.add_subplot(2, 2, 2)
+    ax_vel  = fig.add_subplot(2, 2, 3)
+    ax_tdoa = fig.add_subplot(2, 2, 4)
+
+    t_offset = 0
+    for k in range(cycle):
+        states_k = all_train_targets[k][seq_idx].cpu()   # [m, T]
+        obs_k    = all_train_inputs[k][seq_idx].cpu()    # [n, T]
+        t_ax     = torch.arange(t_offset, t_offset + T).float()
+        col      = _colors[k % len(_colors)]
+
+        ax_traj.plot(states_k[0], states_k[1], color=col, label=f'ds{k}')
+        ax_traj.scatter(states_k[0, 0],  states_k[1, 0],  color=col, marker='o', s=40, zorder=5)
+        ax_traj.scatter(states_k[0, -1], states_k[1, -1], color=col, marker='x', s=60, zorder=5)
+
+        ax_pos.plot(t_ax, states_k[0], color=col, label=f'ds{k} px')
+        ax_pos.plot(t_ax, states_k[1], color=col, linestyle='--')
+
+        ax_vel.plot(t_ax, states_k[2], color=col, label=f'ds{k} vx')
+        ax_vel.plot(t_ax, states_k[3], color=col, linestyle='--')
+
+        for i in range(obs_k.size(0)):
+            ax_tdoa.plot(t_ax, obs_k[i], color=col, alpha=0.6,
+                         label=f'ds{k} ch{i}' if k == 0 else '_')
+
+        if k > 0:
+            for ax in [ax_pos, ax_vel, ax_tdoa]:
+                ax.axvline(x=t_offset, color='k', linestyle='--', alpha=0.35)
+        t_offset += T
+
+    for idx, mic in enumerate(mic_positions):
+        ax_traj.scatter(mic[0].item(), mic[1].item(), marker='^', color='black', s=80, zorder=6)
+        ax_traj.annotate(f'm{idx}', (mic[0].item(), mic[1].item()), textcoords='offset points', xytext=(4, 4), fontsize=7)
+
+    _rect = mpatches.Rectangle(
+        (PX_MIN, PY_MIN), PX_MAX - PX_MIN, PY_MAX - PY_MIN,
+        linewidth=1.5, edgecolor='red', facecolor='lightyellow',
+        linestyle='--', zorder=2, alpha=0.3, label='valid region',
+    )
+    ax_traj.add_patch(_rect)
+
+    ax_traj.set_xlabel('p_x');    ax_traj.set_ylabel('p_y')
+    ax_traj.set_title('2D trajectory (o=start, x=end per dataset)')
+    ax_traj.legend(fontsize=7);   ax_traj.grid(True, alpha=0.4)
+
+    ax_pos.set_ylabel('position');  ax_pos.set_title('p_x (solid) & p_y (dashed) vs time')
+    ax_pos.legend(fontsize=7, ncol=cycle); ax_pos.grid(True, alpha=0.4)
+
+    ax_vel.set_ylabel('velocity');  ax_vel.set_title('v_x (solid) & v_y (dashed) vs time')
+    ax_vel.legend(fontsize=7, ncol=cycle); ax_vel.grid(True, alpha=0.4)
+    ax_vel.set_xlabel('time step')
+
+    ax_tdoa.set_ylabel('TDOA');   ax_tdoa.set_title('TDOA observations vs time')
+    ax_tdoa.legend(fontsize=7);   ax_tdoa.grid(True, alpha=0.4)
+    ax_tdoa.set_xlabel('time step')
+
+    fig.suptitle(f'Sequence {seq_idx} — all datasets (train)  |  dashed = dataset boundary', fontsize=12)
+    plt.tight_layout()
+    _plot_path = os.path.abspath(save_dir + f'seq{seq_idx}_data_sanity.png')
+    plt.savefig(_plot_path, dpi=150)
+    plt.close()
+    print(f"  Saved: {_plot_path}")
+    os.startfile(_plot_path)
 
 #########################################
 ###  System models                     ###
@@ -194,20 +309,6 @@ sys_model_false.F_train_TRUE = all_F_train_true
 sys_model_false.F_valid_TRUE = all_F_cv_true
 sys_model_false.F_test_TRUE  = all_F_test_true
 
-########################################
-### Analytic baselines (one sequence) ###
-########################################
-print("\nAnalytic baselines on test sequence 0 (dataset 0) ...")
-states = all_test_targets[0][0]
-obs    = all_test_inputs[0][0]
-get_F_true_fn  = make_get_F_from_matrix(all_F_test_true[0][0])
-get_F_false_fn = make_get_F_from_matrix(all_F_test_false[0][0])
-x_erts_true,  *_ = run_ekf_erts(obs, get_F_true_fn)
-x_erts_false, *_ = run_ekf_erts(obs, get_F_false_fn)
-mse_erts_true  = loss_fn(x_erts_true,  states).item()
-mse_erts_false = loss_fn(x_erts_false, states).item()
-print(f"  ERTS TRUE-F  MSE: {10*math.log10(mse_erts_true):.2f} dB")
-print(f"  ERTS FALSE-F MSE: {10*math.log10(mse_erts_false):.2f} dB")
 
 #######################
 ### RTSNet true-F   ###
@@ -220,15 +321,15 @@ RTSNet_Pipeline_true.setssModel(sys_model_true)
 RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
 RTSNet_Pipeline_true.setTrainingParams(args)
 
-RTSNet_Pipeline_true.train_RTS_net_3_datasets(
-    sys_model_true,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_true,
-    load_path_RTS=load_path_rtsnet_true,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_true.train_RTS_net_3_datasets(
+#     sys_model_true,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_RTS=destination_path_rtsnet_true,
+#     load_path_RTS=load_path_rtsnet_true,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
@@ -252,15 +353,15 @@ RTSNet_Pipeline_false.setssModel(sys_model_false)
 RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
 RTSNet_Pipeline_false.setTrainingParams(args)
 
-RTSNet_Pipeline_false.train_RTS_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_false,
-    load_path_RTS=load_path_rtsnet_false,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_false.train_RTS_net_3_datasets(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_RTS=destination_path_rtsnet_false,
+#     load_path_RTS=load_path_rtsnet_false,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
@@ -342,8 +443,6 @@ t_axis = torch.arange(T_test)
 
 plt.figure(figsize=(12, 5))
 plt.plot(t_axis, states.cpu()[1],                              linewidth=2.5, label="true p_y")
-plt.plot(t_axis, x_erts_true.cpu()[1],   "--",                linewidth=2,   label="ERTS true F")
-plt.plot(t_axis, x_erts_false.cpu()[1],  ":",                 linewidth=2,   label="ERTS false F")
 plt.plot(t_axis, rtsnet_out_true[0].cpu()[1],                 linewidth=2,   label="RTSNet true F")
 plt.plot(t_axis, rtsnet_out_false[0].cpu()[1],                linewidth=2,   label="RTSNet false F")
 plt.plot(t_axis, rtsnet_out_mnet[0].cpu()[1],                 linewidth=2,   label=f"MNet {cycle}-cycle")
@@ -363,8 +462,6 @@ print(f"  Saved: {cycle_dir}tdoa_rtsnet_y_position.png")
 print("\n" + "=" * 70)
 print(f"RESULTS SUMMARY  (cycle={cycle}, theta_changed_list={theta_changed_list})")
 print("=" * 70)
-print(f"  ERTS TRUE-F  (seq 0)          : {10*math.log10(mse_erts_true):.2f} dB")
-print(f"  ERTS FALSE-F (seq 0)          : {10*math.log10(mse_erts_false):.2f} dB")
 print(f"  RTSNet TRUE-F  (avg)          : {MSE_test_dB_avg_true.item():.2f} dB")
 print(f"  RTSNet FALSE-F (avg)          : {MSE_test_dB_avg_false.item():.2f} dB")
 print(f"  MNet {cycle}-cycle (avg)      : {MSE_test_dB_avg_mnet.item():.2f} dB")  # type: ignore[union-attr]

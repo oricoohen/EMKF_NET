@@ -61,7 +61,7 @@ T_test = args.T_test
 
 ### noise levels
 q2 = 0.1   # process noise variance   (Q = q2 * I_m)
-r2 = 10   # measurement noise variance (R = r2 * I_n)
+r2 = 10   # measurement noise varia  nce (R = r2 * I_n)
 
 ### model-mismatch parameters
 # theta_true:  F per group drawn Uniform(-theta_true/2, +theta_true/2)
@@ -76,11 +76,11 @@ m2x_0 = m2x_0.to(device)
 
 ### paths
 save_dir = "RTSNet/tdoa_2d/10/"
-os.makedirs(save_dir, exist_ok=True)
+os.makedirs(save_dir, exist_ok=True)    
 destination_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
 destination_path_rtsnet_false = save_dir + "RTSNet_false.pt"
 destination_path_M_F = save_dir + "M_step_F_net.pt"
-destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint_arge_f_loss.pt"
+destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint_large_f_loss.pt"
 destination_path_M_F_joint = save_dir + "M_step_F_net_joint_large_f_loss.pt"
 
 print("=" * 70)
@@ -125,20 +125,20 @@ print("\n" + "─" * 60)
 print("TRUE-F  vs  FALSE-F  mismatch  (all groups, test set):")
 print("─" * 60)
 all_mse = []
-for g, (Ft, Ff) in enumerate(zip(F_test_true, F_test_false)):
+for i, (Ft, Ff) in enumerate(zip(F_test_true, F_test_false)):
     mse_g = ((Ft - Ff) ** 2).mean().item()
     all_mse.append(mse_g)
     dB_g  = 10 * math.log10(max(mse_g, 1e-10))
-    print(f"  group {g:3d}  theta_true={theta_test[g]:+.4f} rad  "
+    print(f"  seq {i:3d}  theta_true={theta_test[i]:+.4f} rad  "
           f"||F_true-F_false||^2={mse_g:.6f}  ({dB_g:.2f} dB)")
 mse_mean = sum(all_mse) / len(all_mse)
 print(f"  MEAN  ||F_true-F_false||^2 = {mse_mean:.6f}  "
       f"({10*math.log10(max(mse_mean,1e-10)):.2f} dB)")
-print("  (group 0 — F_true):")
+print("  (seq 0 — F_true):")
 print(" ", F_test_true[0].cpu().numpy())
-print("  (group 0 — F_false):")
+print("  (seq 0 — F_false):")
 print(" ", F_test_false[0].cpu().numpy())
-print("  (group 0 — diff  F_false - F_true):")
+print("  (seq 0 — diff  F_false - F_true):")
 print(" ", (F_test_false[0] - F_test_true[0]).cpu().numpy())
 print("─" * 60)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,11 +184,10 @@ print("\nRunning analytic baselines averaged over all test sequences ...")
 mse_erts_true_sum  = 0.0
 mse_erts_false_sum = 0.0
 for i in range(args.N_T):
-    g        = i // 10
     states_i = test_target[i]
     obs_i    = test_input[i]
-    x_et, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_true[g]),  Q_in=Q, R_in=R)
-    x_ef, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_false[g]), Q_in=Q, R_in=R)
+    x_et, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_true[i]),  Q_in=Q, R_in=R)
+    x_ef, *_ = run_ekf_erts(obs_i, make_get_F_from_matrix(F_test_false[i]), Q_in=Q, R_in=R)
     mse_erts_true_sum  += loss_fn(x_et, states_i).item()
     mse_erts_false_sum += loss_fn(x_ef, states_i).item()
 
@@ -309,21 +308,21 @@ num_em_iters = 2
 #############################
 print("\nJoint training: RTSNet + MNet F together")
 
-RTSNet_Pipeline_false.train_joint_F_mstep_net(
-    sys_model_false,
-    cv_input,
-    cv_target,
-    train_input,
-    train_target,
-    destination_path_M=destination_path_M_F_joint,
-    destination_path_RTS=destination_path_rtsnet_jointF,
-    load_destination_path_RTS=destination_path_rtsnet_false,
-    load_destination_path_M=destination_path_M_F,
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0),
-    lambda_F=1e-3,
-    generate_f=True,
-)
+# RTSNet_Pipeline_false.train_joint_F_mstep_net(
+#     sys_model_false,
+#     cv_input,
+#     cv_target,
+#     train_input,
+#     train_target,
+#     destination_path_M=destination_path_M_F_joint,
+#     destination_path_RTS=destination_path_rtsnet_jointF,
+#     load_destination_path_RTS=destination_path_rtsnet_false,
+#     load_destination_path_M=destination_path_M_F,
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0),
+#     lambda_F=1e-3,
+#     generate_f=True,
+# )
 
 [MSE_test_arr_joint, MSE_test_avg_joint, MSE_test_dB_avg_joint,
  rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net(

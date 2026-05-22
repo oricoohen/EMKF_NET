@@ -74,6 +74,7 @@ class ExtendedKalmanFilter:
         # Compute the 2-nd posterior moment
         self.m2x_posterior = torch.matmul(self.m2y, torch.transpose(self.KG, 0, 1))
         self.m2x_posterior = self.m2x_prior - torch.matmul(self.KG, self.m2x_posterior)
+        self.m2x_posterior = (self.m2x_posterior + self.m2x_posterior.T) / 2
 
     def Update(self, y):
         self.Predict()

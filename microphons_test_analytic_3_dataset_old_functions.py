@@ -16,11 +16,10 @@ from Simulations.TDOA_2D.parameters import (
     make_F_block, f, h, h_jacobian,
     generate_dataset_random_theta,
     generate_false_F_list,
-    make_get_F_from_matrix,
 )
-from Simulations.TDOA_2D.ekf_erts import run_ekf_erts, compute_cross_covariances
 from Simulations.Extended_sysmdl import SystemModel
-from emkf.main_emkf_func import E_EMKF_F_analitic_non_linear_h, EMKF_F_solo
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_old
+from emkf.main_emkf_func import E_EMKF_F_analitic_non_linear_h
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -42,14 +41,14 @@ args.T_test = 30
 
 T_test = args.T_test
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 cycle              = 5
 theta_changed_list = [0.2, 0.2, 0.2, 0.2, 0.2]
 assert len(theta_changed_list) == cycle
 
-theta_false = 0.05
+theta_false = 0.2
 max_em_iter = 5
 
 Q     = (q2 * Q_structure).to(device)
@@ -109,9 +108,8 @@ print(f"  max_em_iter={max_em_iter}")
 #########################################
 ###  Run ERTS across all datasets     ###
 #########################################
-# For each test sequence j, datasets are processed in order 0→cycle-1.
-# x_0 and P_0 carry from the last EKF filtered state/covariance of dataset k
-# into the initial condition of dataset k+1.
+# Outer loop over datasets; S_Test_ext_old processes all N_T sequences in one call.
+# Per-sequence x/P carries are maintained in lists and updated after each dataset.
 
 print("\nRunning ERTS (true F and false F) across all datasets ...")
 
@@ -123,85 +121,51 @@ mse_false_arr = torch.zeros(cycle, N_T)
 mse_emkf_arr  = torch.zeros(cycle, N_T)
 
 # Store first-sequence outputs for plotting
-out_true_seq0  = []   # smoother output per dataset for sequence 0
+out_true_seq0  = []
 out_false_seq0 = []
 out_emkf_seq0  = []
 
-for j in range(N_T):
-    x0_true  = m1x_0.clone()
-    P0_true  = m2x_0.clone()
-    x0_false = m1x_0.clone()
-    P0_false = m2x_0.clone()
+# Per-sequence carries  (shape [m,1] initially, [m] after first update — both fine)
+x0_true_carries  = [m1x_0.clone() for _ in range(N_T)]
+P0_true_carries  = [m2x_0.clone() for _ in range(N_T)]
+x0_false_carries = [m1x_0.clone() for _ in range(N_T)]
+P0_false_carries = [m2x_0.clone() for _ in range(N_T)]
 
-    for data in range(cycle):
-        y_seq  = all_test_inputs[data][j]
-        x_true = all_test_targets[data][j]
+for data in range(cycle):
+    # ── ERTS with true F — all N_T sequences at once ──────────────────────
+    [mse_arr_true, _, _, X_smooth_true, P_smooth_true, _] = S_Test_ext_old(
+        sys_model,
+        test_input=all_test_inputs[data],       # [N_T, n, T]
+        test_target=all_test_targets[data],     # [N_T, m, T]
+        F_list=all_F_test_true[data],           # list of N_T [m,m] matrices
+        generate_f=False,
+        init_x_list=x0_true_carries,            # list of N_T initial states
+        init_P_list=P0_true_carries,            # list of N_T initial covariances
+    )
+    mse_true_arr[data] = mse_arr_true.cpu()
+    out_true_seq0.append(X_smooth_true[0].detach().clone())  # seq-0 output [m, T]
 
-        get_F_true  = make_get_F_from_matrix(all_F_test_true[data][j])
-        get_F_false = make_get_F_from_matrix(all_F_test_false[data][j])
+    # P_smooth[:,:,T-1] == P_filt[:,:,T-1] (smoother initialises at T-1 to filtered value)
+    for j in range(N_T):
+        x0_true_carries[j] = X_smooth_true[j, :, -1].detach()      # [m]
+        P0_true_carries[j] = P_smooth_true[j, :, :, -1].detach()   # [m, m]
 
-        # ERTS with true F
-        x_s_true, P_s_true, P_f_true, *_ = run_ekf_erts(
-            y_seq, get_F_true, Q_in=Q, R_in=R,
-            x_init=x0_true, P_init=P0_true,
-        )
-        mse_true_arr[data, j] = loss_fn(x_s_true, x_true).item()
-        x0_true = x_s_true[:, -1].detach()
-        P0_true = P_f_true[:, :, -1].detach()
+    # ── ERTS with false F — all N_T sequences at once ─────────────────────
+    [mse_arr_false, _, _, X_smooth_false, P_smooth_false, _] = S_Test_ext_old(
+        sys_model,
+        test_input=all_test_inputs[data],
+        test_target=all_test_targets[data],
+        F_list=all_F_test_false[data],
+        generate_f=False,
+        init_x_list=x0_false_carries,
+        init_P_list=P0_false_carries,
+    )
+    mse_false_arr[data] = mse_arr_false.cpu()
+    out_false_seq0.append(X_smooth_false[0].detach().clone())
 
-        # ERTS with false F
-        x_s_false, P_s_false, P_f_false, *_ = run_ekf_erts(
-            y_seq, get_F_false, Q_in=Q, R_in=R,
-            x_init=x0_false, P_init=P0_false,
-        )
-        mse_false_arr[data, j] = loss_fn(x_s_false, x_true).item()
-        x0_false = x_s_false[:, -1].detach()
-        P0_false = P_f_false[:, :, -1].detach()
-
-        if j == 0:
-            out_true_seq0.append(x_s_true)
-            out_false_seq0.append(x_s_false)
-
-## ── Cross-check (confirmed equivalent, F diff ~1e-6) — commented out ──────────
-## def run_emkf_ekf_erts(y_seq, F_init, x_0, P_0, max_it):
-##     F_est = F_init.clone()
-##     F_all = [F_est.clone()]
-##     for _ in range(max_it):
-##         x_s, P_s, P_f, sgains, H_last, K_last = run_ekf_erts(
-##             y_seq, make_get_F_from_matrix(F_est), Q_in=Q, R_in=R,
-##             x_init=x_0, P_init=P_0,
-##         )
-##         V     = compute_cross_covariances(F_est, H_last, K_last, P_f, sgains)
-##         F_est = EMKF_F_solo(F_est, h, Q, R, y_seq, x_0, P_0, x_s, P_s, V, m, T_test)
-##         F_all.append(F_est.clone())
-##     x_s_final, *_ = run_ekf_erts(
-##         y_seq, make_get_F_from_matrix(F_est), Q_in=Q, R_in=R,
-##         x_init=x_0, P_init=P_0,
-##     )
-##     return F_all, x_s_final
-##
-## print("\n=== EMKF cross-check: S_Test_ext_old vs run_ekf_erts (seq 0, dataset 0) ===")
-## _y0  = all_test_inputs[0][0]
-## _xt0 = all_test_targets[0][0]
-## _F0  = all_F_test_false[0][0].clone()
-## _Fmats_A, _, _, _ = E_EMKF_F_analitic_non_linear_h(
-##     sys_model=sys_model, F_0_matrices=[_F0.clone()],
-##     h=h, Q=Q, R=R,
-##     Y=_y0.unsqueeze(0), x_0=m1x_0, P_0=m2x_0,
-##     X=_xt0.unsqueeze(0), max_it=max_em_iter, generate_f=False,
-##     init_x_list=None, init_P_list=None,
-## )
-## _F_final_A = _Fmats_A[0][-1]
-## _xs_A, *_ = run_ekf_erts(_y0, make_get_F_from_matrix(_F_final_A), Q_in=Q, R_in=R)
-## _Fall_B, _xs_B = run_emkf_ekf_erts(_y0, _F0.clone(), m1x_0, m2x_0, max_em_iter)
-## _F_final_B = _Fall_B[-1]
-## print(f"  F_final diff  (A - B) norm : {(_F_final_A - _F_final_B).norm().item():.2e}")
-## print(f"  x_smooth diff (A - B) norm : {(_xs_A - _xs_B).norm().item():.2e}")
-## print(f"  MSE method A : {10*math.log10(loss_fn(_xs_A, _xt0).item()):.2f} dB")
-## print(f"  MSE method B : {10*math.log10(loss_fn(_xs_B, _xt0).item()):.2f} dB")
-## print("=" * 70)
-## ─────────────────────────────────────────────────────────────────────────────
-
+    for j in range(N_T):
+        x0_false_carries[j] = X_smooth_false[j, :, -1].detach()
+        P0_false_carries[j] = P_smooth_false[j, :, :, -1].detach()
 
 #########################################
 ###  Run analytic EMKF across datasets ###
@@ -228,24 +192,26 @@ for data in range(cycle):
         init_P_list=emkf_P_carries,
     )
 
-    for j in range(N_T):
-        F_final_j    = F_mats_batch[j][-1]
-        get_F_emkf_j = make_get_F_from_matrix(F_final_j)
-        y_seq  = all_test_inputs[data][j]
-        x_true = all_test_targets[data][j]
+    # ── Evaluate EMKF: run smoother once with final estimated F per sequence ──
+    # Uses OLD carries (before update) to match the same initial condition as EM.
+    F_list_emkf = [F_mats_batch[j][-1] for j in range(N_T)]   # list of N_T [m,m]
+    [mse_arr_emkf, _, _, X_smooth_emkf, _, _] = S_Test_ext_old(
+        sys_model,
+        test_input=all_test_inputs[data],
+        test_target=all_test_targets[data],
+        F_list=F_list_emkf,
+        generate_f=False,
+        init_x_list=emkf_x_carries,   # OLD carries — not yet updated
+        init_P_list=emkf_P_carries,
+    )
+    mse_emkf_arr[data] = mse_arr_emkf.cpu()
+    out_emkf_seq0.append(X_smooth_emkf[0].detach().clone())
 
-        x_s_emkf, _, P_f_emkf, *_ = run_ekf_erts(
-            y_seq, get_F_emkf_j, Q_in=Q, R_in=R,
-            x_init=emkf_x_carries[j], P_init=emkf_P_carries[j],
-        )
-        mse_emkf_arr[data, j] = loss_fn(x_s_emkf, x_true).item()
-        if j == 0:
-            out_emkf_seq0.append(x_s_emkf)
-
+    # ── Update carries for next dataset ──────────────────────────────────────
     for j in range(N_T):
         emkf_x_carries[j] = last_x_emkf[j]
         emkf_P_carries[j] = last_P_emkf[j]
-        emkf_F_carries[j] = F_mats_batch[j][-1]  # carry estimated F to next dataset
+        emkf_F_carries[j] = F_mats_batch[j][-1]
 
 #########################################
 ###  Results summary                  ###

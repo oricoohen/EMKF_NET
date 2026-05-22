@@ -27,7 +27,7 @@ M_mics  = 4           # number of microphones
 n  = M_mics - 1  # TDOA measurements per timestep (= 3)
 
 # ── Physical constants ────────────────────────────────────────────────────────
-dt      = 0.05   # time step  (v0=0.5 × dt=0.1 gives ~5 units travel over T=100)
+dt      = 0.05   # time step
 c_sound = 1.0   # speed of sound (normalized)
 
 # ── Microphone positions on the x-axis (y = 0) ───────────────────────────────
@@ -36,6 +36,12 @@ mic_positions = torch.tensor(
     [[-10.0, 0.0], [-5.0, 0.0], [0.0, 0.0], [5.0, 0.0], [10.0, 0.0]],
     dtype=torch.float32, device=device,
 )  # [M_mics, 2]
+
+# ── Trajectory validity bounds ────────────────────────────────────────────────
+PX_MIN, PX_MAX =  -6.0,  6.0   # position x
+PY_MIN, PY_MAX =   1.0,  8.0   # position y
+V_MAX          =   2.5         # max speed on either axis
+MAX_RETRIES    = 100            # per-sequence retry limit
 
 # ── Noise covariances ─────────────────────────────────────────────────────────
 Q_structure = torch.eye(m, dtype=torch.float32, device=device)   # [m, m] identity
@@ -47,27 +53,32 @@ Q  = q2 * Q_structure
 R  = r2 * R_structure
 
 # ── Initial condition (fixed and known for every sequence) ────────────────────
-# y-offset of 2.0 keeps the target above the mic axis so TDOA is well-defined.
-v0    = 0.5
-m1x_0 = torch.tensor([[3.0], [3.0], [v0], [0.0]],
+# p_y starts at the centre of [PY_MIN, PY_MAX] = 3.5 so noise has equal margin
+# in both directions before hitting either bound.
+v0    = 0.3
+m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],
                       dtype=torch.float32, device=device)  # [4, 1]
 m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 
 # ── Default block-wise turning angles (single-trajectory script) ──────────────
-default_thetas_deg = [0.0, 20.0, 0.0, -20.0]
-default_thetas_rad = [t * math.pi / 180.0 for t in default_thetas_deg]
-default_thetas_rad = [0.0, 0.035, 0.0, -0.035]
+# default_thetas_deg = [0.0, 20.0, 0.0, -20.0]
+# default_thetas_rad = [t * math.pi / 180.0 for t in default_thetas_deg]
+# default_thetas_rad = [0.0, 0.035, 0.0, -0.035]
 
 # ── F-block constructor ───────────────────────────────────────────────────────
+VEL_DECAY = 0.99  # velocity damping per step — prevents unbounded drift over datasets
+
 def make_F_block(theta_rad: float) -> torch.Tensor:
     """
-    4x4 near-constant-velocity transition matrix with turning angle theta.
-        theta = 0   straight motion
+    4x4 damped-rotation transition matrix.
+    Velocity is rotated by theta and decayed by VEL_DECAY each step,
+    preventing unbounded drift across datasets.
+        theta = 0   straight motion (with decay)
         theta > 0   left turn
         theta < 0   right turn
     """
-    c = math.cos(theta_rad)
-    s = math.sin(theta_rad)
+    c = VEL_DECAY * math.cos(theta_rad)
+    s = VEL_DECAY * math.sin(theta_rad)
     return torch.tensor(
         [[1.0, 0.0,  dt, 0.0],
          [0.0, 1.0, 0.0,  dt],
@@ -138,6 +149,20 @@ def get_jacobian(x: torch.Tensor, g, out_dim: int, in_dim: int) -> torch.Tensor:
     return J.view(out_dim, in_dim)
 
 
+# ── Trajectory validity check ────────────────────────────────────────────────
+def _traj_valid(states: torch.Tensor) -> bool:
+    """
+    Returns True if every timestep of states [m, T] satisfies the bounds:
+      p_x in [PX_MIN, PX_MAX], p_y in [PY_MIN, PY_MAX], |v_x|,|v_y| <= V_MAX
+    """
+    px, py, vx, vy = states[0], states[1], states[2], states[3]
+    return bool(
+        (px >= PX_MIN).all() and (px <= PX_MAX).all() and
+        (py >= PY_MIN).all() and (py <= PY_MAX).all() and
+        (vx.abs() <= V_MAX).all() and (vy.abs() <= V_MAX).all()
+    )
+
+
 # ── Single-trajectory generator ──────────────────────────────────────────────
 def generate_single_traj(
     T: int,
@@ -148,11 +173,14 @@ def generate_single_traj(
 ) -> tuple:
     """
     One trajectory of length T with equal-size blocks.
+    Retries up to MAX_RETRIES times if the trajectory violates the bounds
+    defined by PX_MIN/PX_MAX, PY_MIN/PY_MAX, V_MAX.
 
     Returns
     -------
-    states : [m_state, T]   true states
-    obs    : [n_obs,   T]   noisy TDOA observations
+    states   : [m_state, T]   true states
+    obs      : [n_obs,   T]   noisy TDOA observations
+    n_retries: int            number of rejected attempts (0 = accepted first try)
     """
     if Q_gen is None:
         Q_gen = Q
@@ -161,23 +189,107 @@ def generate_single_traj(
 
     n_blocks   = len(thetas_rad)
     block_size = T // n_blocks
+    L_q = torch.linalg.cholesky(Q_gen)
+    L_r = torch.linalg.cholesky(R_gen)
+    x0  = x_init.reshape(-1).clone() if x_init is not None else m1x_0.reshape(-1).clone()
 
-    L_q = torch.linalg.cholesky(Q_gen)   # [m, m]
-    L_r = torch.linalg.cholesky(R_gen)   # [n, n]
+    vcounts = {'px_low': 0, 'px_high': 0, 'py_low': 0, 'py_high': 0, 'vx': 0, 'vy': 0}
 
-    states = torch.zeros(m, T, device=device)
-    obs    = torch.zeros(n,   T, device=device)
-    x      = x_init.reshape(-1).clone() if x_init is not None else m1x_0.reshape(-1).clone()  # [4]
+    for attempt in range(MAX_RETRIES + 1):
+        states = torch.zeros(m, T, device=device)
+        obs    = torch.zeros(n, T, device=device)
+        x      = x0.clone()
 
-    for t in range(T):
-        k   = min(t // block_size, n_blocks - 1)
-        F_k = make_F_block(thetas_rad[k])
-        x   = F_k @ x + L_q @ torch.randn(m, device=device)
-        y   = h(x).reshape(-1) + L_r @ torch.randn(n, device=device)
-        states[:, t] = x
-        obs[:, t]    = y
+        for t in range(T):
+            k   = min(t // block_size, n_blocks - 1)
+            F_k = make_F_block(thetas_rad[k])
+            x   = F_k @ x + L_q @ torch.randn(m, device=device)
+            y   = h(x).reshape(-1) + L_r @ torch.randn(n, device=device)
+            states[:, t] = x
+            obs[:, t]    = y
 
-    return states, obs
+        if _traj_valid(states):
+            return states, obs, attempt, vcounts
+
+        # tally which bounds were violated in this attempt
+        if (states[0] < PX_MIN).any(): vcounts['px_low']  += 1
+        if (states[0] > PX_MAX).any(): vcounts['px_high'] += 1
+        if (states[1] < PY_MIN).any(): vcounts['py_low']  += 1
+        if (states[1] > PY_MAX).any(): vcounts['py_high'] += 1
+        if (states[2].abs() > V_MAX).any(): vcounts['vx'] += 1
+        if (states[3].abs() > V_MAX).any(): vcounts['vy'] += 1
+
+    ranked = sorted(vcounts.items(), key=lambda x: x[1], reverse=True)
+    ranked_str = '  |  '.join(f"{k}={v}" for k, v in ranked if v > 0)
+
+    # ── pop up the last failed trajectory before crashing ────────────────────
+    try:
+        import os, matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as _plt
+        import matplotlib.patches as _mpatches
+
+        px = states[0].cpu()
+        py = states[1].cpu()
+        vx = states[2].cpu()
+        vy = states[3].cpu()
+
+        # which timesteps violate each bound
+        bad_px = (px < PX_MIN) | (px > PX_MAX)
+        bad_py = (py < PY_MIN) | (py > PY_MAX)
+        bad_v  = (vx.abs() > V_MAX) | (vy.abs() > V_MAX)
+        bad    = bad_px | bad_py | bad_v
+
+        _fig, _axes = _plt.subplots(1, 2, figsize=(14, 6))
+
+        # left: 2D trajectory
+        _ax = _axes[0]
+        _ax.plot(px.numpy(), py.numpy(), 'b-', linewidth=1.5, label='trajectory')
+        _ax.scatter(px[0].item(), py[0].item(), color='green', s=80, zorder=5, label='start')
+        if bad.any():
+            _ax.scatter(px[bad].numpy(), py[bad].numpy(),
+                        color='red', s=40, zorder=6, label='violation')
+        _rect = _mpatches.Rectangle(
+            (PX_MIN, PY_MIN), PX_MAX - PX_MIN, PY_MAX - PY_MIN,
+            linewidth=1.5, edgecolor='red', facecolor='lightyellow',
+            linestyle='--', zorder=2, alpha=0.4, label='valid region',
+        )
+        _ax.add_patch(_rect)
+        for _i, _mic in enumerate(mic_positions):
+            _ax.scatter(_mic[0].item(), _mic[1].item(), marker='^', color='black', s=80, zorder=7)
+            _ax.annotate(f'm{_i}', (_mic[0].item(), _mic[1].item()),
+                         textcoords='offset points', xytext=(4, 4), fontsize=7)
+        _ax.set_xlabel('p_x'); _ax.set_ylabel('p_y')
+        _ax.set_title('Last failed trajectory (red = violated)')
+        _ax.legend(fontsize=8); _ax.grid(True, alpha=0.4)
+
+        # right: velocities vs time
+        _t = list(range(len(vx)))
+        _axes[1].plot(_t, vx.numpy(), label='v_x')
+        _axes[1].plot(_t, vy.numpy(), '--', label='v_y')
+        _axes[1].axhline( V_MAX, color='red', linestyle=':', linewidth=1.2, label=f'+V_MAX={V_MAX}')
+        _axes[1].axhline(-V_MAX, color='red', linestyle=':', linewidth=1.2, label=f'-V_MAX={V_MAX}')
+        _axes[1].set_xlabel('time step'); _axes[1].set_ylabel('velocity')
+        _axes[1].set_title('v_x / v_y vs time')
+        _axes[1].legend(fontsize=8); _axes[1].grid(True, alpha=0.4)
+
+        _fig.suptitle(f'FAILED after {MAX_RETRIES} retries  |  {ranked_str}', fontsize=11, color='red')
+        _plt.tight_layout()
+        _save = os.path.abspath('failed_trajectory_debug.png')
+        _plt.savefig(_save, dpi=150)
+        _plt.close(_fig)
+        os.startfile(_save)
+        print(f"\n  [DEBUG] Failed trajectory plot saved and opened: {_save}")
+    except Exception:
+        pass  # never let the plot crash hide the real error
+
+    raise RuntimeError(
+        f"generate_single_traj: could not produce a valid trajectory in "
+        f"{MAX_RETRIES} attempts.\n"
+        f"Violation breakdown (most common first): {ranked_str}\n"
+        f"Bounds: px=[{PX_MIN},{PX_MAX}], py=[{PY_MIN},{PY_MAX}], |v|<={V_MAX}.\n"
+        f"Consider loosening bounds, reducing noise (Q), or reducing theta range."
+    )
 
 
 # ── Multi-trajectory batch generator ─────────────────────────────────────────
@@ -200,10 +312,27 @@ def generate_multi_traj_batch(
     all_inputs  = torch.zeros(size, n, T, device=device)
     all_targets = torch.zeros(size, m, T, device=device)
 
+    n_rejected = 0
+    total_vc   = {'px_low': 0, 'px_high': 0, 'py_low': 0, 'py_high': 0, 'vx': 0, 'vy': 0}
     for s in range(size):
-        states, obs = generate_single_traj(T, thetas_rad, Q_gen, R_gen)
+        states, obs, retries, vc = generate_single_traj(T, thetas_rad, Q_gen, R_gen)
+        if retries > 0:
+            n_rejected += 1
+            for k in total_vc: total_vc[k] += vc[k]
         all_inputs[s] = obs
         all_targets[s] = states
+
+    rejection_rate = n_rejected / size
+    if rejection_rate > 0.10:
+        ranked = sorted(total_vc.items(), key=lambda x: x[1], reverse=True)
+        ranked_str = '  |  '.join(f"{k}={v}" for k, v in ranked if v > 0)
+        raise RuntimeError(
+            f"generate_multi_traj_batch: {n_rejected}/{size} sequences "
+            f"({100*rejection_rate:.1f}%) needed at least one retry — exceeds 10% threshold.\n"
+            f"Violation breakdown (most common first): {ranked_str}\n"
+            f"Bounds: px=[{PX_MIN},{PX_MAX}], py=[{PY_MIN},{PY_MAX}], |v|<={V_MAX}.\n"
+            f"Suggestions: reduce Q noise, reduce theta range, or loosen bounds."
+        )
 
     return all_inputs, all_targets
 
@@ -257,20 +386,24 @@ def generate_dataset_random_theta(N: int, T: int, theta_true_max: float,
                                   Q_gen: torch.Tensor = None,
                                   R_gen: torch.Tensor = None,
                                   x_init: torch.Tensor = None,
-                                  theta_base: float = 0.0):
+                                  theta_base=None):
     """
-    Generate N trajectories in groups of 10.
-    Each group uses ONE random theta ~ theta_base + Uniform(-theta_true_max/2, +theta_true_max/2)
-    as a constant F for all T time steps of those 10 sequences.
-    All trajectories start from x_init (defaults to m1x_0 if None).
-    N must be a multiple of 10.
+    Generate N trajectories, each with its own random theta.
+    theta for sequence i: theta_base[i] + Uniform(-theta_true_max/2, +theta_true_max/2)
+
+    theta_base: None or float  → all sequences use 0.0 as base
+                list of N floats → each sequence i uses theta_base[i] as base
+
+    x_init: None            → all sequences start from m1x_0
+            [m] tensor      → all sequences share this single initial state
+            [N, m] tensor   → each sequence idx starts from x_init[idx]
 
     Returns
     -------
     inputs     : [N, n, T]
     targets    : [N, m, T]
-    theta_list : list of N//10 floats   (true theta per group)
-    F_list     : list of N//10 tensors  (true F per group)
+    theta_list : list of N floats   (true theta per sequence)
+    F_list     : list of N tensors  (true F per sequence)
     """
     import random as _random
     if Q_gen is None:
@@ -278,21 +411,39 @@ def generate_dataset_random_theta(N: int, T: int, theta_true_max: float,
     if R_gen is None:
         R_gen = R
 
-    n_groups = N // 10
+    per_seq = (x_init is not None and x_init.dim() == 2)   # [N, m] per-sequence carry
+
     inputs  = torch.zeros(N, n, T, device=device)
     targets = torch.zeros(N, m, T, device=device)
     theta_list = []
     F_list     = []
 
-    for g in range(n_groups):
-        theta = theta_base + (_random.random() - 0.5) * theta_true_max   # theta_base + Uniform(-max/2, +max/2)
+    n_rejected = 0
+    total_vc   = {'px_low': 0, 'px_high': 0, 'py_low': 0, 'py_high': 0, 'vx': 0, 'vy': 0}
+    for i in range(N):
+        base  = (theta_base[i] if isinstance(theta_base, list) else 0.0)
+        theta = base + (_random.random() - 0.5) * theta_true_max
         theta_list.append(theta)
         F_list.append(make_F_block(theta))
-        for s in range(10):
-            idx = g * 10 + s
-            states, obs = generate_single_traj(T, [theta], Q_gen, R_gen, x_init=x_init)
-            targets[idx] = states
-            inputs[idx]  = obs
+        x0 = x_init[i] if per_seq else x_init
+        states, obs, retries, vc = generate_single_traj(T, [theta], Q_gen, R_gen, x_init=x0)
+        if retries > 0:
+            n_rejected += 1
+            for k in total_vc: total_vc[k] += vc[k]
+        targets[i] = states
+        inputs[i]  = obs
+
+    rejection_rate = n_rejected / N
+    if rejection_rate > 0.10:
+        ranked = sorted(total_vc.items(), key=lambda x: x[1], reverse=True)
+        ranked_str = '  |  '.join(f"{k}={v}" for k, v in ranked if v > 0)
+        raise RuntimeError(
+            f"generate_dataset_random_theta: {n_rejected}/{N} sequences "
+            f"({100*rejection_rate:.1f}%) needed at least one retry — exceeds 10% threshold.\n"
+            f"Violation breakdown (most common first): {ranked_str}\n"
+            f"Bounds: px=[{PX_MIN},{PX_MAX}], py=[{PY_MIN},{PY_MAX}], |v|<={V_MAX}.\n"
+            f"Suggestions: reduce Q noise, reduce theta range, or loosen bounds."
+        )
 
     return inputs, targets, theta_list, F_list
 
