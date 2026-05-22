@@ -94,19 +94,19 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 destination_path_M = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
-# destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_jointb.pt'
+# destination_path_M_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/M_st   ep_net_jointb.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/old/ori_M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/old/ori_RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 bigru_path = 'RTSNet/lorenz_rotated_01/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []

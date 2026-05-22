@@ -356,8 +356,8 @@ print("\nStarting training...")
 
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
-                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
+#                         , load_path_rtsnet_full, H_init=H_Rotate, datasets=cycles)
 
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
