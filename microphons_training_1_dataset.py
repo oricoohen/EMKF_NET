@@ -308,21 +308,21 @@ num_em_iters = 2
 #############################
 print("\nJoint training: RTSNet + MNet F together")
 
-# RTSNet_Pipeline_false.train_joint_F_mstep_net(
-#     sys_model_false,
-#     cv_input,
-#     cv_target,
-#     train_input,
-#     train_target,
-#     destination_path_M=destination_path_M_F_joint,
-#     destination_path_RTS=destination_path_rtsnet_jointF,
-#     load_destination_path_RTS=destination_path_rtsnet_false,
-#     load_destination_path_M=destination_path_M_F,
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0),
-#     lambda_F=1e-3,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.train_joint_F_mstep_net(
+    sys_model_false,
+    cv_input,
+    cv_target,
+    train_input,
+    train_target,
+    destination_path_M=destination_path_M_F_joint,
+    destination_path_RTS=destination_path_rtsnet_jointF,
+    load_destination_path_RTS=destination_path_rtsnet_false,
+    load_destination_path_M=destination_path_M_F,
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0),
+    lambda_F=1e-3,
+    generate_f=True,
+)
 
 [MSE_test_arr_joint, MSE_test_avg_joint, MSE_test_dB_avg_joint,
  rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net(

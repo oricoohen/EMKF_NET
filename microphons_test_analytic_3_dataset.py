@@ -42,14 +42,13 @@ args.T_test = 30
 
 T_test = args.T_test
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 cycle              = 5
-theta_changed_list = [0.2, 0.2, 0.2, 0.2, 0.2]
-assert len(theta_changed_list) == cycle
+theta_per_dataset  = [0.1, 0.2, 0.3, 0.4, 0.5]   # exact theta (rad) for each dataset
+assert len(theta_per_dataset) == cycle
 
-theta_false = 0.05
 max_em_iter = 5
 
 Q     = (q2 * Q_structure).to(device)
@@ -67,7 +66,7 @@ os.makedirs(cycle_dir, exist_ok=True)
 print("=" * 70)
 print(f"2D TDOA Analytic ERTS — {cycle}-cycle multi-dataset test")
 print(f"  T_test={T_test}  q2={q2}  r2={r2}")
-print(f"  cycle={cycle}  theta_changed_list={theta_changed_list}  theta_false={theta_false}")
+print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -81,22 +80,19 @@ all_test_targets = []
 all_F_test_true  = []
 all_F_test_false = []
 
-carry_x_test    = None
-carry_theta_test = None
+carry_x_test = None
 
 for k in range(cycle):
-    theta_changed = theta_changed_list[k]
-    _te0 = carry_theta_test[0] if isinstance(carry_theta_test, list) else 0.0
-    print(f"  Dataset {k}: theta_base[0]={_te0:.4f} + Uniform(-{theta_changed/2:.3f}, +{theta_changed/2:.3f})")
+    theta_k = theta_per_dataset[k]
+    print(f"  Dataset {k}: theta={theta_k:.4f} rad (fixed for all sequences)")
 
-    xi, xt, th_te, F_te_t = generate_dataset_random_theta(
-        args.N_T, T_test, theta_changed, Q, R,
-        x_init=carry_x_test, theta_base=carry_theta_test,
+    xi, xt, _, F_te_t = generate_dataset_random_theta(
+        args.N_T, T_test, 0, Q, R,
+        x_init=carry_x_test, theta_base=[theta_k] * args.N_T,
     )
-    F_te_f = generate_false_F_list(th_te, theta_false)
+    F_te_f = [make_F_block(0.0)] * args.N_T   # false F always theta=0
 
-    carry_x_test    = xt[:, :, -1]   # [N_T, m] — per-sequence carry
-    carry_theta_test = th_te
+    carry_x_test = xt[:, :, -1]   # [N_T, m] — per-sequence carry
 
     all_test_inputs.append(xi)
     all_test_targets.append(xt)
@@ -210,7 +206,7 @@ print("\nRunning analytic EMKF across all datasets ...")
 
 emkf_x_carries = [m1x_0.clone() for _ in range(N_T)]
 emkf_P_carries = [m2x_0.clone() for _ in range(N_T)]
-emkf_F_carries = [all_F_test_false[0][j].clone() for j in range(N_T)]  # init with false F
+emkf_F_carries = [make_F_block(0.0) for _ in range(N_T)]  # init with theta=0
 
 for data in range(cycle):
     print(f"\n  [EMKF] Dataset {data} ...")
@@ -251,7 +247,7 @@ for data in range(cycle):
 ###  Results summary                  ###
 #########################################
 print("\n" + "=" * 70)
-print(f"RESULTS SUMMARY  (cycle={cycle}, theta_changed_list={theta_changed_list})")
+print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={theta_per_dataset})")
 print("=" * 70)
 
 mse_true_db_per_dataset  = [10 * math.log10(mse_true_arr[k].mean().item())  for k in range(cycle)]
