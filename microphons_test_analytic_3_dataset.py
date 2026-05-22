@@ -10,6 +10,8 @@ from datetime import datetime
 
 import Simulations.config as config
 
+import matplotlib.patches as mpatches
+
 from Simulations.TDOA_2D.parameters import (
     m, n, m1x_0, m2x_0, M_mics,
     Q_structure, R_structure,
@@ -17,6 +19,8 @@ from Simulations.TDOA_2D.parameters import (
     generate_dataset_random_theta,
     generate_false_F_list,
     make_get_F_from_matrix,
+    PX_MIN, PX_MAX, PY_MIN, PY_MAX,
+    mic_positions,
 )
 from Simulations.TDOA_2D.ekf_erts import run_ekf_erts, compute_cross_covariances
 from Simulations.Extended_sysmdl import SystemModel
@@ -36,7 +40,7 @@ print("Current Time =", strTime)
 ###  Settings   ###
 ###################
 args = config.general_settings()
-args.N_T   = 200
+args.N_T   = 100
 args.T     = 30
 args.T_test = 30
 
@@ -101,6 +105,82 @@ for k in range(cycle):
 
 print(f"  Test per dataset: {all_test_targets[0].size()}")
 print(f"  max_em_iter={max_em_iter}")
+
+#########################################
+###  Trajectory popup — sequences 0-2 ###
+#########################################
+_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+           'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+
+print("\nPlotting sequences 0-2 across all datasets ...")
+for seq_idx in range(3):
+    fig = plt.figure(figsize=(16, 12))
+    ax_traj = fig.add_subplot(2, 2, 1)
+    ax_pos  = fig.add_subplot(2, 2, 2)
+    ax_vel  = fig.add_subplot(2, 2, 3)
+    ax_tdoa = fig.add_subplot(2, 2, 4)
+
+    t_offset = 0
+    for k in range(cycle):
+        states_k = all_test_targets[k][seq_idx].cpu()   # [m, T_test]
+        obs_k    = all_test_inputs[k][seq_idx].cpu()    # [n, T_test]
+        t_ax     = torch.arange(t_offset, t_offset + T_test).float()
+        col      = _colors[k % len(_colors)]
+
+        ax_traj.plot(states_k[0], states_k[1], color=col, label=f'ds{k} θ={theta_per_dataset[k]:.2f}')
+        ax_traj.scatter(states_k[0, 0],  states_k[1, 0],  color=col, marker='o', s=40, zorder=5)
+        ax_traj.scatter(states_k[0, -1], states_k[1, -1], color=col, marker='x', s=60, zorder=5)
+
+        ax_pos.plot(t_ax, states_k[0], color=col, label=f'ds{k} px')
+        ax_pos.plot(t_ax, states_k[1], color=col, linestyle='--')
+
+        ax_vel.plot(t_ax, states_k[2], color=col, label=f'ds{k} vx')
+        ax_vel.plot(t_ax, states_k[3], color=col, linestyle='--')
+
+        for i in range(obs_k.size(0)):
+            ax_tdoa.plot(t_ax, obs_k[i], color=col, alpha=0.6,
+                         label=f'ds{k} ch{i}' if k == 0 else '_')
+
+        if k > 0:
+            for ax in [ax_pos, ax_vel, ax_tdoa]:
+                ax.axvline(x=t_offset, color='k', linestyle='--', alpha=0.35)
+        t_offset += T_test
+
+    for idx, mic in enumerate(mic_positions):
+        ax_traj.scatter(mic[0].item(), mic[1].item(), marker='^', color='black', s=80, zorder=6)
+        ax_traj.annotate(f'm{idx}', (mic[0].item(), mic[1].item()),
+                         textcoords='offset points', xytext=(4, 4), fontsize=7)
+
+    _rect = mpatches.Rectangle(
+        (PX_MIN, PY_MIN), PX_MAX - PX_MIN, PY_MAX - PY_MIN,
+        linewidth=1.5, edgecolor='red', facecolor='lightyellow',
+        linestyle='--', zorder=2, alpha=0.3, label='valid region',
+    )
+    ax_traj.add_patch(_rect)
+
+    ax_traj.set_xlabel('p_x');    ax_traj.set_ylabel('p_y')
+    ax_traj.set_title('2D trajectory (o=start, x=end per dataset)')
+    ax_traj.legend(fontsize=7);   ax_traj.grid(True, alpha=0.4)
+
+    ax_pos.set_ylabel('position');  ax_pos.set_title('p_x (solid) & p_y (dashed) vs time')
+    ax_pos.legend(fontsize=7, ncol=cycle); ax_pos.grid(True, alpha=0.4)
+
+    ax_vel.set_ylabel('velocity');  ax_vel.set_title('v_x (solid) & v_y (dashed) vs time')
+    ax_vel.legend(fontsize=7, ncol=cycle); ax_vel.grid(True, alpha=0.4)
+    ax_vel.set_xlabel('time step')
+
+    ax_tdoa.set_ylabel('TDOA');   ax_tdoa.set_title('TDOA observations vs time')
+    ax_tdoa.legend(fontsize=7);   ax_tdoa.grid(True, alpha=0.4)
+    ax_tdoa.set_xlabel('time step')
+
+    fig.suptitle(f'Sequence {seq_idx} — all datasets (test)  |  dashed = dataset boundary', fontsize=12)
+    plt.tight_layout()
+    _plot_path = os.path.abspath(cycle_dir + f'seq{seq_idx}_data_sanity.png')
+    plt.savefig(_plot_path, dpi=150)
+    plt.close()
+    print(f"  Saved: {_plot_path}")
+    if os.name == 'nt':
+        os.startfile(_plot_path)
 
 #########################################
 ###  Run ERTS across all datasets     ###

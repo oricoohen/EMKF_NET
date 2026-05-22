@@ -277,7 +277,9 @@ for seq_idx in range(4):
     plt.savefig(_plot_path, dpi=150)
     plt.close()
     print(f"  Saved: {_plot_path}")
-    os.startfile(_plot_path)
+    # os.startfile(_plot_path)
+    if os.name == "nt":
+        os.startfile(_plot_path)
 
 #########################################
 ###  System models                     ###
