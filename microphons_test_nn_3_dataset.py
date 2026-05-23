@@ -1,0 +1,340 @@
+"""
+5-cycle multi-dataset TDOA test — RTSNet and EMKFNet (MNet / Joint).
+
+Same dataset generation and evaluation protocol as
+microphons_test_analytic_3_dataset.py.
+
+Methods compared
+----------------
+  ERTS true-F    : oracle upper bound (knows the true theta)
+  ERTS false-F   : mismatched baseline (theta = 0 always)
+  RTSNet true-F  : RTSNet trained with true F per sequence
+  RTSNet false-F : RTSNet trained with false F (theta = 0)
+  MNet           : RTSNet false-F + neural M-step for F estimation
+  Joint          : RTSNet + MNet jointly trained
+"""
+
+import os
+import math
+import torch
+import torch.nn as nn
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from datetime import datetime
+
+import Simulations.config as config
+
+from Simulations.TDOA_2D.parameters import (
+    m, n, m1x_0, m2x_0, M_mics,
+    Q_structure, R_structure,
+    make_F_block, f, h, h_jacobian, make_f,
+    generate_dataset_random_theta,
+    make_get_F_from_matrix,
+    mic_positions,
+)
+from Simulations.TDOA_2D.ekf_erts import run_ekf_erts
+from Simulations.Extended_sysmdl import SystemModel
+from Pipelines.Pipeline_mic import Pipeline_mic as Pipeline
+from RTSNet.RTSNet_nn import RTSNetNN
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Using device:", device)
+
+loss_fn = nn.MSELoss(reduction="mean")
+
+today = datetime.today()
+now   = datetime.now()
+strTime = today.strftime("%m.%d.%y") + "_" + now.strftime("%H:%M:%S")
+print("Current Time =", strTime)
+
+###################
+###  Settings   ###
+###################
+args = config.general_settings()
+args.N_T    = 100
+args.T      = 30
+args.T_test = 30
+args.n_steps = 1
+args.n_batch = 1
+args.lr      = 1e-3
+args.wd      = 1e-3
+
+T_test = args.T_test
+N_T    = args.N_T
+
+q2 = 0.01
+r2 = 1.0
+
+cycle             = 5
+theta_per_dataset = [0.1, 0.2, 0.3, 0.4, 0.5]
+# theta_per_dataset = [0.3,0.3]
+assert len(theta_per_dataset) == cycle
+
+num_em_iters = 2
+
+Q     = (q2 * Q_structure).to(device)
+R     = (r2 * R_structure).to(device)
+m1x_0 = m1x_0.to(device)
+m2x_0 = m2x_0.to(device)
+
+save_dir  = "RTSNet/tdoa_2d/1/"
+# cycle_dir = save_dir + f"{cycle}cycle/"
+cycle_dir = save_dir + "5cycle/"
+os.makedirs(cycle_dir, exist_ok=True)
+
+# Checkpoint paths — populated by microphons_training_3_dataset.py
+path_rtsnet_true  = cycle_dir + "RTSNet_true.pt"
+path_rtsnet_false = cycle_dir + "RTSNet_false.pt"
+path_M_F          = cycle_dir + "M_step_F_net.pt"
+path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint.pt"
+path_M_F_joint    = cycle_dir + "M_step_F_net_joint.pt"
+
+print("=" * 70)
+print(f"2D TDOA RTSNet / EMKFNet — {cycle}-cycle multi-dataset test")
+print(f"  T_test={T_test}  q2={q2}  r2={r2}")
+print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
+print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
+print("=" * 70)
+
+#########################################
+###  Generate test data               ###
+#########################################
+print(f"\nGenerating {cycle} test datasets ...")
+
+all_test_inputs  = []
+all_test_targets = []
+all_F_test_true  = []
+all_F_test_false = []
+
+carry_x_test = None
+
+for k in range(cycle):
+    theta_k = theta_per_dataset[k]
+    print(f"  Dataset {k}: theta={theta_k:.4f} rad")
+
+    xi, xt, _, F_te_t = generate_dataset_random_theta(
+        N_T, T_test, 0, Q, R,
+        x_init=carry_x_test, theta_base=[theta_k] * N_T,
+    )
+    F_te_f = [make_F_block(0.0) for _ in range(N_T)]
+
+    carry_x_test = xt[:, :, -1]
+
+    all_test_inputs.append(xi)
+    all_test_targets.append(xt)
+    all_F_test_true.append(F_te_t)
+    all_F_test_false.append(F_te_f)
+
+print(f"  Test per dataset: {all_test_targets[0].size()}")
+
+#########################################
+###  System models                    ###
+#########################################
+H_prior = h_jacobian(m1x_0.reshape(-1))   # [n, m]
+F_init  = make_F_block(0.0)
+f_init  = make_f(F_init)
+
+sys_model_true = SystemModel(f=f_init, Q=Q, h=h, R=R,
+                             T=T_test, T_test=T_test, m=m, n=n, H=H_prior,
+                             prior_S=torch.eye(n, device=device))
+sys_model_true.F      = F_init
+sys_model_true.F_test = all_F_test_true   # [cycle][N_T] — true F per sequence
+sys_model_true.InitSequence(m1x_0, m2x_0)
+
+sys_model_false = SystemModel(f=f_init, Q=Q, h=h, R=R,
+                              T=T_test, T_test=T_test, m=m, n=n, H=H_prior,
+                              prior_S=torch.eye(n, device=device))
+sys_model_false.F      = F_init           # theta=0 seed for MNet carry
+sys_model_false.F_test = all_F_test_false # [cycle][N_T] — false F per sequence
+sys_model_false.InitSequence(m1x_0, m2x_0)
+
+#########################################
+###  Run ERTS baselines               ###
+#########################################
+print("\nRunning ERTS (true F and false F) ...")
+
+mse_true_arr  = torch.zeros(cycle, N_T)
+mse_false_arr = torch.zeros(cycle, N_T)
+
+out_true_seq0  = []
+out_false_seq0 = []
+
+for j in range(N_T):
+    x0_true  = m1x_0.clone()
+    P0_true  = m2x_0.clone()
+    x0_false = m1x_0.clone()
+    P0_false = m2x_0.clone()
+
+    for data in range(cycle):
+        y_seq  = all_test_inputs[data][j]
+        x_true = all_test_targets[data][j]
+
+        get_F_true  = make_get_F_from_matrix(all_F_test_true[data][j])
+        get_F_false = make_get_F_from_matrix(all_F_test_false[data][j])
+
+        x_s_true, _, P_f_true, *_ = run_ekf_erts(
+            y_seq, get_F_true, Q_in=Q, R_in=R,
+            x_init=x0_true, P_init=P0_true,
+        )
+        mse_true_arr[data, j] = loss_fn(x_s_true, x_true).item()
+        x0_true = x_s_true[:, -1].detach()
+        P0_true = P_f_true[:, :, -1].detach()
+
+        x_s_false, _, P_f_false, *_ = run_ekf_erts(
+            y_seq, get_F_false, Q_in=Q, R_in=R,
+            x_init=x0_false, P_init=P0_false,
+        )
+        mse_false_arr[data, j] = loss_fn(x_s_false, x_true).item()
+        x0_false = x_s_false[:, -1].detach()
+        P0_false = P_f_false[:, :, -1].detach()
+
+        if j == 0:
+            out_true_seq0.append(x_s_true)
+            out_false_seq0.append(x_s_false)
+
+#########################################
+###  RTSNet true-F                    ###
+#########################################
+print("\nRTSNet TRUE-F ...")
+RTSNet_model_true = RTSNetNN()
+RTSNet_model_true.NNBuild(sys_model_true, args)
+RTSNet_Pipeline_true = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_trueF")
+RTSNet_Pipeline_true.setssModel(sys_model_true)
+RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
+RTSNet_Pipeline_true.setTrainingParams(args)
+
+[MSE_arr_rt, MSE_avg_rt, MSE_dB_rt,
+ rtsnet_out_true, _] = RTSNet_Pipeline_true.NNTest_3_datasets(
+    sys_model_true, all_test_inputs, all_test_targets,
+    path_rtsnet_true, generate_f=True, datasets=cycle,
+)
+
+mse_rt_db = [10 * math.log10(MSE_arr_rt[k * N_T:(k + 1) * N_T].mean().item())
+             for k in range(cycle)]
+
+#########################################
+###  RTSNet false-F                   ###
+#########################################
+print("\nRTSNet FALSE-F ...")
+RTSNet_model_false = RTSNetNN()
+RTSNet_model_false.NNBuild(sys_model_false, args)
+RTSNet_Pipeline_false = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_falseF")
+RTSNet_Pipeline_false.setssModel(sys_model_false)
+RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
+RTSNet_Pipeline_false.setTrainingParams(args)
+
+[MSE_arr_rf, MSE_avg_rf, MSE_dB_rf,
+ rtsnet_out_false, _] = RTSNet_Pipeline_false.NNTest_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
+    path_rtsnet_false, generate_f=True, datasets=cycle,
+)
+
+mse_rf_db = [10 * math.log10(MSE_arr_rf[k * N_T:(k + 1) * N_T].mean().item())
+             for k in range(cycle)]
+
+#########################################
+###  MNet (EMKFNet)                   ###
+#########################################
+print("\nMNet (EMKFNet) ...")
+
+[MSE_arr_mnet, MSE_avg_mnet, MSE_dB_mnet,
+ rtsnet_out_mnet, _] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
+    path_rtsnet_false, path_M_F,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+)
+
+mse_mnet_db = [10 * math.log10(MSE_arr_mnet[k * N_T:(k + 1) * N_T].mean().item())
+               for k in range(cycle)]
+
+#########################################
+###  Joint (RTSNet + MNet)            ###
+#########################################
+print("\nJoint (RTSNet + MNet) ...")
+
+[MSE_arr_joint, MSE_avg_joint, MSE_dB_joint,
+ rtsnet_out_joint, _] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
+    path_rtsnet_joint, path_M_F_joint,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+)
+
+mse_joint_db = [10 * math.log10(MSE_arr_joint[k * N_T:(k + 1) * N_T].mean().item())
+                for k in range(cycle)]
+
+#########################################
+###  Results summary                  ###
+#########################################
+print("\n" + "=" * 70)
+print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={theta_per_dataset})")
+print("=" * 70)
+
+mse_true_db  = [10 * math.log10(mse_true_arr[k].mean().item())  for k in range(cycle)]
+mse_false_db = [10 * math.log10(mse_false_arr[k].mean().item()) for k in range(cycle)]
+
+for k in range(cycle):
+    print(f"  Dataset {k} (theta={theta_per_dataset[k]:.1f})"
+          f"  ERTS-T: {mse_true_db[k]:6.2f} dB"
+          f"  ERTS-F: {mse_false_db[k]:6.2f} dB"
+          f"  RTSNet-T: {mse_rt_db[k]:6.2f} dB"
+          f"  RTSNet-F: {mse_rf_db[k]:6.2f} dB"
+          f"  MNet: {mse_mnet_db[k]:6.2f} dB"
+          f"  Joint: {mse_joint_db[k]:6.2f} dB")
+
+print()
+print(f"  ERTS true-F    (overall) : {10*math.log10(mse_true_arr.mean().item()):.2f} dB")
+print(f"  ERTS false-F   (overall) : {10*math.log10(mse_false_arr.mean().item()):.2f} dB")
+print(f"  RTSNet true-F  (overall) : {MSE_dB_rt.item():.2f} dB")
+print(f"  RTSNet false-F (overall) : {MSE_dB_rf.item():.2f} dB")
+print(f"  MNet           (overall) : {MSE_dB_mnet.item():.2f} dB")
+print(f"  Joint          (overall) : {MSE_dB_joint.item():.2f} dB")
+print("=" * 70)
+
+#########################################
+###  Plot — sequence 0, all datasets  ###
+#########################################
+print("\nPlotting sequence 0 across all datasets ...")
+t_axis = torch.arange(T_test)
+
+# rtsnet_out_* is [N_T * cycle, m, T] ordered: x_out[j * cycle + data]
+# so sequence 0, dataset k => index k
+
+fig, axes = plt.subplots(cycle, 1, figsize=(14, 3 * cycle), sharex=True)
+for k in range(cycle):
+    ax = axes[k]
+    states = all_test_targets[k][0]
+
+    ax.plot(t_axis, states.cpu()[1],                              lw=2.5, label="true p_y")
+    ax.plot(t_axis, out_true_seq0[k].cpu()[1],   "--",           lw=2,   label="ERTS true-F")
+    ax.plot(t_axis, out_false_seq0[k].cpu()[1],  ":",            lw=2,   label="ERTS false-F")
+    ax.plot(t_axis, rtsnet_out_true[k].cpu()[1],  "-.",          lw=2,   label="RTSNet true-F")
+    ax.plot(t_axis, rtsnet_out_false[k].cpu()[1], "-",           lw=1.5, label="RTSNet false-F", alpha=0.8)
+    ax.plot(t_axis, rtsnet_out_mnet[k].cpu()[1],  "-",           lw=1.5, label="MNet",           alpha=0.7)
+    ax.plot(t_axis, rtsnet_out_joint[k].cpu()[1], "-",           lw=1.5, label="Joint",          alpha=0.7)
+
+    ax.set_ylabel(f"ds{k} (θ={theta_per_dataset[k]:.1f})\ny position")
+    ax.legend(loc="upper right", fontsize=7, ncol=3)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    ax.set_title(
+        f"Dataset {k} — "
+        f"ERTS-T: {mse_true_db[k]:.2f} dB  "
+        f"ERTS-F: {mse_false_db[k]:.2f} dB  "
+        f"RTSNet-T: {mse_rt_db[k]:.2f} dB  "
+        f"RTSNet-F: {mse_rf_db[k]:.2f} dB  "
+        f"MNet: {mse_mnet_db[k]:.2f} dB  "
+        f"Joint: {mse_joint_db[k]:.2f} dB",
+        fontsize=8,
+    )
+
+axes[-1].set_xlabel("time step")
+fig.suptitle(
+    f"TDOA RTSNet / EMKFNet — {cycle}-dataset sequential scenario",
+    fontsize=13,
+)
+plt.tight_layout()
+
+plot_path = cycle_dir + "nn_y_position.png"
+plt.savefig(plot_path, dpi=250)
+plt.close()
+print(f"  Saved: {plot_path}")

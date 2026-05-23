@@ -12,7 +12,7 @@ from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1
 from Simulations.utils import DataLoader, DataGen
 
 
-def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelihood=0.01, tol_params=0.005):
+def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelihood=0.01, tol_params=0.005, vel_only=False):
     """
     Perform EM for a single sequence to estimate the state transition matrix F.
 
@@ -40,16 +40,17 @@ def EMKF_F_solo(F_0, H, Q, R, y, x_0, P_0, X_s, P_smooth_s, V_s,n,T, tol_likelih
     eps = 1e-7 * torch.eye(n, device=A_2.device)
     # A_2inv = torch.linalg.pinv(A_2+eps) ####istead of solving linlag we will solve the equation
     # F_fin = A_1 @ A_2inv
-    A_2 = A_2 + eps
-    F_fin = torch.linalg.solve(A_2.T, A_1.T).T
-    # --- SAFETY CLAMP: spectral radius --delet if not needed-
-    eig = torch.linalg.eigvals(F_fin)  # complex tensor (2,)
-    rho = eig.abs().max().real  # scalar
-    # if torch.isfinite(rho) and rho > 1.05:
-    #     F_fin = F_fin * (1.05 / (rho + 1e-8))  # scale down uniformly
+    if vel_only:
+        # Estimate only the 2x2 velocity block; position rows are fixed kinematics
+        A_1_vv = A_1[2:4, 2:4]
+        A_2_vv = A_2[2:4, 2:4] + 1e-7 * torch.eye(2, device=A_2.device)
+        F_vv = torch.linalg.solve(A_2_vv.T, A_1_vv.T).T
+        F_fin = F_0.clone()
+        F_fin[2:4, 2:4] = F_vv
+    else:
+        A_2 = A_2 + eps
+        F_fin = torch.linalg.solve(A_2.T, A_1.T).T
 
-
-    # print('f_i shape',F_i.shape)
     return F_fin
 
 
@@ -218,7 +219,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
 
 
 
-def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None):
+def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None, vel_only=False):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -263,6 +264,15 @@ def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0,
         X_t = X[j]
         F_all_j = []
         F_all_j.append(F_est)
+
+        if j == 0:
+            import math as _math
+            F_vv0 = F_est[2:4, 2:4]
+            theta0 = _math.atan2(F_vv0[1, 0].item(), F_vv0[0, 0].item())
+            sr0 = torch.linalg.eigvals(F_vv0).abs().max().item()
+            print(f"\n  [Seq0 INIT] theta_F0={theta0:.4f}rad  spec_rad(Fvv)={sr0:.4f}")
+            print(f"  {'Iter':>4}  {'MSE(dB)':>9}  {'theta_est(rad)':>15}  {'spec_rad':>9}")
+
         for q in range(max_it):
             #############E STEP rts###############################
             # pick per-seq initials if provided
@@ -276,7 +286,6 @@ def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0,
                 x0_j = None
                 P0_j = None
                 sys_model.InitSequence(x_0, P_0)
-            # print('q_iter:', q, 'F_est:', F_est)
             [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test_ext(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
                 F_list=[F_est.clone()],generate_f=False, init_x_list=x0_j,
                 init_P_list=P0_j)
@@ -284,11 +293,18 @@ def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0,
             sum_lin_per_iter[q] += float(_mse_avg)
             #############M STEP rts###############################
             F_est = EMKF_F_solo(F_est, h, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),
-                                m,T)
+                                m,T, vel_only=vel_only)
             #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
             alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
             F_all_j.append(F_est)
+
+            if j == 0:
+                F_vv = F_est[2:4, 2:4]
+                theta_est = _math.atan2(F_vv[1, 0].item(), F_vv[0, 0].item())
+                spec_rad = torch.linalg.eigvals(F_vv).abs().max().item()
+                mse_db_q = 10.0 * _math.log10(float(_mse_avg) + 1e-12)
+                print(f"  {q:>4d}  {mse_db_q:>9.3f}  {theta_est:>15.4f}  {spec_rad:>9.4f}")
 
 
         F_matrices.append(F_all_j)

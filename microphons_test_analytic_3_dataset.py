@@ -302,6 +302,7 @@ for data in range(cycle):
         generate_f=False,
         init_x_list=emkf_x_carries,
         init_P_list=emkf_P_carries,
+        vel_only=True,
     )
 
     for j in range(N_T):

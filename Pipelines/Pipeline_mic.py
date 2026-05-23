@@ -1762,14 +1762,7 @@ class Pipeline_mic:
                 x_0 = SysModel.m1x_0.clone().detach().to(self.device)
                 sample_total_loss = 0.0
 
-                if F_init is None:
-                    if generate_f:
-                        f_index = n_e
-                        F_current = SysModel.F_train[0][f_index].clone().detach().to(self.device)
-                    else:
-                        F_current = SysModel.F_train[0][n_e].clone().detach().to(self.device)
-                else:
-                    F_current = F_base
+                F_current = F_base  # always theta=0, matching test initialization
 
                 for data in range(datasets):
                     y_seq = train_input[data][n_e]

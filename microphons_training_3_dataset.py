@@ -61,13 +61,13 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 ### cycle: number of datasets
 cycle = 5
 # Max theta per dataset [rad] — each group of 10 sequences draws theta ~ Uniform(-max/2, +max/2)
-theta_changed_list = [0.2, 0.2, 0.2,0.2,0.2]
+theta_changed_list = [0.4, 0.4, 0.4, 0.4, 0.4]
 assert len(theta_changed_list) == cycle
 
 ### false F mismatch 
@@ -381,19 +381,19 @@ sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 #############################
 print(f"\nMNet {cycle}-cycle training ...")
 
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F,
-    load_path_RTS=destination_path_rtsnet_false,
-    load_mnet=load_path_M_F,
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_M=destination_path_M_F,
+#     load_path_RTS=destination_path_rtsnet_false,
+#     load_mnet=load_path_M_F,
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0, 0.85),
+#     lambda_F=1e-3,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 ###############################
 ### Joint cycle training     ###
@@ -442,7 +442,7 @@ print("\nTesting joint ...")
 ########################################
 print("\nPlotting test sequence 0 ...")
 t_axis = torch.arange(T_test)
-
+states = all_test_targets[0][0]
 plt.figure(figsize=(12, 5))
 plt.plot(t_axis, states.cpu()[1],                              linewidth=2.5, label="true p_y")
 plt.plot(t_axis, rtsnet_out_true[0].cpu()[1],                 linewidth=2,   label="RTSNet true F")
