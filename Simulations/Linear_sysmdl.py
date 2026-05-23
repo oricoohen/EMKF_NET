@@ -255,7 +255,7 @@ def estimate_Q_R_from_true_data(all_inputs_by_H,
         results["R_hat_structured"] = r2_hat * RS
 
     return results
-def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.6, H_init=None):
+def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.4, H_init=None):
     """
     Generate a list of random H matrices using rotation.
     Args:
