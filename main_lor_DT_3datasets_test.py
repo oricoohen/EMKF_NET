@@ -105,8 +105,8 @@ destination_path_M = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/old/ori_M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/old/ori_RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 bigru_path = 'RTSNet/lorenz_rotated_01/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []
@@ -359,23 +359,23 @@ for dataset_id in range(cycles):
     print(f"Dataset {dataset_id + 1} input shape: {test_input.shape}")
 
     # Set up system model for this dataset
-    if dataset_id == 0:
-        # For first dataset, use initial guess
-        current_H_estimate = initial_guess_H
-        print("Using initial H guess for first dataset")
-    else:
-        # For subsequent datasets, use previous dataset's estimate
-        current_H_estimate = current_H_estimate_prev
-        print(f"Using previous dataset's H as estimate: {current_H_estimate[0]}")
-
-    # Create system model with current H estimate
-    sys_model_ai = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
-    sys_model_ai.InitSequence(m1x_0, m2x_0)  # x0 and P0
-
-    # Set up H_test and H_test_TRUE for EMKF
-    sys_model_ai.H_test = current_H_estimate
-    # sys_model_ai.H_test = H_deji
-    sys_model_ai.H_test_TRUE = true_H_for_this_dataset
+    # if dataset_id == 0:
+    #     # For first dataset, use initial guess
+    #     current_H_estimate = initial_guess_H
+    #     print("Using initial H guess for first dataset")
+    # else:
+    #     # For subsequent datasets, use previous dataset's estimate
+    #     current_H_estimate = current_H_estimate_prev
+    #     print(f"Using previous dataset's H as estimate: {current_H_estimate[0]}")
+    #
+    # # Create system model with current H estimate
+    # sys_model_ai = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    # sys_model_ai.InitSequence(m1x_0, m2x_0)  # x0 and P0
+    #
+    # # Set up H_test and H_test_TRUE for EMKF
+    # sys_model_ai.H_test = current_H_estimate
+    # # sys_model_ai.H_test = H_deji
+    # sys_model_ai.H_test_TRUE = true_H_for_this_dataset
 
 
     # Run test_H_mstep_net (this will iteratively improve H estimates)
@@ -383,46 +383,46 @@ for dataset_id in range(cycles):
 
 
 
-    if dataset_id == 0:
-        # x0_em_last = test_init.clone()
-        test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
-            sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial_joint,
-            destination_path_M=destination_path_M_joint,
-            num_em_iters=num_iters,
-            generate_h=False)
-        # test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
-        #     sys_model_ai, test_input, test_target,
-        #     destination_path_RTS=destination_path_rtsnet_partial_joint,
-        #     destination_path_M=destination_path_M_joint,
-        #     num_em_iters=num_iters,
-        #     generate_h=False,
-        #     init_x_list=x0_em_last,
-        #     init_P_list=None)
-    else:
-        test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
-            sys_model_ai, test_input, test_target,
-            destination_path_RTS=destination_path_rtsnet_partial_joint,
-            destination_path_M=destination_path_M_joint,
-            num_em_iters=num_iters,
-            generate_h=False,
-            init_x_list=x0_em_last,
-            init_P_list=None)
-    all_emkf_x.append(list_x.detach().clone())
-    emkf_mse_lin_sum += float(test_losses[-1])
-    current_H_estimate_prev = final_H_list
+    # if dataset_id == 0:
+    #     # x0_em_last = test_init.clone()
+    #     test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
+    #         sys_model_ai, test_input, test_target,
+    #         destination_path_RTS=destination_path_rtsnet_partial_joint,
+    #         destination_path_M=destination_path_M_joint,
+    #         num_em_iters=num_iters,
+    #         generate_h=False)
+    #     # test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
+    #     #     sys_model_ai, test_input, test_target,
+    #     #     destination_path_RTS=destination_path_rtsnet_partial_joint,
+    #     #     destination_path_M=destination_path_M_joint,
+    #     #     num_em_iters=num_iters,
+    #     #     generate_h=False,
+    #     #     init_x_list=x0_em_last,
+    #     #     init_P_list=None)
+    # else:
+    #     test_losses, test_h_losses, final_H_list, last_x_list,list_x = RTSNet_Pipeline.test_H_mstep_net(
+    #         sys_model_ai, test_input, test_target,
+    #         destination_path_RTS=destination_path_rtsnet_partial_joint,
+    #         destination_path_M=destination_path_M_joint,
+    #         num_em_iters=num_iters,
+    #         generate_h=False,
+    #         init_x_list=x0_em_last,
+    #         init_P_list=None)
+    # all_emkf_x.append(list_x.detach().clone())
+    # emkf_mse_lin_sum += float(test_losses[-1])
+    # current_H_estimate_prev = final_H_list
+    #
+    # # Prepare initials for NEXT dataset
+    # p0_em_last = sys_model_ai.m2x_0.clone().detach()
+    #
+    # # Use TRUE last state for continuity
+    # # last_x_list = test_target[:,:,-1]
+    # # print('last_x_list TRUE:',last_x_list[0])
+    # # x0_em_last = [last_x_list[j].unsqueeze(-1).clone() for j in range(len(last_x_list))]
+    # x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
 
-    # Prepare initials for NEXT dataset
-    p0_em_last = sys_model_ai.m2x_0.clone().detach()
-
-    # Use TRUE last state for continuity
-    # last_x_list = test_target[:,:,-1]
-    # print('last_x_list TRUE:',last_x_list[0])
-    # x0_em_last = [last_x_list[j].unsqueeze(-1).clone() for j in range(len(last_x_list))]
-    x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
-
-    assert x0_em_last[0].ndim == 2 and x0_em_last[0].shape[1] == 1, f"x0 shape off: {x0_em_last[0].shape}"
-emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
+#     assert x0_em_last[0].ndim == 2 and x0_em_last[0].shape[1] == 1, f"x0 shape off: {x0_em_last[0].shape}"
+# emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
 #############################################################################
 # Baseline: Test with INITIAL GUESS H using NNTest
@@ -477,9 +477,9 @@ print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB"
 print('\n=== SUMMARY COMPARISON ===')
 print(f"TRUE H (perfect):        {average_true_H_mse_db:.3f} dB")
 print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
-print(f"EMKF FINAL (learned):    {emkf_final_mse_db:.3f} dB")
-print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
-print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
+# print(f"EMKF FINAL (learned):    {emkf_final_mse_db:.3f} dB")
+# print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
+# print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
 
 
 import matplotlib.pyplot as plt
