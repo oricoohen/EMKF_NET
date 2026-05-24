@@ -18,11 +18,10 @@ import matplotlib.pyplot as plt
 
 from Simulations.Extended_sysmdl import SystemModel
 from Simulations.TDOA_2D.parameters import (
-    m, n, Q, R,
+    m, n,
     m1x_0, m2x_0, M_mics,
-    f, h,
+    f, h, make_F_block,
     generate_dataset_random_theta,
-    generate_false_F_list,
 )
 from Simulations.TDOA_2D.ekf_erts import (
     run_ekf_erts, compute_cross_covariances,
@@ -37,8 +36,7 @@ T           = 30
 N_T         = 100          # number of test sequences
 max_em_iter = 10
 
-theta_true_max  = 0.4      # true  F drawn Uniform(-theta_true_max/2,  +theta_true_max/2)
-theta_false_max = 2.0      # false F = true_theta + Uniform(-theta_false_max/2, +theta_false_max/2)
+theta_true_max  = 0.8      # true  F drawn Uniform(-theta_true_max/2, +theta_true_max/2)
 
 # ── Noise covariances ─────────────────────────────────────────────────────────
 Q_structure = torch.eye(m, dtype=torch.float32, device=device)
@@ -52,7 +50,7 @@ R  = r2 * R_structure
 print("=" * 60)
 print("2D TDOA tracking — analytic baselines averaged over sequences")
 print(f"  T={T}  N_T={N_T}  max_em_iter={max_em_iter}")
-print(f"  theta_true_max={theta_true_max} rad   theta_false_max={theta_false_max} rad")
+print(f"  theta_true_max={theta_true_max} rad   theta_false=0.0 rad (fixed)")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 60)
 
@@ -66,10 +64,9 @@ print(f"\n[1/4] Generating {N_T} trajectories ...")
 inputs, targets, theta_list, F_true_list = generate_dataset_random_theta(
     N_T, T, theta_true_max, Q_gen=Q, R_gen=R
 )
-F_false_list = generate_false_F_list(theta_list, theta_false_max)
+F_false_list = [make_F_block(0.0) for _ in range(len(theta_list))]
 # inputs:  [N_T, n, T]
 # targets: [N_T, m, T]
-# F_true_list / F_false_list: one per group of 10
 
 print(f"  {N_T} sequences, one theta per sequence.")
 
@@ -154,7 +151,7 @@ x_plot_false, *_ = run_ekf_erts(obs0, get_F_f0, Q_in=Q, R_in=R)
 
 F_mat0, *_ = E_EMKF_F_analitic_non_linear_h(
     sys_model=sys_model,
-    F_0_matrices=[F_false_list[0].clone()],
+    F_0_matrices=[make_F_block(0.0)],
     h=h, Q=Q, R=R,
     Y=obs0.unsqueeze(0),
     x_0=m1x_0, P_0=m2x_0,

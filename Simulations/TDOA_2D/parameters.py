@@ -27,7 +27,7 @@ M_mics  = 5           # number of microphones
 n  = M_mics - 1  # TDOA measurements per timestep (= 4)
 
 # ── Physical constants ────────────────────────────────────────────────────────
-dt      = 0.05   # time step
+dt      = 0.07   # time step
 c_sound = 1.0   # speed of sound (normalized)
 
 # ── Microphone positions on the x-axis (y = 0) ───────────────────────────────

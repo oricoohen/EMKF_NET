@@ -46,7 +46,7 @@ args.T_test = 30
 
 T_test = args.T_test
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 cycle              = 5
@@ -113,7 +113,7 @@ _colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
            'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
 
 print("\nPlotting sequences 0-2 across all datasets ...")
-for seq_idx in range(3):
+for seq_idx in range(10):
     fig = plt.figure(figsize=(16, 12))
     ax_traj = fig.add_subplot(2, 2, 1)
     ax_pos  = fig.add_subplot(2, 2, 2)
