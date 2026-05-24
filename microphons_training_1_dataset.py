@@ -19,7 +19,6 @@ from Simulations.TDOA_2D.parameters import (
     Q_structure, R_structure,
     make_F_block, h, h_jacobian,
     generate_dataset_random_theta,
-    generate_false_F_list,
     make_f,
     make_get_F_from_matrix,
 )
@@ -60,14 +59,13 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.1   # process noise variance   (Q = q2 * I_m)
-r2 = 10   # measurement noise varia  nce (R = r2 * I_n)
+q2 = 0.001   # process noise variance   (Q = q2 * I_m)
+r2 = 1   # measurement noise varia  nce (R = r2 * I_n)
 
 ### model-mismatch parameters
-# theta_true:  F per group drawn Uniform(-theta_true/2, +theta_true/2)
-# theta_false: false F = true_theta + Uniform(-theta_false/2, +theta_false/2)
-theta_true  = 0.4   # [rad]
-theta_false = 2   # [rad]
+# theta_true: F per group drawn Uniform(-theta_true/2, +theta_true/2)
+# false F is always theta=0 (straight-line assumption)
+theta_true  = 1   # [rad]
 
 Q     = (q2 * Q_structure).to(device) 
 R     = (r2 * R_structure).to(device)
@@ -75,7 +73,7 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir = "RTSNet/tdoa_2d/10/"
+save_dir = "RTSNet/tdoa_2d/1/"
 os.makedirs(save_dir, exist_ok=True)    
 destination_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
 destination_path_rtsnet_false = save_dir + "RTSNet_false.pt"
@@ -87,7 +85,7 @@ print("=" * 70)
 print("2D TDOA RTSNet experiment — true-F and false-F models")
 print(f"  T={T}  T_test={T_test}")
 print(f"  q2={q2}  r2={r2}")
-print(f"  theta_true={theta_true} rad   theta_false={theta_false} rad")
+print(f"  theta_true={theta_true} rad   theta_false=0.0 rad (fixed)")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -111,10 +109,10 @@ cv_input, cv_target, theta_cv, F_cv_true = \
 test_input, test_target, theta_test, F_test_true = \
     generate_dataset_random_theta(args.N_T,  T_test, theta_true, Q, R)
 
-# False-F lists: each group's F is the true theta + Uniform(-theta_false/2, +theta_false/2)
-F_train_false = generate_false_F_list(theta_train, theta_false)
-F_cv_false    = generate_false_F_list(theta_cv,    theta_false)
-F_test_false  = generate_false_F_list(theta_test,  theta_false)
+# False-F lists: always theta=0 (straight-line assumption)
+F_train_false = [make_F_block(0.0) for _ in range(len(theta_train))]
+F_cv_false    = [make_F_block(0.0) for _ in range(len(theta_cv))]
+F_test_false  = [make_F_block(0.0) for _ in range(len(theta_test))]
 
 print("trainset size:", train_target.size())
 print("cvset size:   ", cv_target.size())
@@ -218,12 +216,11 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_true.NNTrain(
-#     sys_model_true, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_true.NNTrain(
+    sys_model_true, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -246,12 +243,11 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-# [MSE_cv_linear_epoch, MSE_cv_dB_epoch,
-#  MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline_false.NNTrain(
-#     sys_model_false, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_false,load_model_path = destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.NNTrain(
+    sys_model_false, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 
 
@@ -276,20 +272,20 @@ print("||F_false - F_true||^2 =", diff.pow(2).mean().item(),
 
 num_em_iters = 2
 
-# RTSNet_Pipeline_false.train_F_mstep_net(
-#     sys_model_false,
-#     cv_input,
-#     cv_target,
-#     train_input,
-#     train_target,
-#     destination_path_M=destination_path_M_F,
-#     destination_path_RTS=destination_path_rtsnet_false,
-#     load_destination_path_M=None,
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.train_F_mstep_net(
+    sys_model_false,
+    cv_input,
+    cv_target,
+    train_input,
+    train_target,
+    destination_path_M=destination_path_M_F,
+    destination_path_RTS=destination_path_rtsnet_false,
+    load_destination_path_M=None,
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+)
 
 [MSE_test_arr_mnet, MSE_test_avg_mnet, MSE_test_dB_avg_mnet,
  rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net(

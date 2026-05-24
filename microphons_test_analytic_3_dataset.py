@@ -50,7 +50,7 @@ q2 = 0.001
 r2 = 1
 
 cycle              = 5
-theta_per_dataset  = [0.5, 2, 0.1, 0.8, 3]   # exact theta (rad) for each dataset
+theta_per_dataset  = [0.5, 0.5, 0.1, 0.8, 0.2]   # exact theta (rad) for each dataset
 assert len(theta_per_dataset) == cycle
 
 max_em_iter = 5
