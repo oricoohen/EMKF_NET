@@ -66,7 +66,7 @@ m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 # default_thetas_rad = [0.0, 0.035, 0.0, -0.035]
 
 # ── F-block constructor ───────────────────────────────────────────────────────
-VEL_DECAY = 1  # velocity damping per step — prevents unbounded drift over datasets
+VEL_DECAY = 0.99  # velocity damping per step — prevents unbounded drift over datasets
 
 def make_F_block(theta_rad: float) -> torch.Tensor:
     """
