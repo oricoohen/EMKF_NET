@@ -10068,10 +10068,10 @@ class Pipeline_ERTS:
                         C_nu_x = (nu @ x_curr.T) / T
 
                         z_in = torch.cat([
-                            A_yx.reshape(-1).detach(),
-                            A_xx.reshape(-1).detach(),
-                            S_nu.reshape(-1).detach(),
-                            C_nu_x.reshape(-1).detach(),
+                            A_yx.reshape(-1),
+                            A_xx.reshape(-1),
+                            S_nu.reshape(-1),
+                            C_nu_x.reshape(-1),
                             H_current.reshape(-1).detach()
                         ], dim=0).reshape(1, -1)
 

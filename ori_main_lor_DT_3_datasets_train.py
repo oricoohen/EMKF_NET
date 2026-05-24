@@ -105,13 +105,13 @@ load_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net_joint.pt'
 destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/10datasets/0.4var_ori_RTSNet_full.pt'
 destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial.pt'
 destination_path_M_reg = 'RTSNet/lorenz_rotated_001/10datasets/ori_M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/no_detouch_ori_M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/no_detouch_ori_RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
-bigru_path = 'RTSNet/lorenz_rotated_0001/10datasets/benchmarks/bigru_smoother1_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_001/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 for p in [
     destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
@@ -184,10 +184,12 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
-    val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
-    test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
-
+    # train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
+    # val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
+    # test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
+    train_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_train_mat))]
+    val_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_val_mat))]
+    test_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_test_mat_list))]
     H_init = [H_train_mat, H_val_mat, H_test_mat_list]  # For next dataset
 
     # Prepare x0_last for next dataset (for continuity in test sequences)
@@ -356,8 +358,8 @@ print("\nStarting training...")
 
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
-                        , load_path_rtsnet_full, H_init=H_Rotate, datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
+#                         , load_path_rtsnet_full, H_init=H_Rotate, datasets=cycles)
 
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
