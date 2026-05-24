@@ -63,11 +63,11 @@ args.wd      = 1e-3
 T_test = args.T_test
 N_T    = args.N_T
 
-q2 = 0.01
-r2 = 1.0
+q2 = 0.001
+r2 = 1.
 
 cycle             = 5
-theta_per_dataset = [0.1, 0.2, 0.3, 0.4, 0.5]
+theta_per_dataset = [0.5, 2, 0.1, 0.8, 3]
 # theta_per_dataset = [0.3,0.3]
 assert len(theta_per_dataset) == cycle
 
