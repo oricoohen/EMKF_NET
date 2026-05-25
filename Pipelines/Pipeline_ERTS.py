@@ -9198,8 +9198,9 @@ class Pipeline_ERTS:
 
                 loss_3sets = 0.0
                 for data in range(datasets):
+                    h_index = n_e // 10
                     if H_init == None:
-                        H_enter = SysModel.H_train[data][n_e]
+                        H_enter = SysModel.H_train[data][h_index]
                     else:
                         H_enter = H_init
                     SysModel.H = H_enter
@@ -9302,9 +9303,9 @@ class Pipeline_ERTS:
                     x_0_cv = SysModel.m1x_0.clone().detach().to(self.device)
                     cv_loss_3sets = 0.0
                     for data in range(datasets):
-
+                        h_index_cv = j // 10
                         if H_init == None:
-                            H_enter_cv = SysModel.H_valid [data][j]
+                            H_enter_cv = SysModel.H_valid [data][h_index_cv]
                         else:
                             H_enter_cv = H_init
                         SysModel.H = H_enter_cv
