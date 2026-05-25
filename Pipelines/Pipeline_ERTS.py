@@ -9191,8 +9191,6 @@ class Pipeline_ERTS:
 
             Batch_Optimizing_LOSS_sum = 0
             batch_dataset_losses = [0.0] * datasets
-            H_enter = H_init
-            self.model.update_H(H_enter)
             for j in range(0, self.N_B):
 
                 n_e = random.randint(0, self.N_E - 1)
@@ -9200,8 +9198,12 @@ class Pipeline_ERTS:
 
                 loss_3sets = 0.0
                 for data in range(datasets):
-
-
+                    if H_init == None:
+                        H_enter = SysModel.H_train[data][n_e]
+                    else:
+                        H_enter = H_init
+                    SysModel.H = H_enter
+                    self.model.update_H(H_enter)
                     y_training = train_input[data][n_e].to(self.device)
                     x_target = train_target[data][n_e].to(self.device)
                     SysModel.T = y_training.size(-1)
@@ -9241,7 +9243,7 @@ class Pipeline_ERTS:
                     loss_3sets = loss_3sets + rtsnet_loss
 
                     # preserve x_0 for next dataset
-                    x_0 = x_out_training[:, -1]
+                    x_0 = x_out_training[:, -1].detach()
 
                 loss_3sets = loss_3sets / datasets
                 Batch_Optimizing_LOSS_sum += loss_3sets
@@ -9301,6 +9303,12 @@ class Pipeline_ERTS:
                     cv_loss_3sets = 0.0
                     for data in range(datasets):
 
+                        if H_init == None:
+                            H_enter_cv = SysModel.H_valid [data][j]
+                        else:
+                            H_enter_cv = H_init
+                        SysModel.H = H_enter_cv
+                        self.model.update_H(H_enter_cv)
                         y_cv = cv_input[data][j].to(self.device)
                         x_cv_target = cv_target[data][j].to(self.device)
                         SysModel.T_test = y_cv.size(-1)
@@ -9955,7 +9963,7 @@ class Pipeline_ERTS:
                 self.MSE_cv_idx_opt = epoch
                 torch.save(model_mstep, destination_path_M)
 
-    def     train_H_mstep_net_3_datasets_joint(self, SysModel, cv_input, cv_target, train_input, train_target,
+    def train_H_mstep_net_3_datasets_joint(self, SysModel, cv_input, cv_target, train_input, train_target,
                                      destination_path_M, destination_path_RTS,load_path_RTS, load_mnet, num_em_iters=3, H_init=None,
                                      alpha=(0.05, 0.1, 0.85), lambda_H=1e-3, generate_h=True, datasets=3,x_0_train_list = None,x_0_cv_list =None):
         """
