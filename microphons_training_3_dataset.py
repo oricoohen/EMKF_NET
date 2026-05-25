@@ -13,6 +13,7 @@ import Simulations.config as config
 
 from Pipelines.Pipeline_mic import Pipeline_mic as Pipeline
 from RTSNet.RTSNet_nn import RTSNetNN
+from Baselines.BiGRU_smoother import train_bigru_smoother
 
 from Simulations.TDOA_2D.parameters import (
     m, n, m1x_0, m2x_0, M_mics,
@@ -100,6 +101,7 @@ destination_path_rtsnet_false  = cycle_dir + "RTSNet_false.pt"
 destination_path_M_F           = cycle_dir + "M_step_F_net.pt"
 destination_path_rtsnet_jointF = cycle_dir + "RTSNet_falseF_joint.pt"
 destination_path_M_F_joint     = cycle_dir + "M_step_F_net_joint.pt"
+destination_path_bigru         = cycle_dir + "BiGRU.pt"
 # destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
 # destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
 # destination_path_M_F           = save_dir + "M_step_F_net.pt"
@@ -314,15 +316,15 @@ RTSNet_Pipeline_true.setssModel(sys_model_true)
 RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
 RTSNet_Pipeline_true.setTrainingParams(args)
 
-RTSNet_Pipeline_true.train_RTS_net_3_datasets(
-    sys_model_true,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_true,
-    load_path_RTS=load_path_rtsnet_true,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_true.train_RTS_net_3_datasets(
+    # sys_model_true,
+    # all_cv_inputs,    all_cv_targets,
+    # all_train_inputs, all_train_targets,
+    # destination_path_RTS=destination_path_rtsnet_true,
+    # load_path_RTS=load_path_rtsnet_true,
+    # generate_f=True,
+    # datasets=cycle,
+# )
 
 sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
@@ -346,15 +348,15 @@ RTSNet_Pipeline_false.setssModel(sys_model_false)
 RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
 RTSNet_Pipeline_false.setTrainingParams(args)
 
-RTSNet_Pipeline_false.train_RTS_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_false,
-    load_path_RTS=load_path_rtsnet_false,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_false.train_RTS_net_3_datasets(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_RTS=destination_path_rtsnet_false,
+#     load_path_RTS=load_path_rtsnet_false,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
@@ -429,6 +431,39 @@ print("\nTesting joint ...")
 )
 
 ########################################
+### BiGRU baseline                   ###
+########################################
+print("\nBiGRU — training on all cycle datasets ...")
+train_bigru_smoother(
+    train_input=all_train_inputs,
+    train_target=all_train_targets,
+    cv_input=all_cv_inputs,
+    cv_target=all_cv_targets,
+    n=n, m=m,
+    save_path=destination_path_bigru,
+    device=device,
+    epochs=args.n_steps,
+    batch_size=args.n_batch,
+    lr=args.lr,
+)
+
+print("\nBiGRU — testing ...")
+bigru_model = torch.load(destination_path_bigru, weights_only=False, map_location=device)
+bigru_model.eval()
+
+bigru_outputs         = []   # list[dataset] of [N_T, m, T]
+mse_bigru_per_dataset = torch.zeros(cycle)
+with torch.no_grad():
+    for k in range(cycle):
+        y    = all_test_inputs[k].to(device)
+        tgt  = all_test_targets[k].to(device)
+        xhat = bigru_model(y)          # [N_T, m, T]
+        mse_bigru_per_dataset[k] = loss_fn(xhat, tgt)
+        bigru_outputs.append(xhat.cpu())
+
+mse_bigru_avg_db = 10 * math.log10(mse_bigru_per_dataset.mean().item())
+
+########################################
 ### Plot                              ###
 ########################################
 print("\nPlotting test sequence 0 ...")
@@ -440,6 +475,7 @@ plt.plot(t_axis, rtsnet_out_true[0].cpu()[1],                 linewidth=2,   lab
 plt.plot(t_axis, rtsnet_out_false[0].cpu()[1],                linewidth=2,   label="RTSNet false F")
 plt.plot(t_axis, rtsnet_out_mnet[0].cpu()[1],                 linewidth=2,   label=f"MNet {cycle}-cycle")
 plt.plot(t_axis, rtsnet_out_joint[0].cpu()[1], "-.",          linewidth=2,   label=f"Joint {cycle}-cycle")  # type: ignore[index]
+plt.plot(t_axis, bigru_outputs[0][0][1],        "--",          linewidth=2,   label="BiGRU")
 plt.xlabel("time")
 plt.ylabel("y position")
 plt.title(f"TDOA tracking: y position — {cycle}-cycle")
@@ -459,4 +495,5 @@ print(f"  RTSNet TRUE-F  (avg)          : {MSE_test_dB_avg_true.item():.2f} dB")
 print(f"  RTSNet FALSE-F (avg)          : {MSE_test_dB_avg_false.item():.2f} dB")
 print(f"  MNet {cycle}-cycle (avg)      : {MSE_test_dB_avg_mnet.item():.2f} dB")  # type: ignore[union-attr]
 print(f"  Joint {cycle}-cycle (avg)     : {MSE_test_dB_avg_joint.item():.2f} dB")
+print(f"  BiGRU          (avg)          : {mse_bigru_avg_db:.2f} dB")
 print("=" * 70)
