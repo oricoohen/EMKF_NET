@@ -50,7 +50,7 @@ args.N_T = 200
 args.T = 30
 args.T_test = 30
 ### training parameters
-args.n_steps = 400
+args.n_steps = 300
 args.n_batch = 30
 args.lr = 1e-3
 args.wd = 1e-3
@@ -59,8 +59,8 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.001   # process noise variance   (Q = q2 * I_m)
-r2 = 1   # measurement noise varia  nce (R = r2 * I_n)
+q2 = 0.01   # process noise variance   (Q = q2 * I_m)
+r2 = 10   # measurement noise varia  nce (R = r2 * I_n)
 
 ### model-mismatch parameters
 # theta_true: F per group drawn Uniform(-theta_true/2, +theta_true/2)
@@ -75,11 +75,11 @@ m2x_0 = m2x_0.to(device)
 ### paths
 save_dir = "RTSNet/tdoa_2d/1/"
 os.makedirs(save_dir, exist_ok=True)    
-destination_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
-destination_path_rtsnet_false = save_dir + "RTSNet_false.pt"
-destination_path_M_F = save_dir + "M_step_F_net.pt"
-destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint_large_f_loss.pt"
-destination_path_M_F_joint = save_dir + "M_step_F_net_joint_large_f_loss.pt"
+destination_path_rtsnet_true  = save_dir + "0.01RTSNet_true.pt"
+destination_path_rtsnet_false = save_dir + "0.01RTSNet_false.pt"
+destination_path_M_F = save_dir + "0.01M_step_F_net.pt"
+destination_path_rtsnet_jointF = save_dir + "0.01RTSNet_falseF_joint_large_f_loss.pt"
+destination_path_M_F_joint = save_dir + "0.01M_step_F_net_joint_large_f_loss.pt"
 
 print("=" * 70)
 print("2D TDOA RTSNet experiment — true-F and false-F models")
@@ -216,11 +216,11 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-# RTSNet_Pipeline_true.NNTrain(
-#     sys_model_true, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_true.NNTrain(
+    sys_model_true, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -243,11 +243,11 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-# RTSNet_Pipeline_false.NNTrain(
-#     sys_model_false, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.NNTrain(
+    sys_model_false, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 
 
@@ -272,20 +272,20 @@ print("||F_false - F_true||^2 =", diff.pow(2).mean().item(),
 
 num_em_iters = 2
 
-# RTSNet_Pipeline_false.train_F_mstep_net(
-#     sys_model_false,
-#     cv_input,
-#     cv_target,
-#     train_input,
-#     train_target,
-#     destination_path_M=destination_path_M_F,
-#     destination_path_RTS=destination_path_rtsnet_false,
-#     load_destination_path_M=None,
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.train_F_mstep_net(
+    sys_model_false,
+    cv_input,
+    cv_target,
+    train_input,
+    train_target,
+    destination_path_M=destination_path_M_F,
+    destination_path_RTS=destination_path_rtsnet_false,
+    load_destination_path_M=None,
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+)
 
 [MSE_test_arr_mnet, MSE_test_avg_mnet, MSE_test_dB_avg_mnet,
  rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net(
