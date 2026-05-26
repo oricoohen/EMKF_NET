@@ -400,7 +400,7 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
     destination_path_M=destination_path_M_F_joint,
     destination_path_RTS=destination_path_rtsnet_jointF,
     load_path_RTS=destination_path_rtsnet_false,
-    load_mnet=load_path_M_F_joint,
+    load_mnet=destination_path_M_F,
     num_em_iters=num_em_iters,
     alpha=(0.3, 1.0, 0.85),
     lambda_F=1e-3,
