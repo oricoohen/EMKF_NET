@@ -67,7 +67,7 @@ r2 = 1
 ### cycle: number of datasets
 cycle = 5
 # Max theta per dataset [rad] — each group of 10 sequences draws theta ~ Uniform(-max/2, +max/2)
-theta_changed_list = [3, 3, 3, 3, 3]
+theta_changed_list = [0.5, 0.5, 0.5, 0.5, 0.5]
 assert len(theta_changed_list) == cycle
 
 ### false F mismatch — always assume theta=0 (straight-line motion)
@@ -374,19 +374,19 @@ sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 #############################
 print(f"\nMNet {cycle}-cycle training ...")
 
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F,
-    load_path_RTS=destination_path_rtsnet_false,
-    load_mnet=load_path_M_F,
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-)
+# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_M=destination_path_M_F,
+#     load_path_RTS=destination_path_rtsnet_false,
+#     load_mnet=load_path_M_F,
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0, 0.85),
+#     lambda_F=1e-3,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 ###############################
 ### Joint cycle training     ###

@@ -67,7 +67,7 @@ q2 = 0.001
 r2 = 1.
 
 cycle             = 5
-theta_per_dataset = [0.5, 0.5, 0.1, 0.8, 0.2]
+theta_per_dataset = [0.2, 0.4, 0.6, 0.8, 1]
 # theta_per_dataset = [0.3,0.3]
 assert len(theta_per_dataset) == cycle
 
