@@ -46,7 +46,7 @@ args.T_test = 30
 
 T_test = args.T_test
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 cycle              = 5
@@ -240,6 +240,16 @@ for j in range(N_T):
             out_true_seq0.append(x_s_true)
             out_false_seq0.append(x_s_false)
 
+print("\n── ERTS results ──────────────────────────────────────────────────────")
+for k in range(cycle):
+    true_db  = 10 * math.log10(mse_true_arr[k].mean().item())
+    false_db = 10 * math.log10(mse_false_arr[k].mean().item())
+    print(f"  Dataset {k}  ERTS true-F: {true_db:.2f} dB   ERTS false-F: {false_db:.2f} dB")
+_true_avg  = 10 * math.log10(mse_true_arr.mean().item())
+_false_avg = 10 * math.log10(mse_false_arr.mean().item())
+print(f"  Overall    ERTS true-F: {_true_avg:.2f} dB   ERTS false-F: {_false_avg:.2f} dB")
+print("──────────────────────────────────────────────────────────────────────\n")
+
 ## ── Cross-check (confirmed equivalent, F diff ~1e-6) — commented out ──────────
 ## def run_emkf_ekf_erts(y_seq, F_init, x_0, P_0, max_it):
 ##     F_est = F_init.clone()
@@ -330,22 +340,22 @@ for data in range(cycle):
 ###  Run BiGRU baseline               ###
 #########################################
 # Load the BiGRU trained by microphons_training_3_dataset.py — no retraining here.
-bigru_train_dir = f"RTSNet/tdoa_2d/1/{cycle}cycle/"
-load_path_bigru = bigru_train_dir + "BiGRU.pt"
-print(f"\nLoading BiGRU from {load_path_bigru} ...")
-bigru_model = torch.load(load_path_bigru, weights_only=False, map_location=device)
-bigru_model.eval()
+# bigru_train_dir = f"RTSNet/tdoa_2d/1/{cycle}cycle/"
+# load_path_bigru = bigru_train_dir + "BiGRU.pt"
+# print(f"\nLoading BiGRU from {load_path_bigru} ...")
+# bigru_model = torch.load(load_path_bigru, weights_only=False, map_location=device)
+# bigru_model.eval()
 
-print("Running BiGRU inference across all datasets ...")
+# print("Running BiGRU inference across all datasets ...")
 
-with torch.no_grad():
-    for data in range(cycle):
-        y_batch = all_test_inputs[data]    # [N_T, n, T]
-        x_batch = all_test_targets[data]   # [N_T, m, T]
-        x_hat   = bigru_model(y_batch)     # [N_T, m, T]
-        for j in range(N_T):
-            mse_bigru_arr[data, j] = loss_fn(x_hat[j], x_batch[j]).item()
-        out_bigru_seq0.append(x_hat[0].cpu())
+# with torch.no_grad():
+#     for data in range(cycle):
+#         y_batch = all_test_inputs[data]    # [N_T, n, T]
+#         x_batch = all_test_targets[data]   # [N_T, m, T]
+#         x_hat   = bigru_model(y_batch)     # [N_T, m, T]
+#         for j in range(N_T):
+#             mse_bigru_arr[data, j] = loss_fn(x_hat[j], x_batch[j]).item()
+#         out_bigru_seq0.append(x_hat[0].cpu())
 
 #########################################
 ###  Results summary                  ###
@@ -357,22 +367,22 @@ print("=" * 70)
 mse_true_db_per_dataset  = [10 * math.log10(mse_true_arr[k].mean().item())  for k in range(cycle)]
 mse_false_db_per_dataset = [10 * math.log10(mse_false_arr[k].mean().item()) for k in range(cycle)]
 mse_emkf_db_per_dataset  = [10 * math.log10(mse_emkf_arr[k].mean().item())  for k in range(cycle)]
-mse_bigru_db_per_dataset = [10 * math.log10(mse_bigru_arr[k].mean().item()) for k in range(cycle)]
+# mse_bigru_db_per_dataset = [10 * math.log10(mse_bigru_arr[k].mean().item()) for k in range(cycle)]
 
 for k in range(cycle):
     print(f"  Dataset {k}  ERTS true-F : {mse_true_db_per_dataset[k]:.2f} dB"
           f"   ERTS false-F: {mse_false_db_per_dataset[k]:.2f} dB"
-          f"   EMKF: {mse_emkf_db_per_dataset[k]:.2f} dB"
-          f"   BiGRU: {mse_bigru_db_per_dataset[k]:.2f} dB")
+          f"   EMKF: {mse_emkf_db_per_dataset[k]:.2f} dB")
+        #   f"   BiGRU: {mse_bigru_db_per_dataset[k]:.2f} dB")
 
 mse_true_avg_db  = 10 * math.log10(mse_true_arr.mean().item())
 mse_false_avg_db = 10 * math.log10(mse_false_arr.mean().item())
 mse_emkf_avg_db  = 10 * math.log10(mse_emkf_arr.mean().item())
-mse_bigru_avg_db = 10 * math.log10(mse_bigru_arr.mean().item())
+# mse_bigru_avg_db = 10 * math.log10(mse_bigru_arr.mean().item())
 print(f"\n  ERTS TRUE-F  (overall avg) : {mse_true_avg_db:.2f} dB")
 print(f"  ERTS FALSE-F (overall avg) : {mse_false_avg_db:.2f} dB")
 print(f"  EMKF         (overall avg) : {mse_emkf_avg_db:.2f} dB")
-print(f"  BiGRU        (overall avg) : {mse_bigru_avg_db:.2f} dB")
+# print(f"  BiGRU        (overall avg) : {mse_bigru_avg_db:.2f} dB")
 print("=" * 70)
 
 #########################################
@@ -389,14 +399,14 @@ for k in range(cycle):
     ax.plot(t_axis, out_true_seq0[k].cpu()[1],  "--",  linewidth=2,   label="ERTS true F")
     ax.plot(t_axis, out_false_seq0[k].cpu()[1], ":",   linewidth=2,   label="ERTS false F")
     ax.plot(t_axis, out_emkf_seq0[k].cpu()[1],  "-.",  linewidth=2,   label="EMKF")
-    ax.plot(t_axis, out_bigru_seq0[k][1],        "-.",  linewidth=2,   label="BiGRU")
+    # ax.plot(t_axis, out_bigru_seq0[k][1],        "-.",  linewidth=2,   label="BiGRU")
     ax.set_ylabel(f"Dataset {k}\ny position")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_title(f"Dataset {k} — true: {mse_true_db_per_dataset[k]:.2f} dB  "
                  f"false: {mse_false_db_per_dataset[k]:.2f} dB  "
-                 f"EMKF: {mse_emkf_db_per_dataset[k]:.2f} dB  "
-                 f"BiGRU: {mse_bigru_db_per_dataset[k]:.2f} dB")
+                 f"EMKF: {mse_emkf_db_per_dataset[k]:.2f} dB")
+                 #  f"BiGRU: {mse_bigru_db_per_dataset[k]:.2f} dB")
 
 axes[-1].set_xlabel("time")
 fig.suptitle(f"TDOA ERTS analytic — {cycle}-dataset sequential scenario", fontsize=13)
