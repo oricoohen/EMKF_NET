@@ -213,11 +213,11 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-# RTSNet_Pipeline_true.NNTrain(
-#     sys_model_true, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_true.NNTrain(
+    sys_model_true, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -240,11 +240,11 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-# RTSNet_Pipeline_false.NNTrain(
-#     sys_model_false, cv_input, cv_target, train_input, train_target,
-#     destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
-#     generate_f=True,
-# )
+RTSNet_Pipeline_false.NNTrain(
+    sys_model_false, cv_input, cv_target, train_input, train_target,
+    destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
+    generate_f=True,
+)
 
 
 
