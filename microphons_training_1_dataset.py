@@ -59,7 +59,7 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.01   # process noise variance   (Q = q2 * I_m)
+q2 = 0.001   # process noise variance   (Q = q2 * I_m)
 r2 = 1       # measurement noise variance (R = r2 * I_n)
 
 ### theta range for rotation model
@@ -75,11 +75,11 @@ m2x_0 = m2x_0.to(device)
 ### paths
 save_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(save_dir, exist_ok=True)    
-destination_path_rtsnet_true  = save_dir + "RTSNet_true0.01.pt"
-destination_path_rtsnet_false = save_dir + "RTSNet_false0.01.pt"
-destination_path_M_F          = save_dir + "M_step_F_net0.01.pt"
-destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint0.01.pt"
-destination_path_M_F_joint    = save_dir + "M_step_F_net_joint0.01.pt"
+destination_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
+destination_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
+destination_path_M_F          = save_dir + "M_step_F_net0.001.pt"
+destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint0.001.pt"
+destination_path_M_F_joint    = save_dir + "M_step_F_net_joint0.001.pt"
 
 print("=" * 70)
 print("2D TDOA RTSNet experiment — rotation theta model")
@@ -176,7 +176,7 @@ sys_model_false.F_test_TRUE  = F_test_true
 ### Analytic baselines (all test seqs) ###
 ########################################
 print("\nRunning analytic baselines averaged over all test sequences ...")
-mse_erts_true_sum  = 0.0
+mse_erts_true_sum  = 0.0        
 mse_erts_false_sum = 0.0
 for i in range(args.N_T):
     states_i = test_target[i]

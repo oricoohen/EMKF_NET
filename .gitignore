@@ -16,6 +16,7 @@ venv/
 
 # Data files
 *.pt
+*.png
 *.md
 *.csv
 *.json
