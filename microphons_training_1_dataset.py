@@ -47,8 +47,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 30
-args.T_test = 30
+args.T = 50
+args.T_test = 50
 ### training parameters
 args.n_steps = 300
 args.n_batch = 30
@@ -60,12 +60,12 @@ T_test = args.T_test
 
 ### noise levels
 q2 = 0.01   # process noise variance   (Q = q2 * I_m)
-r2 = 10   # measurement noise varia  nce (R = r2 * I_n)
+r2 = 1       # measurement noise variance (R = r2 * I_n)
 
-### model-mismatch parameters
-# theta_true: F per group drawn Uniform(-theta_true/2, +theta_true/2)
-# false F is always theta=0 (straight-line assumption)
-theta_true  = 1   # [rad]
+### theta range for rotation model
+# each sequence draws theta ~ Uniform(-theta_true_max/2, +theta_true_max/2)
+# false F is always make_F_block(0.0) (straight-line / theta=0 assumption)
+theta_true_max = 0.2   # actual drawn range = Uniform(-0.1, +0.1), covers test ±0.10 with margin
 
 Q     = (q2 * Q_structure).to(device) 
 R     = (r2 * R_structure).to(device)
@@ -73,19 +73,19 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir = "RTSNet/tdoa_2d/1/"
+save_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(save_dir, exist_ok=True)    
-destination_path_rtsnet_true  = save_dir + "0.01RTSNet_true.pt"
-destination_path_rtsnet_false = save_dir + "0.01RTSNet_false.pt"
-destination_path_M_F = save_dir + "0.01M_step_F_net.pt"
-destination_path_rtsnet_jointF = save_dir + "0.01RTSNet_falseF_joint_large_f_loss.pt"
-destination_path_M_F_joint = save_dir + "0.01M_step_F_net_joint_large_f_loss.pt"
+destination_path_rtsnet_true  = save_dir + "RTSNet_true0.01.pt"
+destination_path_rtsnet_false = save_dir + "RTSNet_false0.01.pt"
+destination_path_M_F          = save_dir + "M_step_F_net0.01.pt"
+destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint0.01.pt"
+destination_path_M_F_joint    = save_dir + "M_step_F_net_joint0.01.pt"
 
 print("=" * 70)
-print("2D TDOA RTSNet experiment — true-F and false-F models")
+print("2D TDOA RTSNet experiment — rotation theta model")
 print(f"  T={T}  T_test={T_test}")
 print(f"  q2={q2}  r2={r2}")
-print(f"  theta_true={theta_true} rad   theta_false=0.0 rad (fixed)")
+print(f"  theta_true_max={theta_true_max}  false F = make_F_block(0.0) [theta=0, straight line]")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -99,20 +99,16 @@ print("=" * 70)
 # F is NOT random per time-step — it is constant within a trajectory and
 # drawn Uniform(-theta_true/2, +theta_true/2) once per group of 10.
 
-print("\nGenerating datasets ...")
-train_input, train_target, theta_train, F_train_true = \
-    generate_dataset_random_theta(args.N_E,  T,      theta_true, Q, R)
+print(f"\nGenerating datasets ...  theta_true_max={theta_true_max}")
 
-cv_input, cv_target, theta_cv, F_cv_true = \
-    generate_dataset_random_theta(args.N_CV, T,      theta_true, Q, R)
+train_input, train_target, _, F_train_true = generate_dataset_random_theta(args.N_E,  T,      theta_true_max, Q, R)
+cv_input,    cv_target,    _, F_cv_true    = generate_dataset_random_theta(args.N_CV, T,      theta_true_max, Q, R)
+test_input,  test_target,  _, F_test_true  = generate_dataset_random_theta(args.N_T,  T_test, theta_true_max, Q, R)
 
-test_input, test_target, theta_test, F_test_true = \
-    generate_dataset_random_theta(args.N_T,  T_test, theta_true, Q, R)
-
-# False-F lists: always theta=0 (straight-line assumption)
-F_train_false = [make_F_block(0.0) for _ in range(len(theta_train))]
-F_cv_false    = [make_F_block(0.0) for _ in range(len(theta_cv))]
-F_test_false  = [make_F_block(0.0) for _ in range(len(theta_test))]
+# False F: theta=0 (straight-line constant-velocity assumption)
+F_train_false = [make_F_block(0.0) for _ in range(args.N_E)]
+F_cv_false    = [make_F_block(0.0) for _ in range(args.N_CV)]
+F_test_false  = [make_F_block(0.0) for _ in range(args.N_T)]
 
 print("trainset size:", train_target.size())
 print("cvset size:   ", cv_target.size())
@@ -127,7 +123,8 @@ for i, (Ft, Ff) in enumerate(zip(F_test_true, F_test_false)):
     mse_g = ((Ft - Ff) ** 2).mean().item()
     all_mse.append(mse_g)
     dB_g  = 10 * math.log10(max(mse_g, 1e-10))
-    print(f"  seq {i:3d}  theta_true={theta_test[i]:+.4f} rad  "
+    theta_i = math.atan2(Ft[3, 2].item(), Ft[2, 2].item())
+    print(f"  seq {i:3d}  theta={theta_i:.4f} rad  "
           f"||F_true-F_false||^2={mse_g:.6f}  ({dB_g:.2f} dB)")
 mse_mean = sum(all_mse) / len(all_mse)
 print(f"  MEAN  ||F_true-F_false||^2 = {mse_mean:.6f}  "
@@ -147,7 +144,7 @@ print("─" * 60)
 # Linearized H at x0 — prior feature for RTSNet's FC9 (S-GRU). Nonlinear h stays intact.
 H_prior = h_jacobian(m1x_0.reshape(-1))   # [n, m]
 
-# Neutral initial F for NNBuild — will be updated per-group during training via generate_f=True
+# Neutral initial F for NNBuild — constant velocity (false F starting point)
 F_init  = make_F_block(0.0)
 f_init  = make_f(F_init)
 
@@ -216,11 +213,11 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_true.parameters() if p.requires_grad))
 
-RTSNet_Pipeline_true.NNTrain(
-    sys_model_true, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_true,
-    generate_f=True,
-)
+# RTSNet_Pipeline_true.NNTrain(
+#     sys_model_true, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest(
@@ -243,11 +240,11 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 print("Number of trainable parameters for RTSNet:",
       sum(p.numel() for p in RTSNet_model_false.parameters() if p.requires_grad))
 
-RTSNet_Pipeline_false.NNTrain(
-    sys_model_false, cv_input, cv_target, train_input, train_target,
-    destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
-    generate_f=True,
-)
+# RTSNet_Pipeline_false.NNTrain(
+#     sys_model_false, cv_input, cv_target, train_input, train_target,
+#     destination_path_rtsnet_false, load_model_path=destination_path_rtsnet_true,
+#     generate_f=True,
+# )
 
 
 

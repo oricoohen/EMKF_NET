@@ -66,18 +66,21 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
                  Q_in: torch.Tensor = None,
                  R_in: torch.Tensor = None,
                  x_init: torch.Tensor = None,
-                 P_init: torch.Tensor = None) -> tuple:
+                 P_init: torch.Tensor = None,
+                 obs_mask: torch.Tensor = None) -> tuple:
     """
     One EKF forward pass followed by one ERTS backward pass.
 
     Parameters
     ----------
-    y_seq  : [n_obs, T_len]   noisy observations
-    get_F  : callable(t: int) -> [m_state, m_state]
-    Q_in   : [m, m]  process noise covariance (defaults to module-level Q)
-    R_in   : [n, n]  measurement noise covariance (defaults to module-level R)
-    x_init : [m] or [m,1]  initial state mean   (defaults to m1x_0)
-    P_init : [m, m]        initial state covariance (defaults to m2x_0)
+    y_seq    : [n_obs, T_len]   noisy observations
+    get_F    : callable(t: int) -> [m_state, m_state]
+    Q_in     : [m, m]  process noise covariance (defaults to module-level Q)
+    R_in     : [n, n]  measurement noise covariance (defaults to module-level R)
+    x_init   : [m] or [m,1]  initial state mean   (defaults to m1x_0)
+    P_init   : [m, m]        initial state covariance (defaults to m2x_0)
+    obs_mask : [T_len] bool tensor, True = use measurement at this step.
+               None means measure at every step (default behaviour).
 
     Returns
     -------
@@ -102,8 +105,8 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
 
     x_p = m1x_0.reshape(-1).clone().to(device) if x_init is None else x_init.reshape(-1).clone().to(device)
     P_p = P0_use.clone()
-    H_last = None
-    K_last = None
+    H_last = torch.zeros(n, m, device=device)
+    K_last = torch.zeros(m, n, device=device)
 
     # ── EKF forward ──────────────────────────────────────────────────────────
     for t in range(T_len):
@@ -113,19 +116,24 @@ def run_ekf_erts(y_seq: torch.Tensor, get_F,
         xpr = F_t @ x_p
         Ppr = F_t @ P_p @ F_t.T + Q_use
 
-        H_t = h_jacobian(xpr)
-        S_t = H_t @ Ppr @ H_t.T + R_use
-        K_t = Ppr @ H_t.T @ torch.linalg.inv(S_t)
-
-        innov = y_seq[:, t] - h(xpr).reshape(-1)
-        x_p   = xpr + K_t @ innov
-        P_p   = (I_m - K_t @ H_t) @ Ppr
-        P_p   = (P_p + P_p.T) / 2
+        has_obs = (obs_mask is None) or bool(obs_mask[t].item())
+        if has_obs:
+            H_t = h_jacobian(xpr)
+            S_t = H_t @ Ppr @ H_t.T + R_use
+            K_t = Ppr @ H_t.T @ torch.linalg.inv(S_t)
+            innov = y_seq[:, t] - h(xpr).reshape(-1)
+            x_p = xpr + K_t @ innov
+            P_p = (I_m - K_t @ H_t) @ Ppr
+            P_p = (P_p + P_p.T) / 2
+            H_last = H_t
+            K_last = K_t
+        else:
+            # No measurement at this step — pure prediction
+            x_p = xpr
+            P_p = Ppr
 
         x_f[:, t]    = x_p
         P_f[:, :, t] = P_p
-        H_last = H_t
-        K_last = K_t
 
     # ── ERTS backward ─────────────────────────────────────────────────────────
     x_s    = x_f.clone()

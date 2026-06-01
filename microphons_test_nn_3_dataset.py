@@ -52,9 +52,9 @@ print("Current Time =", strTime)
 ###  Settings   ###
 ###################
 args = config.general_settings()
-args.N_T    = 100
-args.T      = 30
-args.T_test = 30
+args.N_T    = 15
+args.T      = 50
+args.T_test = 50
 args.n_steps = 1
 args.n_batch = 1
 args.lr      = 1e-3
@@ -63,13 +63,17 @@ args.wd      = 1e-3
 T_test = args.T_test
 N_T    = args.N_T
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1.
 
 cycle             = 5
-theta_per_dataset = [0.2, 0.4, 0.6, 0.8, 1]
-# theta_per_dataset = [0.3,0.3]
+theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # matches analytic test
 assert len(theta_per_dataset) == cycle
+
+# Sparse-measurement mask — must match analytic test exactly so ERTS baselines are comparable.
+MEASURE_EVERY_K = 1   # 1 = every step; >1 = sparse
+obs_mask = torch.zeros(T_test, dtype=torch.bool)
+obs_mask[::MEASURE_EVERY_K] = True
 
 num_em_iters = 2
 
@@ -78,15 +82,15 @@ R     = (r2 * R_structure).to(device)
 m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
-save_dir  = "RTSNet/tdoa_2d/1/"
+save_dir  = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 # cycle_dir = save_dir + f"{cycle}cycle/"
-cycle_dir = save_dir + "5cycle/"
+cycle_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Checkpoint paths — populated by microphons_training_3_dataset.py
-path_rtsnet_true  = cycle_dir + "RTSNet_true.pt"
-path_rtsnet_false = cycle_dir + "RTSNet_false.pt"
-path_M_F          = cycle_dir + "M_step_F_net.pt"
+path_rtsnet_true  = cycle_dir + "RTSNet_true0.01.pt"
+path_rtsnet_false = cycle_dir + "RTSNet_false0.01.pt"
+path_M_F          = cycle_dir + "M_step_F_net0.01.pt"
 path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint.pt"
 path_M_F_joint    = cycle_dir + "M_step_F_net_joint.pt"
 
@@ -267,14 +271,14 @@ mse_joint_db = [10 * math.log10(MSE_arr_joint[k * N_T:(k + 1) * N_T].mean().item
 ###  Results summary                  ###
 #########################################
 print("\n" + "=" * 70)
-print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={theta_per_dataset})")
+print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={[round(t,2) for t in theta_per_dataset]})")
 print("=" * 70)
 
 mse_true_db  = [10 * math.log10(mse_true_arr[k].mean().item())  for k in range(cycle)]
 mse_false_db = [10 * math.log10(mse_false_arr[k].mean().item()) for k in range(cycle)]
 
 for k in range(cycle):
-    print(f"  Dataset {k} (theta={theta_per_dataset[k]:.1f})"
+    print(f"  Dataset {k} (theta={theta_per_dataset[k]:.2f})"
           f"  ERTS-T: {mse_true_db[k]:6.2f} dB"
           f"  ERTS-F: {mse_false_db[k]:6.2f} dB"
           f"  RTSNet-T: {mse_rt_db[k]:6.2f} dB"
@@ -313,7 +317,7 @@ for k in range(cycle):
     ax.plot(t_axis, rtsnet_out_mnet[k].cpu()[1],  "-",           lw=1.5, label="MNet",           alpha=0.7)
     ax.plot(t_axis, rtsnet_out_joint[k].cpu()[1], "-",           lw=1.5, label="Joint",          alpha=0.7)
 
-    ax.set_ylabel(f"ds{k} (θ={theta_per_dataset[k]:.1f})\ny position")
+    ax.set_ylabel(f"ds{k} (θ={theta_per_dataset[k]:.2f})\ny position")
     ax.legend(loc="upper right", fontsize=7, ncol=3)
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_title(
@@ -338,3 +342,75 @@ plot_path = cycle_dir + "nn_y_position.png"
 plt.savefig(plot_path, dpi=250)
 plt.close()
 print(f"  Saved: {plot_path}")
+
+#########################################
+###  2-D trajectory popup — sequence 0 ###
+#########################################
+print("\nPlotting 2D trajectory for sequence 0 ...")
+
+# Concatenate all datasets along time for sequence 0
+def _cat(arr):
+    return torch.cat([arr[k].cpu() for k in range(cycle)])
+
+true_px   = _cat([all_test_targets[k][0][0] for k in range(cycle)])
+true_py   = _cat([all_test_targets[k][0][1] for k in range(cycle)])
+erts_t_px = _cat([out_true_seq0[k][0]       for k in range(cycle)])
+erts_t_py = _cat([out_true_seq0[k][1]       for k in range(cycle)])
+erts_f_px = _cat([out_false_seq0[k][0]      for k in range(cycle)])
+erts_f_py = _cat([out_false_seq0[k][1]      for k in range(cycle)])
+rt_t_px   = _cat([rtsnet_out_true[k][0]     for k in range(cycle)])
+rt_t_py   = _cat([rtsnet_out_true[k][1]     for k in range(cycle)])
+rt_f_px   = _cat([rtsnet_out_false[k][0]    for k in range(cycle)])
+rt_f_py   = _cat([rtsnet_out_false[k][1]    for k in range(cycle)])
+mnet_px   = _cat([rtsnet_out_mnet[k][0]     for k in range(cycle)])
+mnet_py   = _cat([rtsnet_out_mnet[k][1]     for k in range(cycle)])
+jnt_px    = _cat([rtsnet_out_joint[k][0]    for k in range(cycle)])
+jnt_py    = _cat([rtsnet_out_joint[k][1]    for k in range(cycle)])
+
+matplotlib.use("TkAgg")   # switch to interactive backend for popup
+
+fig2d, ax2d = plt.subplots(figsize=(10, 8))
+
+ax2d.plot(true_px,   true_py,   "k-",   lw=2.5,  label="True",           zorder=6)
+ax2d.plot(erts_t_px, erts_t_py, "--",   lw=1.8,  label="ERTS true-F",    zorder=5)
+ax2d.plot(erts_f_px, erts_f_py, ":",    lw=1.8,  label="ERTS false-F",   zorder=5)
+ax2d.plot(rt_t_px,   rt_t_py,   "-.",   lw=1.6,  label="RTSNet true-F",  zorder=5)
+ax2d.plot(rt_f_px,   rt_f_py,   "-",    lw=1.4,  label="RTSNet false-F", zorder=4, alpha=0.8)
+ax2d.plot(mnet_px,   mnet_py,   "-",    lw=1.4,  label="MNet",           zorder=4, alpha=0.8)
+ax2d.plot(jnt_px,    jnt_py,    "-",    lw=1.4,  label="Joint",          zorder=4, alpha=0.8)
+
+# Dataset boundary markers (start of each dataset on the true trajectory)
+for k in range(cycle):
+    bx = all_test_targets[k][0][0, 0].cpu().item()
+    by = all_test_targets[k][0][1, 0].cpu().item()
+    ax2d.scatter(bx, by, color="black", s=60, zorder=7,
+                 marker="o" if k == 0 else "D")
+    ax2d.annotate(f"ds{k} θ={theta_per_dataset[k]:.2f}",
+                  (bx, by), textcoords="offset points",
+                  xytext=(6, 4), fontsize=8)
+
+# Microphone positions
+for idx, mic in enumerate(mic_positions):
+    ax2d.scatter(mic[0].item(), mic[1].item(),
+                 marker="^", color="red", s=100, zorder=8)
+    ax2d.annotate(f"m{idx}", (mic[0].item(), mic[1].item()),
+                  textcoords="offset points", xytext=(4, 4), fontsize=8)
+
+ax2d.set_xlabel("p_x")
+ax2d.set_ylabel("p_y")
+ax2d.set_title(
+    f"2D trajectory — seq 0 — all {cycle} datasets concatenated\n"
+    + "  ".join(f"ds{k} θ={theta_per_dataset[k]:.2f}" for k in range(cycle)),
+    fontsize=11,
+)
+ax2d.legend(fontsize=9, loc="upper right")
+ax2d.grid(True, alpha=0.4)
+
+plot_2d_path = os.path.abspath(cycle_dir + "traj_2d_seq0.png")
+plt.savefig(plot_2d_path, dpi=200)
+print(f"  Saved: {plot_2d_path}")
+
+if os.name == "nt":
+    os.startfile(plot_2d_path)
+else:
+    plt.show()

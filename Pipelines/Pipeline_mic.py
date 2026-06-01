@@ -636,11 +636,12 @@ class Pipeline_mic:
 
                     # ── M-step forward ───────────────────────────────────────
                     deltaF     = model_mstep(z_in)          # [1, m, m]
-                    deltaF_mat = deltaF.squeeze(0)          # [m, m]
-                    F_next     = F_current + deltaF_mat
+                    deltaF_vv  = deltaF.squeeze(0)[2:4, 2:4]   # velocity block only
+                    F_next     = F_current.clone()
+                    F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
 
-                    f_loss = torch.mean((F_next - F_true) ** 2)
-                    reg    = lambda_F * torch.mean(deltaF_mat ** 2)
+                    f_loss = torch.mean((F_next[2:4, 2:4] - F_true[2:4, 2:4]) ** 2)
+                    reg    = lambda_F * torch.mean(deltaF_vv ** 2)
                     f_loss_em_epoch[em_iter] += f_loss.item()
 
                     F_current = F_next
@@ -670,7 +671,7 @@ class Pipeline_mic:
                         weight = alpha[1]
                     else:
                         weight = alpha[2]
-                    total_loss_seq += weight * (0.1*f_loss + reg + 4 * x_loss)
+                    total_loss_seq += weight * (5*f_loss + reg + 1* x_loss)
 
                 total_loss_batch += total_loss_seq
 
@@ -789,7 +790,7 @@ class Pipeline_mic:
                             weight_cv = alpha[1]
                         else:
                             weight_cv = alpha[2]
-                        total_loss_seq_cv += weight_cv * (0.1 * f_loss_cv.item() + 4*x_loss_cv.item()
+                        total_loss_seq_cv += weight_cv * (5 * f_loss_cv.item() + 1*x_loss_cv.item()
                                                           + reg_cv.item())
 
                     total_loss_cv += total_loss_seq_cv
@@ -930,11 +931,12 @@ class Pipeline_mic:
 
                     # ── M-step ───────────────────────────────────────────────
                     deltaF     = model_mstep(z_in)
-                    deltaF_mat = deltaF.squeeze(0)
-                    F_next     = F_current + deltaF_mat
+                    deltaF_vv  = deltaF.squeeze(0)[2:4, 2:4]   # velocity block only
+                    F_next     = F_current.clone()
+                    F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
 
-                    f_loss = torch.mean((F_next - F_true) ** 2)
-                    reg    = lambda_F * torch.mean(deltaF_mat ** 2)
+                    f_loss = torch.mean((F_next[2:4, 2:4] - F_true[2:4, 2:4]) ** 2)
+                    reg    = lambda_F * torch.mean(deltaF_vv ** 2)
                     f_loss_em_epoch[em_iter] += f_loss.detach().item()
 
                     F_current = F_next
@@ -964,7 +966,7 @@ class Pipeline_mic:
                         weight = alpha[1]
                     else:
                         weight = alpha[2]
-                    total_loss_seq += weight * (10 * f_loss + 0.5*x_loss + reg)
+                    total_loss_seq += weight * (2 * f_loss + 1*x_loss + reg)
 
                 total_loss_batch += total_loss_seq
 
@@ -1100,7 +1102,7 @@ class Pipeline_mic:
                             weight_cv = alpha[1]
                         else:
                             weight_cv = alpha[2]
-                        total_loss_seq_cv += weight_cv * (10 * f_loss_cv.item() + 0.5*x_loss_cv.item()
+                        total_loss_seq_cv += weight_cv * (2* f_loss_cv.item() + 1*x_loss_cv.item()
                                                           +  reg_cv.item())
 
                     total_loss_cv += total_loss_seq_cv
@@ -1342,7 +1344,10 @@ class Pipeline_mic:
                         ], dim=0).reshape(1, -1)
 
                         deltaF     = model_mstep(z_in)
-                        F_current  = F_current + deltaF.view(m, m)
+                        deltaF_vv  = deltaF.squeeze(0)[2:4, 2:4]
+                        F_next     = F_current.clone()
+                        F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
+                        F_current  = F_next
 
                         self.model.update_F(F_current)
                         self.model.InitSequence(x_0, T)
@@ -1503,12 +1508,13 @@ class Pipeline_mic:
                         ], dim=0).reshape(1, -1)
 
                         deltaF = model_mstep(z_in)
-                        deltaF_mat = deltaF.view(m, m)
-                        F_next = F_current + deltaF_mat
+                        deltaF_vv  = deltaF.squeeze(0)[2:4, 2:4]
+                        F_next     = F_current.clone()
+                        F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
                         F_current = F_next
 
-                        f_loss = torch.mean((F_next - F_true) ** 2)
-                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        f_loss = torch.mean((F_next[2:4, 2:4] - F_true[2:4, 2:4]) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_vv ** 2)
 
                         self.model.update_F(F_current)
                         self.model.InitSequence(x_0, T)
@@ -1649,12 +1655,13 @@ class Pipeline_mic:
                             ], dim=0).reshape(1, -1)
 
                             dF_cv = model_mstep(z_cv)
-                            dF_cv_mat = dF_cv.view(m, m)
-                            F_next_cv = F_current_cv + dF_cv_mat
+                            dF_cv_vv   = dF_cv.squeeze(0)[2:4, 2:4]   # velocity block only
+                            F_next_cv  = F_current_cv.clone()
+                            F_next_cv[2:4, 2:4] = F_current_cv[2:4, 2:4] + dF_cv_vv
                             F_current_cv = F_next_cv
 
-                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)
-                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            f_loss_cv = torch.mean((F_next_cv[2:4, 2:4] - F_true_cv[2:4, 2:4]) ** 2)
+                            reg_cv = lambda_F * torch.mean(dF_cv_vv ** 2)
 
                             self.model.update_F(F_current_cv)
                             self.model.InitSequence(x_0_cv, T_cv)
@@ -1837,12 +1844,13 @@ class Pipeline_mic:
                         ], dim=0).reshape(1, -1)
 
                         deltaF = model_mstep(z_in)
-                        deltaF_mat = deltaF.view(m, m)
-                        F_next = F_current + deltaF_mat
+                        deltaF_vv  = deltaF.squeeze(0)[2:4, 2:4]
+                        F_next     = F_current.clone()
+                        F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
                         F_current = F_next
 
-                        f_loss = torch.mean((F_next - F_true) ** 2)
-                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        f_loss = torch.mean((F_next[2:4, 2:4] - F_true[2:4, 2:4]) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_vv ** 2)
                         batch_f_loss_em[em_iter] += f_loss.detach().item()
                         batch_reg_em[em_iter] += reg.detach().item()
 
@@ -2008,12 +2016,13 @@ class Pipeline_mic:
                             ], dim=0).reshape(1, -1)
 
                             dF_cv = model_mstep(z_cv)
-                            dF_cv_mat = dF_cv.view(m, m)
-                            F_next_cv = F_current_cv + dF_cv_mat
+                            dF_cv_vv   = dF_cv.squeeze(0)[2:4, 2:4]   # velocity block only
+                            F_next_cv  = F_current_cv.clone()
+                            F_next_cv[2:4, 2:4] = F_current_cv[2:4, 2:4] + dF_cv_vv
                             F_current_cv = F_next_cv
 
-                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)
-                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            f_loss_cv = torch.mean((F_next_cv[2:4, 2:4] - F_true_cv[2:4, 2:4]) ** 2)
+                            reg_cv = lambda_F * torch.mean(dF_cv_vv ** 2)
                             batch_cv_f_loss_em[em_iter] += f_loss_cv.item()
                             batch_cv_reg_em[em_iter] += reg_cv.item()
 

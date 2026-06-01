@@ -19,7 +19,7 @@ class DeltaF_MStepNet(nn.Module):
     Output:
       - ΔF:  [B, m, m]
     """
-    def __init__(self, m, n, d_hidden=256, dF_scale=0.1):
+    def __init__(self, m, n, d_hidden=256, dF_scale=0.3):###oti changed it from 0.1
         super().__init__()
         self.m = m
         self.n = n

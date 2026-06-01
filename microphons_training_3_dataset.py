@@ -20,7 +20,6 @@ from Simulations.TDOA_2D.parameters import (
     Q_structure, R_structure,
     make_F_block, h, h_jacobian,
     generate_dataset_random_theta,
-    generate_false_F_list,
     make_f,
     PX_MIN, PX_MAX, PY_MIN, PY_MAX,
 )
@@ -49,8 +48,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 30
-args.T_test = 30
+args.T = 50
+args.T_test = 50
 ### training parameters
 args.n_steps = 400
 args.n_batch = 30
@@ -66,12 +65,11 @@ r2 = 1
 
 ### cycle: number of datasets
 cycle = 5
-# Max theta per dataset [rad] — each group of 10 sequences draws theta ~ Uniform(-max/2, +max/2)
-theta_changed_list = [0.5, 0.5, 0.5, 0.5, 0.5]
-assert len(theta_changed_list) == cycle
-
-### false F mismatch — always assume theta=0 (straight-line motion)
-theta_false = 0.0   # [rad]
+# Per-dataset theta for rotation model:
+#   dataset theta_k ~ Uniform(-theta_range, theta_range)  (random left/right turn)
+#   within-dataset per-sequence variation: theta_true_max (small, for generalization)
+theta_range    = 0.12   # dataset-level range — covers test range ±0.10
+theta_true_max = 0.02   # within-dataset per-sequence variation
 
 ### EM iterations
 num_em_iters = 2
@@ -108,9 +106,9 @@ destination_path_bigru         = cycle_dir + "BiGRU.pt"
 # destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint.pt"
 # destination_path_M_F_joint     = save_dir + "M_step_F_net_joint.pt"
 print("=" * 70)
-print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment")
+print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment (rotation theta model)")
 print(f"  T={T}  T_test={T_test}  q2={q2}  r2={r2}")
-print(f"  cycle={cycle}  theta_changed_list={theta_changed_list}  theta_false={theta_false}")
+print(f"  cycle={cycle}  theta_range=±{theta_range}  theta_true_max={theta_true_max}  false F = make_F_block(0.0)")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -137,34 +135,30 @@ all_F_train_false = []
 all_F_cv_false    = []
 all_F_test_false  = []
 
-# Carry state between datasets: last state of last trajectory and last group theta
-carry_x_train  = None;  carry_theta_train  = None
-carry_x_cv     = None;  carry_theta_cv     = None
-carry_x_test   = None;  carry_theta_test   = None
+import random as _random
+
+# Carry state between datasets (position/velocity only)
+carry_x_train = None
+carry_x_cv    = None
+carry_x_test  = None
 
 for k in range(cycle):
-    theta_changed = theta_changed_list[k]
-    print(f"  Dataset {k}: theta ~ theta_prev + Uniform(-{theta_changed/2:.3f}, +{theta_changed/2:.3f}) rad per group")
-    _tr0 = carry_theta_train[0] if isinstance(carry_theta_train, list) else 0.0
-    _cv0 = carry_theta_cv[0]    if isinstance(carry_theta_cv,    list) else 0.0
-    _te0 = carry_theta_test[0]  if isinstance(carry_theta_test,  list) else 0.0
-    print(f"            theta_base[0]: train={_tr0:.4f}  cv={_cv0:.4f}  test={_te0:.4f}")
+    # Each dataset gets its own random turning rate
+    theta_k = _random.uniform(-theta_range, theta_range)
+    print(f"  Dataset {k}: theta={theta_k:.4f} rad")
 
-    ti, tt, th_tr, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_changed, Q, R, x_init=carry_x_train, theta_base=carry_theta_train)
-    ci, ct, th_cv, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_changed, Q, R, x_init=carry_x_cv,    theta_base=carry_theta_cv)
-    xi, xt, th_te, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_changed, Q, R, x_init=carry_x_test,  theta_base=carry_theta_test)
+    ti, tt, _, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_true_max, Q, R, x_init=carry_x_train, theta_base=[theta_k]*args.N_E)
+    ci, ct, _, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_true_max, Q, R, x_init=carry_x_cv,    theta_base=[theta_k]*args.N_CV)
+    xi, xt, _, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_true_max, Q, R, x_init=carry_x_test,  theta_base=[theta_k]*args.N_T)
 
-    # Update carry: last state of EVERY sequence, last group's theta
-    carry_x_train  = tt[:, :, -1];  carry_theta_train  = th_tr   # [N_E,  m]
-    carry_x_cv     = ct[:, :, -1];  carry_theta_cv     = th_cv   # [N_CV, m]
-    carry_x_test   = xt[:, :, -1];  carry_theta_test   = th_te   # [N_T,  m]
+    carry_x_train = tt[:, :, -1]   # [N_E,  m]
+    carry_x_cv    = ct[:, :, -1]   # [N_CV, m]
+    carry_x_test  = xt[:, :, -1]   # [N_T,  m]
 
-    # False F is always theta=0 (straight-line assumption) for every dataset
-    F_tr_f = [make_F_block(0.0) for _ in range(len(th_tr))]
-    F_cv_f = [make_F_block(0.0) for _ in range(len(th_cv))]
-
-    # test always starts from theta=0 (matches MNet training starting point)
-    F_te_f = [make_F_block(0.0).to(device) for _ in range(args.N_T)]
+    # False F: theta=0 (straight-line constant-velocity assumption)
+    F_tr_f = [make_F_block(0.0) for _ in range(args.N_E)]
+    F_cv_f = [make_F_block(0.0) for _ in range(args.N_CV)]
+    F_te_f = [make_F_block(0.0) for _ in range(args.N_T)]
 
     all_train_inputs.append(ti);   all_train_targets.append(tt)
     all_cv_inputs.append(ci);      all_cv_targets.append(ct)
@@ -193,10 +187,12 @@ for k in range(cycle):
         print(f"  ← x_0 for ds{k+1}", end="")
     print()
 
-print("\nData sanity check — theta per sequence (train, first 5 sequences, all datasets):")
+print("\nData sanity check — theta per dataset (train):")
 for k in range(cycle):
-    thetas_k = [f"{all_F_train_true[k][s][2,2].item():.3f}" for s in range(min(5, args.N_E))]
-    print(f"  ds{k} F[2,2] (cos θ) seq0-4: {thetas_k}")
+    import math as _math
+    F_vv = all_F_train_true[k][0]
+    theta_k_check = _math.atan2(F_vv[3, 2].item(), F_vv[2, 2].item())
+    print(f"  ds{k} theta = {theta_k_check:.4f} rad")
 
 # Plot sequences 0-3 across all datasets — 4 panels each
 import matplotlib.patches as mpatches
@@ -280,7 +276,7 @@ for seq_idx in range(4):
 # H_prior: linearized h at x0 — used as fixed GRU feature in RTSNet (FC9)
 # h:       nonlinear TDOA function — called inside RTSNet for innovations + MNet statistics
 H_prior = h_jacobian(m1x_0.reshape(-1))   # [n, m]
-F_init  = make_F_block(0.0)
+F_init  = make_F_block(0.0)   # theta=0 starting point (false F)
 f_init  = make_f(F_init)
 
 sys_model_true = SystemModel(f=f_init, Q=Q, h=h, R=R,
@@ -316,15 +312,15 @@ RTSNet_Pipeline_true.setssModel(sys_model_true)
 RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
 RTSNet_Pipeline_true.setTrainingParams(args)
 
-# RTSNet_Pipeline_true.train_RTS_net_3_datasets(
-    # sys_model_true,
-    # all_cv_inputs,    all_cv_targets,
-    # all_train_inputs, all_train_targets,
-    # destination_path_RTS=destination_path_rtsnet_true,
-    # load_path_RTS=load_path_rtsnet_true,
-    # generate_f=True,
-    # datasets=cycle,
-# )
+RTSNet_Pipeline_true.train_RTS_net_3_datasets(
+    sys_model_true,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_true,
+    load_path_RTS=load_path_rtsnet_true,
+    generate_f=True,
+    datasets=cycle,
+)
 
 sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
@@ -348,15 +344,15 @@ RTSNet_Pipeline_false.setssModel(sys_model_false)
 RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
 RTSNet_Pipeline_false.setTrainingParams(args)
 
-# RTSNet_Pipeline_false.train_RTS_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_false,
-#     load_path_RTS=load_path_rtsnet_false,
-#     generate_f=True,
-#     datasets=cycle,
-# )
+RTSNet_Pipeline_false.train_RTS_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_false,
+    load_path_RTS=load_path_rtsnet_false,
+    generate_f=True,
+    datasets=cycle,
+)
 
 sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
@@ -489,7 +485,7 @@ print(f"  Saved: {cycle_dir}tdoa_rtsnet_y_position.png")
 ### Results summary                   ###
 ########################################
 print("\n" + "=" * 70)
-print(f"RESULTS SUMMARY  (cycle={cycle}, theta_changed_list={theta_changed_list})")
+print(f"RESULTS SUMMARY  (cycle={cycle}, a_range={a_range}, b_range={b_range})")
 print("=" * 70)
 print(f"  RTSNet TRUE-F  (avg)          : {MSE_test_dB_avg_true.item():.2f} dB")
 print(f"  RTSNet FALSE-F (avg)          : {MSE_test_dB_avg_false.item():.2f} dB")

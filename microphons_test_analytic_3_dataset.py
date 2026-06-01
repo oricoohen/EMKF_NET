@@ -21,10 +21,12 @@ from Simulations.TDOA_2D.parameters import (
     make_get_F_from_matrix,
     PX_MIN, PX_MAX, PY_MIN, PY_MAX,
     mic_positions,
+    make_F_diag, generate_dataset_diag_accel,
 )
 from Simulations.TDOA_2D.ekf_erts import run_ekf_erts, compute_cross_covariances
 from Simulations.Extended_sysmdl import SystemModel
 from emkf.main_emkf_func import E_EMKF_F_analitic_non_linear_h, EMKF_F_solo
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_old
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -41,17 +43,39 @@ print("Current Time =", strTime)
 ###################
 args = config.general_settings()
 args.N_T   = 100
-args.T     = 30
-args.T_test = 30
+args.T     = 50
+args.T_test = 50
 
 T_test = args.T_test
 
 q2 = 0.01
 r2 = 1
 
-cycle              = 5
-theta_per_dataset  = [0.2, 0.2, 0.2, 0.2, 0.2]   # exact theta (rad) for each dataset
-assert len(theta_per_dataset) == cycle
+cycle = 5
+
+USE_DIAG_MODEL = False   # True: diagonal alpha model (Type 2); False: rotation theta model (Type 1)
+
+# 1 = measure every step (original — true-F and false-F look similar).
+# 5 = measure every 5 steps; the filter predicts position for 5 steps with F alone,
+#     so wrong F accumulates position error between corrections.
+MEASURE_EVERY_K = 1
+
+if USE_DIAG_MODEL:
+    # a_per_dataset[k] IS F[2,2] (alpha_x) directly, b_per_dataset[k] IS F[3,3] (alpha_y) directly.
+    # vx_{t+1} = a * vx_t + noise,  vy_{t+1} = b * vy_t + noise
+    # False F uses make_F_diag(1.0, 1.0) (constant-velocity assumption).
+    a_per_dataset = [1.0, 0.98, 0.95,  1.0, 0.97]   # F[2,2] = alpha_x directly
+    b_per_dataset = [ 0.97, 1.0, 1, 1.0,  0.95]   # F[3,3] = alpha_y directly
+
+    assert len(a_per_dataset) == cycle and len(b_per_dataset) == cycle
+    ds_label = [
+        f'αx={a_per_dataset[k]:.2f} αy={b_per_dataset[k]:.2f}'
+        for k in range(cycle)
+    ]
+else:
+    theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
+    assert len(theta_per_dataset) == cycle
+    ds_label = [f'θ={theta_per_dataset[k]:.2f}' for k in range(cycle)]
 
 max_em_iter = 5
 
@@ -68,9 +92,12 @@ cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(cycle_dir, exist_ok=True)
 
 print("=" * 70)
-print(f"2D TDOA Analytic ERTS — {cycle}-cycle multi-dataset test")
+print(f"2D TDOA Analytic ERTS -- {cycle}-cycle multi-dataset test")
 print(f"  T_test={T_test}  q2={q2}  r2={r2}")
-print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
+if USE_DIAG_MODEL:
+    print(f"  USE_DIAG_MODEL=True  a={a_per_dataset}  b={b_per_dataset}  false F = constant velocity")
+else:
+    print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -87,16 +114,25 @@ all_F_test_false = []
 carry_x_test = None
 
 for k in range(cycle):
-    theta_k = theta_per_dataset[k]
-    print(f"  Dataset {k}: theta={theta_k:.4f} rad (fixed for all sequences)")
+    if USE_DIAG_MODEL:
+        alpha_x_k = a_per_dataset[k]
+        alpha_y_k = b_per_dataset[k]
+        print(f"  Dataset {k}: alpha_x={alpha_x_k:.4f}  alpha_y={alpha_y_k:.4f}")
+        xi, xt, F_te_t = generate_dataset_diag_accel(
+            args.N_T, T_test, alpha_x_k, alpha_y_k, Q, R,
+            x_init=carry_x_test,
+        )   # a_range=0 (default) → all seqs same F; F_te_t is list of N_T matrices
+        F_te_f = [make_F_diag(1.0, 1.0)] * args.N_T   # false F: constant velocity
+    else:
+        theta_k = theta_per_dataset[k]
+        print(f"  Dataset {k}: theta={theta_k:.4f} rad (fixed for all sequences)")
+        xi, xt, _, F_te_t = generate_dataset_random_theta(
+            args.N_T, T_test, 0, Q, R,
+            x_init=carry_x_test, theta_base=[theta_k] * args.N_T,
+        )
+        F_te_f = [make_F_block(0.0)] * args.N_T   # false F always theta=0
 
-    xi, xt, _, F_te_t = generate_dataset_random_theta(
-        args.N_T, T_test, 0, Q, R,
-        x_init=carry_x_test, theta_base=[theta_k] * args.N_T,
-    )
-    F_te_f = [make_F_block(0.0)] * args.N_T   # false F always theta=0
-
-    carry_x_test = xt[:, :, -1]   # [N_T, m] — per-sequence carry
+    carry_x_test = xt[:, :, -1]   # [N_T, m] -- per-sequence carry
 
     all_test_inputs.append(xi)
     all_test_targets.append(xt)
@@ -106,8 +142,57 @@ for k in range(cycle):
 print(f"  Test per dataset: {all_test_targets[0].size()}")
 print(f"  max_em_iter={max_em_iter}")
 
+print("\n-- True F vs False F per dataset ---------------------------------------")
+for k in range(cycle):
+    F_t = all_F_test_true[k][0]
+    F_f = all_F_test_false[k][0]
+    print(f"  Dataset {k} ({ds_label[k]}):")
+    print(f"    True F:\n{F_t.cpu().numpy().round(4)}")
+    print(f"    False F:\n{F_f.cpu().numpy().round(4)}")
+print("------------------------------------------------------------------------")
+
+# #########################################
+# ###  Cross-check: run_ekf_erts vs      ###
+# ###  S_Test_ext_old on seq-0, ds-0     ###
+# #########################################
+# print("\n=== CROSS-CHECK: run_ekf_erts vs S_Test_ext_old (seq 0, dataset 0) ===")
+# _y0   = all_test_inputs[0][0]
+# _xt0  = all_test_targets[0][0]
+# _F_true  = all_F_test_true[0][0]
+# _F_false = all_F_test_false[0][0]
+# _loss_cc = nn.MSELoss(reduction='mean')
+
+# # new run_ekf_erts
+# _xs_new_true,  *_ = run_ekf_erts(_y0, make_get_F_from_matrix(_F_true),  Q_in=Q, R_in=R)
+# _xs_new_false, *_ = run_ekf_erts(_y0, make_get_F_from_matrix(_F_false), Q_in=Q, R_in=R)
+# _mse_new_true  = 10 * math.log10(_loss_cc(_xs_new_true,  _xt0).item())
+# _mse_new_false = 10 * math.log10(_loss_cc(_xs_new_false, _xt0).item())
+
+# # old S_Test_ext_old  -- returns [MSE_arr, MSE_avg, MSE_dB, ERTS_out, P_smooth, V_test]
+# sys_model.update_f(_F_true)
+# _ret_ot = S_Test_ext_old(
+#     sys_model, test_input=[_y0], test_target=[_xt0],
+#     F_list=[_F_true], generate_f=False,
+# )
+# sys_model.update_f(_F_false)
+# _ret_of = S_Test_ext_old(
+#     sys_model, test_input=[_y0], test_target=[_xt0],
+#     F_list=[_F_false], generate_f=False,
+# )
+# _arr_ot, _out_ot = _ret_ot[0], _ret_ot[3]   # MSE_arr, ERTS_out
+# _arr_of, _out_of = _ret_of[0], _ret_of[3]
+# _mse_old_true  = 10 * math.log10(_arr_ot[0].item())
+# _mse_old_false = 10 * math.log10(_arr_of[0].item())
+
+# print(f"  TRUE-F  : new={_mse_new_true:.4f} dB   old={_mse_old_true:.4f} dB   diff={abs(_mse_new_true -_mse_old_true ):.2e}")
+# print(f"  FALSE-F : new={_mse_new_false:.4f} dB  old={_mse_old_false:.4f} dB   diff={abs(_mse_new_false-_mse_old_false):.2e}")
+# print(f"  Gap (true-false): new={_mse_new_true-_mse_new_false:.4f} dB   old={_mse_old_true-_mse_old_false:.4f} dB")
+# print(f"  x_smooth diff true-F  : {(_xs_new_true  - _out_ot[0]).norm().item():.2e}")
+# print(f"  x_smooth diff false-F : {(_xs_new_false - _out_of[0]).norm().item():.2e}")
+# print("=" * 70)
+
 #########################################
-###  Trajectory popup — sequences 0-2 ###
+###  Trajectory popup -- sequences 0-2 ###
 #########################################
 _colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
            'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
@@ -127,7 +212,7 @@ for seq_idx in range(10):
         t_ax     = torch.arange(t_offset, t_offset + T_test).float()
         col      = _colors[k % len(_colors)]
 
-        ax_traj.plot(states_k[0], states_k[1], color=col, label=f'ds{k} θ={theta_per_dataset[k]:.2f}')
+        ax_traj.plot(states_k[0], states_k[1], color=col, label=f'ds{k} {ds_label[k]}')
         ax_traj.scatter(states_k[0, 0],  states_k[1, 0],  color=col, marker='o', s=40, zorder=5)
         ax_traj.scatter(states_k[0, -1], states_k[1, -1], color=col, marker='x', s=60, zorder=5)
 
@@ -173,7 +258,7 @@ for seq_idx in range(10):
     ax_tdoa.legend(fontsize=7);   ax_tdoa.grid(True, alpha=0.4)
     ax_tdoa.set_xlabel('time step')
 
-    fig.suptitle(f'Sequence {seq_idx} — all datasets (test)  |  dashed = dataset boundary', fontsize=12)
+    fig.suptitle(f'Sequence {seq_idx} -- all datasets (test)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
     _plot_path = os.path.abspath(cycle_dir + f'seq{seq_idx}_data_sanity.png')
     plt.savefig(_plot_path, dpi=150)
@@ -190,14 +275,25 @@ for seq_idx in range(10):
 # into the initial condition of dataset k+1.
 
 print("\nRunning ERTS (true F and false F) across all datasets ...")
+print(f"  MEASURE_EVERY_K={MEASURE_EVERY_K}  (1=every step, 5=every 5th step, etc.)")
+
+# Build observation mask: True at steps that have a measurement.
+obs_mask = torch.zeros(T_test, dtype=torch.bool)
+obs_mask[::MEASURE_EVERY_K] = True
+print(f"  Measurements per sequence: {obs_mask.sum().item()} / {T_test}")
 
 N_T = args.N_T
 
-# MSE arrays: [datasets, N_T]
+# MSE arrays: [datasets, N_T]  — full state (4D)
 mse_true_arr  = torch.zeros(cycle, N_T)
 mse_false_arr = torch.zeros(cycle, N_T)
 mse_emkf_arr  = torch.zeros(cycle, N_T)
 mse_bigru_arr = torch.zeros(cycle, N_T)
+
+# Position-only MSE arrays: [datasets, N_T]  — dims 0,1 (p_x, p_y) only
+pos_true_arr  = torch.zeros(cycle, N_T)
+pos_false_arr = torch.zeros(cycle, N_T)
+pos_emkf_arr  = torch.zeros(cycle, N_T)
 
 # Store first-sequence outputs for plotting
 out_true_seq0  = []   # smoother output per dataset for sequence 0
@@ -222,8 +318,10 @@ for j in range(N_T):
         x_s_true, P_s_true, P_f_true, *_ = run_ekf_erts(
             y_seq, get_F_true, Q_in=Q, R_in=R,
             x_init=x0_true, P_init=P0_true,
+            obs_mask=obs_mask,
         )
         mse_true_arr[data, j] = loss_fn(x_s_true, x_true).item()
+        pos_true_arr[data, j] = loss_fn(x_s_true[:2, :], x_true[:2, :]).item()
         x0_true = x_s_true[:, -1].detach()
         P0_true = P_f_true[:, :, -1].detach()
 
@@ -231,8 +329,10 @@ for j in range(N_T):
         x_s_false, P_s_false, P_f_false, *_ = run_ekf_erts(
             y_seq, get_F_false, Q_in=Q, R_in=R,
             x_init=x0_false, P_init=P0_false,
+            obs_mask=obs_mask,
         )
         mse_false_arr[data, j] = loss_fn(x_s_false, x_true).item()
+        pos_false_arr[data, j] = loss_fn(x_s_false[:2, :], x_true[:2, :]).item()
         x0_false = x_s_false[:, -1].detach()
         P0_false = P_f_false[:, :, -1].detach()
 
@@ -240,7 +340,7 @@ for j in range(N_T):
             out_true_seq0.append(x_s_true)
             out_false_seq0.append(x_s_false)
 
-print("\n── ERTS results ──────────────────────────────────────────────────────")
+print("\n-- ERTS results ------------------------------------------------------")
 for k in range(cycle):
     true_db  = 10 * math.log10(mse_true_arr[k].mean().item())
     false_db = 10 * math.log10(mse_false_arr[k].mean().item())
@@ -248,9 +348,9 @@ for k in range(cycle):
 _true_avg  = 10 * math.log10(mse_true_arr.mean().item())
 _false_avg = 10 * math.log10(mse_false_arr.mean().item())
 print(f"  Overall    ERTS true-F: {_true_avg:.2f} dB   ERTS false-F: {_false_avg:.2f} dB")
-print("──────────────────────────────────────────────────────────────────────\n")
+print("----------------------------------------------------------------------\n")
 
-## ── Cross-check (confirmed equivalent, F diff ~1e-6) — commented out ──────────
+## -- Cross-check (confirmed equivalent, F diff ~1e-6) -- commented out ----------
 ## def run_emkf_ekf_erts(y_seq, F_init, x_0, P_0, max_it):
 ##     F_est = F_init.clone()
 ##     F_all = [F_est.clone()]
@@ -288,7 +388,7 @@ print("────────────────────────�
 ## print(f"  MSE method A : {10*math.log10(loss_fn(_xs_A, _xt0).item()):.2f} dB")
 ## print(f"  MSE method B : {10*math.log10(loss_fn(_xs_B, _xt0).item()):.2f} dB")
 ## print("=" * 70)
-## ─────────────────────────────────────────────────────────────────────────────
+## -----------------------------------------------------------------------------
 
 
 #########################################
@@ -298,7 +398,10 @@ print("\nRunning analytic EMKF across all datasets ...")
 
 emkf_x_carries = [m1x_0.clone() for _ in range(N_T)]
 emkf_P_carries = [m2x_0.clone() for _ in range(N_T)]
-emkf_F_carries = [make_F_block(0.0) for _ in range(N_T)]  # init with theta=0
+if USE_DIAG_MODEL:
+    emkf_F_carries = [make_F_diag(1.0, 1.0) for _ in range(N_T)]   # init: constant velocity
+else:
+    emkf_F_carries = [make_F_block(0.0) for _ in range(N_T)]        # init: theta=0
 
 for data in range(cycle):
     print(f"\n  [EMKF] Dataset {data} ...")
@@ -315,6 +418,7 @@ for data in range(cycle):
         init_x_list=emkf_x_carries,
         init_P_list=emkf_P_carries,
         vel_only=True,
+        obs_mask=obs_mask,   # None → full measurements (original); obs_mask → fair sparse comparison
     )
 
     for j in range(N_T):
@@ -328,8 +432,14 @@ for data in range(cycle):
             x_init=emkf_x_carries[j], P_init=emkf_P_carries[j],
         )
         mse_emkf_arr[data, j] = loss_fn(x_s_emkf, x_true).item()
+        pos_emkf_arr[data, j] = loss_fn(x_s_emkf[:2, :], x_true[:2, :]).item()
         if j == 0:
             out_emkf_seq0.append(x_s_emkf)
+
+    F_est_seq0 = F_mats_batch[0][-1]
+    F_true_seq0 = all_F_test_true[data][0]
+    print(f"  [seq 0] estimated F:\n{F_est_seq0.cpu().numpy().round(4)}")
+    print(f"  [seq 0] true F:\n{F_true_seq0.cpu().numpy().round(4)}")
 
     for j in range(N_T):
         emkf_x_carries[j] = last_x_emkf[j]
@@ -339,7 +449,7 @@ for data in range(cycle):
 #########################################
 ###  Run BiGRU baseline               ###
 #########################################
-# Load the BiGRU trained by microphons_training_3_dataset.py — no retraining here.
+# Load the BiGRU trained by microphons_training_3_dataset.py -- no retraining here.
 # bigru_train_dir = f"RTSNet/tdoa_2d/1/{cycle}cycle/"
 # load_path_bigru = bigru_train_dir + "BiGRU.pt"
 # print(f"\nLoading BiGRU from {load_path_bigru} ...")
@@ -361,7 +471,10 @@ for data in range(cycle):
 ###  Results summary                  ###
 #########################################
 print("\n" + "=" * 70)
-print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={theta_per_dataset})")
+if USE_DIAG_MODEL:
+    print(f"RESULTS SUMMARY  (cycle={cycle}, diag model, a={a_per_dataset}, b={b_per_dataset})")
+else:
+    print(f"RESULTS SUMMARY  (cycle={cycle}, theta_per_dataset={theta_per_dataset})")
 print("=" * 70)
 
 mse_true_db_per_dataset  = [10 * math.log10(mse_true_arr[k].mean().item())  for k in range(cycle)]
@@ -378,20 +491,39 @@ for k in range(cycle):
 mse_true_avg_db  = 10 * math.log10(mse_true_arr.mean().item())
 mse_false_avg_db = 10 * math.log10(mse_false_arr.mean().item())
 mse_emkf_avg_db  = 10 * math.log10(mse_emkf_arr.mean().item())
-# mse_bigru_avg_db = 10 * math.log10(mse_bigru_arr.mean().item())
-print(f"\n  ERTS TRUE-F  (overall avg) : {mse_true_avg_db:.2f} dB")
+
+pos_true_avg_db  = 10 * math.log10(pos_true_arr.mean().item())
+pos_false_avg_db = 10 * math.log10(pos_false_arr.mean().item())
+pos_emkf_avg_db  = 10 * math.log10(pos_emkf_arr.mean().item())
+
+print(f"\n  --- Full state (p_x, p_y, v_x, v_y) ---")
+print(f"  ERTS TRUE-F  (overall avg) : {mse_true_avg_db:.2f} dB")
 print(f"  ERTS FALSE-F (overall avg) : {mse_false_avg_db:.2f} dB")
 print(f"  EMKF         (overall avg) : {mse_emkf_avg_db:.2f} dB")
-# print(f"  BiGRU        (overall avg) : {mse_bigru_avg_db:.2f} dB")
+print(f"\n  --- Position only (p_x, p_y) ---")
+print(f"  ERTS TRUE-F  (overall avg) : {pos_true_avg_db:.2f} dB")
+print(f"  ERTS FALSE-F (overall avg) : {pos_false_avg_db:.2f} dB")
+print(f"  EMKF         (overall avg) : {pos_emkf_avg_db:.2f} dB")
+print("=" * 70)
+
+pos_true_db_per_dataset  = [10 * math.log10(pos_true_arr[k].mean().item())  for k in range(cycle)]
+pos_false_db_per_dataset = [10 * math.log10(pos_false_arr[k].mean().item()) for k in range(cycle)]
+pos_emkf_db_per_dataset  = [10 * math.log10(pos_emkf_arr[k].mean().item())  for k in range(cycle)]
+print("\n  Position-only per dataset:")
+for k in range(cycle):
+    print(f"  Dataset {k}  ERTS true-F : {pos_true_db_per_dataset[k]:.2f} dB"
+          f"   ERTS false-F: {pos_false_db_per_dataset[k]:.2f} dB"
+          f"   EMKF: {pos_emkf_db_per_dataset[k]:.2f} dB")
 print("=" * 70)
 
 #########################################
-###  Plot — sequence 0, all datasets  ###
+###  Plot -- sequence 0, all datasets  ###
 #########################################
 print("\nPlotting sequence 0 across all datasets ...")
 t_axis = torch.arange(T_test)
 
-fig, axes = plt.subplots(cycle, 1, figsize=(12, 3 * cycle), sharex=True)
+fig, axes = plt.subplots(cycle, 1, figsize=(12, 3 * cycle), sharex=True, squeeze=False)
+axes = axes.flatten()
 for k in range(cycle):
     ax     = axes[k]
     states = all_test_targets[k][0]
@@ -403,15 +535,82 @@ for k in range(cycle):
     ax.set_ylabel(f"Dataset {k}\ny position")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, linestyle="--", alpha=0.5)
-    ax.set_title(f"Dataset {k} — true: {mse_true_db_per_dataset[k]:.2f} dB  "
+    ax.set_title(f"Dataset {k} -- true: {mse_true_db_per_dataset[k]:.2f} dB  "
                  f"false: {mse_false_db_per_dataset[k]:.2f} dB  "
                  f"EMKF: {mse_emkf_db_per_dataset[k]:.2f} dB")
                  #  f"BiGRU: {mse_bigru_db_per_dataset[k]:.2f} dB")
 
 axes[-1].set_xlabel("time")
-fig.suptitle(f"TDOA ERTS analytic — {cycle}-dataset sequential scenario", fontsize=13)
+fig.suptitle(f"TDOA ERTS analytic -- {cycle}-dataset sequential scenario", fontsize=13)
 plt.tight_layout()
 
 plot_path = cycle_dir + "analytic_erts_y_position.png"
 plt.savefig(plot_path, dpi=250)
 print(f"  Saved: {plot_path}")
+plt.close()
+
+#########################################
+###  2-D spatial popup -- seq 0        ###
+###  One subplot per dataset          ###
+#########################################
+ncols = 3
+nrows = math.ceil(cycle / ncols)
+fig2, axes2 = plt.subplots(nrows, ncols, figsize=(6 * ncols, 5 * nrows))
+axes2_flat = axes2.flatten() if hasattr(axes2, 'flatten') else [axes2]
+
+for k in range(cycle):
+    ax2 = axes2_flat[k]
+
+    px_true_k       = all_test_targets[k][0][0].cpu().numpy()
+    py_true_k       = all_test_targets[k][0][1].cpu().numpy()
+    px_erts_true_k  = out_true_seq0[k].cpu()[0].numpy()
+    py_erts_true_k  = out_true_seq0[k].cpu()[1].numpy()
+    px_erts_false_k = out_false_seq0[k].cpu()[0].numpy()
+    py_erts_false_k = out_false_seq0[k].cpu()[1].numpy()
+    px_emkf_k       = out_emkf_seq0[k].cpu()[0].numpy()
+    py_emkf_k       = out_emkf_seq0[k].cpu()[1].numpy()
+
+    ax2.plot(px_true_k,       py_true_k,       'k-',  linewidth=1.0, label='True',            zorder=5)
+    ax2.plot(px_erts_true_k,  py_erts_true_k,  'b--', linewidth=1.8, label=f'ERTS true-F  ({mse_true_db_per_dataset[k]:.2f} dB)',  zorder=4)
+    ax2.plot(px_erts_false_k, py_erts_false_k, 'r:',  linewidth=2.0, label=f'ERTS false-F ({mse_false_db_per_dataset[k]:.2f} dB)', zorder=3)
+    ax2.plot(px_emkf_k,       py_emkf_k,       'g-.', linewidth=1.8, label=f'EMKF         ({mse_emkf_db_per_dataset[k]:.2f} dB)',  zorder=3)
+
+    # start / end markers on true trajectory
+    ax2.scatter(px_true_k[0],  py_true_k[0],  color='black', s=60, marker='o', zorder=6)
+    ax2.scatter(px_true_k[-1], py_true_k[-1], color='black', s=60, marker='x', zorder=6)
+
+    # microphone positions
+    for i, mic in enumerate(mic_positions):
+        ax2.scatter(mic[0].cpu().item(), mic[1].cpu().item(),
+                    marker='^', color='dimgray', s=60, zorder=8)
+        ax2.annotate(f'm{i}', (mic[0].cpu().item(), mic[1].cpu().item()),
+                     textcoords='offset points', xytext=(3, 3), fontsize=7)
+
+    # valid region
+    rect_k = mpatches.Rectangle(
+        (PX_MIN, PY_MIN), PX_MAX - PX_MIN, PY_MAX - PY_MIN,
+        linewidth=1.2, edgecolor='red', facecolor='lightyellow',
+        linestyle='--', zorder=1, alpha=0.25,
+    )
+    ax2.add_patch(rect_k)
+
+    ax2.set_xlabel('p_x (m)', fontsize=9)
+    ax2.set_ylabel('p_y (m)', fontsize=9)
+    ax2.set_title(f'Dataset {k}  {ds_label[k]}', fontsize=10)
+    ax2.legend(fontsize=8, loc='best')
+    ax2.grid(True, alpha=0.4)
+
+# hide unused subplots
+for k in range(cycle, len(axes2_flat)):
+    axes2_flat[k].set_visible(False)
+
+fig2.suptitle(f'2D positions -- sequence 0, per dataset  |  q2={q2}  r2={r2}  T={T_test}',
+              fontsize=13)
+plt.tight_layout()
+
+xy_plot_path = os.path.abspath(cycle_dir + "xy_positions_seq0.png")
+plt.savefig(xy_plot_path, dpi=200, metadata={})
+plt.close()
+print(f"  Saved: {xy_plot_path}")
+if os.name == 'nt':
+    os.startfile(xy_plot_path)

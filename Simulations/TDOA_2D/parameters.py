@@ -23,25 +23,26 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # ── Dimensions ────────────────────────────────────────────────────────────────
 m = 4           # state: [p_x, p_y, v_x, v_y]
-M_mics  = 5           # number of microphones
-n  = M_mics - 1  # TDOA measurements per timestep (= 4)
+M_mics  = 3           # number of microphones
+n  = M_mics - 1  # TDOA measurements per timestep (= 2)
 
 # ── Physical constants ────────────────────────────────────────────────────────
-dt      = 0.07   # time step
+dt      = 0.1   # time step
 c_sound = 1.0   # speed of sound (normalized)
 
-# ── Microphone positions on the x-axis (y = 0) ───────────────────────────────
+# ── Microphone positions ──────────────────────────────────────────────────────
 # mic_positions[0] is the reference microphone (used as TDOA baseline).
 mic_positions = torch.tensor(
-    [[-10.0, 0.0], [-5.0, 0.0], [0.0, 0.0], [5.0, 0.0], [10.0, 0.0]],
+    [[0.0, 0.0], [10.0, 0.0], [-10.0, 0.0]],
     dtype=torch.float32, device=device,
 )  # [M_mics, 2]
 
 # ── Trajectory validity bounds ────────────────────────────────────────────────
-PX_MIN, PX_MAX =  -6.0,  6.0   # position x
-PY_MIN, PY_MAX =   1.0,  8.0   # position y
-V_MAX          =   2.5         # max speed on either axis
+PX_MIN, PX_MAX =  -9.0,  9.0   # position x
+PY_MIN, PY_MAX =   1.0,  15.0   # position y
+V_MAX          =   3.5         # max speed on either axis
 MAX_RETRIES    = 100            # per-sequence retry limit
+USE_REFLECTION = True           # True: bounce at walls instead of regenerating; False: old retry behavior
 
 # ── Noise covariances ─────────────────────────────────────────────────────────
 Q_structure = torch.eye(m, dtype=torch.float32, device=device)   # [m, m] identity
@@ -66,7 +67,7 @@ m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 # default_thetas_rad = [0.0, 0.035, 0.0, -0.035]
 
 # ── F-block constructor ───────────────────────────────────────────────────────
-VEL_DECAY = 0.99  # velocity damping per step — prevents unbounded drift over datasets
+VEL_DECAY = 1  # velocity damping per step — prevents unbounded drift over datasets
 
 def make_F_block(theta_rad: float) -> torch.Tensor:
     """
@@ -149,6 +150,22 @@ def get_jacobian(x: torch.Tensor, g, out_dim: int, in_dim: int) -> torch.Tensor:
     return J.view(out_dim, in_dim)
 
 
+# ── Boundary reflection (used when USE_REFLECTION=True) ──────────────────────
+def _reflect_state(x: torch.Tensor) -> torch.Tensor:
+    """Reflect position and velocity at spatial bounds in-place. Clamps velocity magnitude."""
+    if x[0] < PX_MIN:
+        x[0] = 2 * PX_MIN - x[0];  x[2] = x[2].abs()
+    elif x[0] > PX_MAX:
+        x[0] = 2 * PX_MAX - x[0];  x[2] = -x[2].abs()
+    if x[1] < PY_MIN:
+        x[1] = 2 * PY_MIN - x[1];  x[3] = x[3].abs()
+    elif x[1] > PY_MAX:
+        x[1] = 2 * PY_MAX - x[1];  x[3] = -x[3].abs()
+    x[2].clamp_(-V_MAX, V_MAX)
+    x[3].clamp_(-V_MAX, V_MAX)
+    return x
+
+
 # ── Trajectory validity check ────────────────────────────────────────────────
 def _traj_valid(states: torch.Tensor) -> bool:
     """
@@ -204,6 +221,8 @@ def generate_single_traj(
             k   = min(t // block_size, n_blocks - 1)
             F_k = make_F_block(thetas_rad[k])
             x   = F_k @ x + L_q @ torch.randn(m, device=device)
+            if USE_REFLECTION:
+                _reflect_state(x)
             y   = h(x).reshape(-1) + L_r @ torch.randn(n, device=device)
             states[:, t] = x
             obs[:, t]    = y
@@ -461,3 +480,129 @@ def generate_false_F_list(theta_true_list: list, theta_false_max: float) -> list
         delta = (_random.random() - 0.5) * theta_false_max
         F_false_list.append(make_F_block(theta_true + delta))
     return F_false_list
+
+
+# ── Diagonal (independent-axis) acceleration model ────────────────────────────
+# vx_{t+1} = alpha_x * vx_t + noise
+# vy_{t+1} = alpha_y * vy_t + noise
+# alpha > 1: accelerating, alpha < 1: decelerating, alpha = 1: constant velocity.
+# No coupling between axes — no circular motion.
+
+def make_F_diag(alpha_x: float, alpha_y: float) -> torch.Tensor:
+    """
+    4x4 transition matrix with independent per-axis velocity scaling.
+    False F uses make_F_diag(1.0, 1.0) (constant velocity).
+    """
+    return torch.tensor(
+        [[1.0, 0.0,     dt, 0.0    ],
+         [0.0, 1.0,    0.0,     dt ],
+         [0.0, 0.0, alpha_x, 0.0   ],
+         [0.0, 0.0,    0.0, alpha_y]],
+        dtype=torch.float32, device=device,
+    )
+
+
+def generate_single_traj_diag(
+    T: int,
+    alpha_x: float,
+    alpha_y: float,
+    Q_gen: torch.Tensor = None,
+    R_gen: torch.Tensor = None,
+    x_init: torch.Tensor = None,
+) -> tuple:
+    """
+    Single trajectory of length T using a diagonal F(alpha_x, alpha_y).
+    Retries up to MAX_RETRIES times if bounds are violated.
+
+    Returns: states [m, T], obs [n, T], n_retries int
+    """
+    if Q_gen is None: Q_gen = Q
+    if R_gen is None: R_gen = R
+
+    F_use = make_F_diag(alpha_x, alpha_y)
+    L_q   = torch.linalg.cholesky(Q_gen)
+    L_r   = torch.linalg.cholesky(R_gen)
+    x0    = x_init.reshape(-1).clone() if x_init is not None else m1x_0.reshape(-1).clone()
+
+    for attempt in range(MAX_RETRIES + 1):
+        states = torch.zeros(m, T, device=device)
+        obs    = torch.zeros(n, T, device=device)
+        x      = x0.clone()
+        for t in range(T):
+            x = F_use @ x + L_q @ torch.randn(m, device=device)
+            if USE_REFLECTION:
+                _reflect_state(x)
+            y = h(x).reshape(-1) + L_r @ torch.randn(n, device=device)
+            states[:, t] = x
+            obs[:, t]    = y
+        if _traj_valid(states):
+            return states, obs, attempt, F_use
+
+    raise RuntimeError(
+        f"generate_single_traj_diag: could not produce a valid trajectory in "
+        f"{MAX_RETRIES} attempts with alpha_x={alpha_x:.4f}, alpha_y={alpha_y:.4f}.\n"
+        f"Bounds: px=[{PX_MIN},{PX_MAX}], py=[{PY_MIN},{PY_MAX}], |v|<={V_MAX}.\n"
+        f"Suggestion: bring alpha closer to 1.0, reduce Q noise, or loosen bounds."
+    )
+
+
+def generate_dataset_diag_accel(
+    N: int,
+    T: int,
+    alpha_x: float,
+    alpha_y: float,
+    Q_gen: torch.Tensor = None,
+    R_gen: torch.Tensor = None,
+    x_init=None,
+    a_range: float = 0.0,
+    b_range: float = 0.0,
+) -> tuple:
+    """
+    Generate N trajectories using diagonal F(alpha_x_i, alpha_y_i) per sequence.
+
+    x_init: None          → all sequences start from m1x_0
+            [m] tensor    → all sequences share this initial state
+            [N, m] tensor → each sequence i starts from x_init[i]
+
+    a_range, b_range: per-sequence random offset around (alpha_x, alpha_y).
+        alpha_x_i = alpha_x + Uniform(-a_range, a_range)
+        If 0 (default, test mode): all sequences share exactly alpha_x, alpha_y.
+
+    Returns: inputs [N, n, T], targets [N, m, T], F_list (list of N F matrices)
+    """
+    import random as _rng
+    if Q_gen is None: Q_gen = Q
+    if R_gen is None: R_gen = R
+
+    per_seq = (
+        x_init is not None
+        and isinstance(x_init, torch.Tensor)
+        and x_init.dim() == 2
+    )
+
+    inputs  = torch.zeros(N, n, T, device=device)
+    targets = torch.zeros(N, m, T, device=device)
+    F_list  = []
+    n_rejected = 0
+
+    for i in range(N):
+        ax_i = alpha_x + (_rng.uniform(-a_range, a_range) if a_range > 0 else 0.0)
+        ay_i = alpha_y + (_rng.uniform(-b_range, b_range) if b_range > 0 else 0.0)
+        x0 = x_init[i] if per_seq else x_init
+        states, obs, retries, F_i = generate_single_traj_diag(T, ax_i, ay_i, Q_gen, R_gen, x0)
+        if retries > 0:
+            n_rejected += 1
+        inputs[i]  = obs
+        targets[i] = states
+        F_list.append(F_i)
+
+    rejection_rate = n_rejected / N
+    if rejection_rate > 0.10:
+        raise RuntimeError(
+            f"generate_dataset_diag_accel: {n_rejected}/{N} sequences "
+            f"({100*rejection_rate:.1f}%) needed at least one retry — exceeds 10%.\n"
+            f"alpha_x={alpha_x:.4f}, alpha_y={alpha_y:.4f}.\n"
+            f"Suggestion: bring alpha closer to 1.0 or loosen bounds."
+        )
+
+    return inputs, targets, F_list

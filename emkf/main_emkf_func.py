@@ -219,7 +219,7 @@ def EMKF_F_analitic(sys_model,F_0_matrices, H, Q, R, Y, x_0, P_0, X, max_it=3, g
 
 
 
-def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None, vel_only=False):
+def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0, X, max_it=3, generate_f=True,init_x_list=None, init_P_list=None, vel_only=False, obs_mask=None):
     """
      EMKF_F:  Run EMKF_F_solo across multiple sequences in tensor form.
      Notation:
@@ -286,14 +286,36 @@ def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0,
                 x0_j = None
                 P0_j = None
                 sys_model.InitSequence(x_0, P_0)
-            [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test_ext(sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
-                F_list=[F_est.clone()],generate_f=False, init_x_list=x0_j,
-                init_P_list=P0_j)
+
+            if obs_mask is None:
+                # Original path — full measurements every step (no mask)
+                [_mse_arr, _mse_avg, _mse_db, X_smooth, P_smooth_t, V_t] = S_Test_ext(
+                    sys_model, Y_t.unsqueeze(0), X_t.unsqueeze(0),
+                    F_list=[F_est.clone()], generate_f=False,
+                    init_x_list=x0_j, init_P_list=P0_j)
+                x_s_j    = X_smooth.squeeze(0)    # [m, T]
+                P_s_j    = P_smooth_t.squeeze(0)  # [m, m, T]
+                V_j      = V_t.squeeze(0)         # [m, m, T]
+            else:
+                # Fair path — same sparse measurements as ERTS baselines
+                from Simulations.TDOA_2D.ekf_erts import run_ekf_erts as _run_erts
+                from Simulations.TDOA_2D.ekf_erts import compute_cross_covariances as _cc
+                import torch.nn as _nn
+                def _gF(_F):
+                    def _f(_t): return _F
+                    return _f
+                x_s_j, P_s_j, P_f_j, sgains_j, H_last_j, K_last_j = _run_erts(
+                    Y_t, _gF(F_est), Q_in=Q, R_in=R,
+                    x_init=x_0, P_init=P_0, obs_mask=obs_mask,
+                )
+                V_j      = _cc(F_est, H_last_j, K_last_j, P_f_j, sgains_j)
+                _mse_avg = _nn.MSELoss(reduction='mean')(x_s_j, X_t).item()
+
             # Compute *our* MSE for this sequence & iteration (linear, not dB)
             sum_lin_per_iter[q] += float(_mse_avg)
             #############M STEP rts###############################
-            F_est = EMKF_F_solo(F_est, h, Q, R, Y_t, x_0, P_0, X_smooth.squeeze(0), P_smooth_t.squeeze(0), V_t.squeeze(0),
-                                m,T, vel_only=vel_only)
+            F_est = EMKF_F_solo(F_est, h, Q, R, Y_t, x_0, P_0, x_s_j, P_s_j, V_j,
+                                m, T, vel_only=vel_only)
             #alpha = 0.6/(q/5+1)  # 0 < α ≤ 1  (smaller = safer)
             alpha = 0
             F_est = alpha * F_all_j[q-1] + (1 - alpha) * F_est
@@ -309,8 +331,8 @@ def E_EMKF_F_analitic_non_linear_h(sys_model,F_0_matrices, h, Q, R, Y, x_0, P_0,
 
         F_matrices.append(F_all_j)
         # after final iteration, keep last smoothed x_T, P_T (for next dataset)
-        x_T = X_smooth[0, :, -1].unsqueeze(-1).clone()  # [m,1]
-        P_T = P_smooth_t[0, :, :, -1].clone()  # [m,m]
+        x_T = x_s_j[:, -1].unsqueeze(-1).clone()  # [m,1]
+        P_T = P_s_j[:, :, -1].clone()             # [m,m]
         last_x_list.append(x_T)
         last_P_list.append(P_T)
     # -------- After all sequences: report mean MSE per iteration --------
