@@ -1209,9 +1209,11 @@ class Pipeline_mic:
                     ], dim=0).reshape(1, -1)
 
                     # ── M-step (no grad) ─────────────────────────────────────
-                    deltaF     = model_mstep(z_in)
-                    deltaF_mat = deltaF.squeeze(0)
-                    F_current  = F_current + deltaF_mat
+                    deltaF    = model_mstep(z_in)
+                    deltaF_vv = deltaF.squeeze(0)[2:4, 2:4]   # velocity block only
+                    F_next    = F_current.clone()
+                    F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
+                    F_current = F_next
 
                     # ── E-step with updated F ────────────────────────────────
                     self.model.update_F(F_current)
@@ -1259,7 +1261,8 @@ class Pipeline_mic:
 
     def test_F_mstep_net_3_datasets(self, SysModel, all_test_inputs, all_test_targets,
                                      destination_path_RTS, destination_path_M,
-                                     num_em_iters=1, generate_f=True, datasets=3):
+                                     num_em_iters=1, generate_f=True, datasets=3,
+                                     propagate_F=True):
         """
         Test MNet across `datasets` sequential datasets.
         For each test sequence j, datasets are processed in order 0→datasets-1.
@@ -1391,7 +1394,8 @@ class Pipeline_mic:
 
     def train_F_mstep_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
                         destination_path_M, load_path_RTS, load_mnet, num_em_iters=3, F_init=None,
-                        alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, datasets=3):
+                        alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, datasets=3,
+                        propagate_F=True):
         """
         M-step training for F (state transition matrix) across 3 datasets.
         - h is NONLINEAR and stays fixed
@@ -1550,7 +1554,12 @@ class Pipeline_mic:
 
                         sample_total_loss += weight * loss_em
 
-                    F_base = F_current.detach()
+                    # propagate_F=True:  carry estimated F into next dataset
+                    # propagate_F=False: reset to F_init (pass false F as F_init)
+                    if propagate_F:
+                        F_base = F_current.detach()
+                    else:
+                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach()
                     x_0 = x_curr[:, -1].detach()
 
                 sample_total_loss = sample_total_loss / float(datasets)
@@ -1722,7 +1731,7 @@ class Pipeline_mic:
     def train_F_mstep_net_3_datasets_joint(self, SysModel, cv_input, cv_target, train_input, train_target,
                                     destination_path_M, destination_path_RTS, load_path_RTS, load_mnet, num_em_iters=3, F_init=None,
                                     alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, datasets=3,
-                                    x_0_train_list=None, x_0_cv_list=None):
+                                    x_0_train_list=None, x_0_cv_list=None, propagate_F=True):
         """
         Joint training for F M-step + RTSNet across 3 datasets.
         - h is NONLINEAR and stays fixed
@@ -1888,7 +1897,12 @@ class Pipeline_mic:
 
                         sample_total_loss += weight * loss_em
 
-                    F_base = F_current.detach()
+                    # propagate_F=True:  carry estimated F into next dataset
+                    # propagate_F=False: reset to F_init (pass false F as F_init)
+                    if propagate_F:
+                        F_base = F_current.detach()
+                    else:
+                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach()
                     x_0 = x_curr[:, -1].detach()
 
                 sample_total_loss = sample_total_loss / float(datasets)

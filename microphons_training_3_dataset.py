@@ -60,16 +60,14 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 ### cycle: number of datasets
 cycle = 5
-# Per-dataset theta for rotation model:
-#   dataset theta_k ~ Uniform(-theta_range, theta_range)  (random left/right turn)
-#   within-dataset per-sequence variation: theta_true_max (small, for generalization)
-theta_range    = 0.12   # dataset-level range — covers test range ±0.10
-theta_true_max = 0.02   # within-dataset per-sequence variation
+# Each sequence draws theta independently from Uniform(-theta_max, +theta_max).
+# No dataset-level base theta — every sequence is fully independent.
+theta_max = 0.12   # drawn range = Uniform(-0.12, +0.12), covers test ±0.10
 
 ### EM iterations
 num_em_iters = 2
@@ -80,25 +78,25 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir  = "RTSNet/tdoa_2d/1/"
+save_dir  = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Load paths: pre-trained networks from the 1-dataset experiment
 
-load_path_rtsnet_true  = save_dir + "RTSNet_true.pt"
-load_path_rtsnet_false = save_dir + "RTSNet_false.pt"
-load_path_M_F = save_dir + "M_step_F_net.pt"
-load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint_arge_f_loss.pt"
-load_path_M_F_joint = save_dir + "M_step_F_net_joint_large_f_loss.pt"
+load_path_rtsnet_true  = save_dir + "RTSNet_true0.01.pt"
+load_path_rtsnet_false = save_dir + "RTSNet_false0.01.pt"
+load_path_M_F = save_dir + "M_step_F_net0.01.pt"
+load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.01.pt"
+load_path_M_F_joint = save_dir + "M_step_F_net_joint0.01.pt"
 
 # Cycle-dataset experiment outputs
-destination_path_rtsnet_true   = cycle_dir + "RTSNet_true.pt"
-destination_path_rtsnet_false  = cycle_dir + "RTSNet_false.pt"
-destination_path_M_F           = cycle_dir + "M_step_F_net.pt"
-destination_path_rtsnet_jointF = cycle_dir + "RTSNet_falseF_joint.pt"
-destination_path_M_F_joint     = cycle_dir + "M_step_F_net_joint.pt"
+destination_path_rtsnet_true   = cycle_dir + "RTSNet_true0.01.pt"
+destination_path_rtsnet_false  = cycle_dir + "RTSNet_false0.01.pt"
+destination_path_M_F           = cycle_dir + "M_step_F_net0.01.pt"
+destination_path_rtsnet_jointF = cycle_dir + "RTSNet_falseF_joint0.01.pt"
+destination_path_M_F_joint     = cycle_dir + "M_step_F_net_joint0.01.pt"
 destination_path_bigru         = cycle_dir + "BiGRU.pt"
 # destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
 # destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
@@ -108,7 +106,7 @@ destination_path_bigru         = cycle_dir + "BiGRU.pt"
 print("=" * 70)
 print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment (rotation theta model)")
 print(f"  T={T}  T_test={T_test}  q2={q2}  r2={r2}")
-print(f"  cycle={cycle}  theta_range=±{theta_range}  theta_true_max={theta_true_max}  false F = make_F_block(0.0)")
+print(f"  cycle={cycle}  theta_max=±{theta_max}  (each seq independent)  false F = make_F_block(0.0)")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -143,13 +141,12 @@ carry_x_cv    = None
 carry_x_test  = None
 
 for k in range(cycle):
-    # Each dataset gets its own random turning rate
-    theta_k = _random.uniform(-theta_range, theta_range)
-    print(f"  Dataset {k}: theta={theta_k:.4f} rad")
+    # Each sequence draws its own independent theta from Uniform(-theta_max, +theta_max)
+    print(f"  Dataset {k}: theta per sequence ~ Uniform(±{theta_max})")
 
-    ti, tt, _, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      theta_true_max, Q, R, x_init=carry_x_train, theta_base=[theta_k]*args.N_E)
-    ci, ct, _, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      theta_true_max, Q, R, x_init=carry_x_cv,    theta_base=[theta_k]*args.N_CV)
-    xi, xt, _, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, theta_true_max, Q, R, x_init=carry_x_test,  theta_base=[theta_k]*args.N_T)
+    ti, tt, _, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      2*theta_max, Q, R, x_init=carry_x_train)
+    ci, ct, _, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      2*theta_max, Q, R, x_init=carry_x_cv)
+    xi, xt, _, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, 2*theta_max, Q, R, x_init=carry_x_test)
 
     carry_x_train = tt[:, :, -1]   # [N_E,  m]
     carry_x_cv    = ct[:, :, -1]   # [N_CV, m]
