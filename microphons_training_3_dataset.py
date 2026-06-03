@@ -60,7 +60,7 @@ T      = args.T
 T_test = args.T_test
 
 ### noise levels
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
 ### cycle: number of datasets
@@ -85,18 +85,18 @@ os.makedirs(cycle_dir, exist_ok=True)
 
 # Load paths: pre-trained networks from the 1-dataset experiment
 
-load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
-load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
-load_path_M_F = save_dir + "M_step_F_net0.001.pt"
-load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.001.pt"
-load_path_M_F_joint = save_dir + "M_step_F_net_joint0.001.pt"
+load_path_rtsnet_true  = save_dir + "RTSNet_true0.01.pt"
+load_path_rtsnet_false = save_dir + "RTSNet_false0.01.pt"
+load_path_M_F = save_dir + "M_step_F_net0.01.pt"
+load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.01.pt"
+load_path_M_F_joint = save_dir + "M_step_F_net_joint0.01.pt"
 
 # Cycle-dataset experiment outputs
-destination_path_rtsnet_true   = cycle_dir + "5dRTSNet_true0.001.pt"
-destination_path_rtsnet_false  = cycle_dir + "5dRTSNet_false0.001.pt"
-destination_path_M_F           = cycle_dir + "5dM_step_F_net0.001.pt"
-destination_path_rtsnet_jointF = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
-destination_path_M_F_joint     = cycle_dir + "5dM_step_F_net_joint0.001.pt"
+destination_path_rtsnet_true   = cycle_dir + "5dRTSNet_true0.01.pt"
+destination_path_rtsnet_false  = cycle_dir + "5dRTSNet_false0.01.pt"
+destination_path_M_F           = cycle_dir + "5dM_step_F_net0.01.pt"
+destination_path_rtsnet_jointF = cycle_dir + "5dRTSNet_falseF_joint0.01.pt"
+destination_path_M_F_joint     = cycle_dir + "5dM_step_F_net_joint0.01.pt"
 destination_path_bigru         = cycle_dir + "BiGRU.pt"
 # destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
 # destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
