@@ -1371,8 +1371,11 @@ class Pipeline_mic:
 
                     MSE_arr[data * N_T + j] = loss_fn(x_s, x_true).item()
                     x_out_list.append(x_s)
-                    x_0       = x_s[:, T - 1].detach()
-                    F_carried = F_current.detach()
+                    x_0 = x_s[:, T - 1].detach()
+                    if propagate_F:
+                        F_carried = F_current.detach()
+                    else:
+                        F_carried = SysModel.F_test[data][j].clone().detach()
 
         end = time.time()
         t = end - start
@@ -1706,7 +1709,10 @@ class Pipeline_mic:
                             sample_total_loss_cv += weight * loss_em_cv
 
                         x_0_cv = x_curr[:, -1].detach()
-                        F_base_cv = F_current_cv.detach()
+                        if propagate_F:
+                            F_base_cv = F_current_cv.detach()
+                        else:
+                            F_base_cv = SysModel.F_valid[data][j].clone().detach()
 
                     sample_total_loss_cv = sample_total_loss_cv / float(datasets)
                     cv_loss_sum += sample_total_loss_cv.item()
@@ -2074,7 +2080,10 @@ class Pipeline_mic:
                             sample_total_loss_cv += weight * loss_em_cv
 
                         x_0_cv = x_curr[:, -1].detach()
-                        F_base_cv = F_current_cv.detach()
+                        if propagate_F:
+                            F_base_cv = F_current_cv.detach()
+                        else:
+                            F_base_cv = SysModel.F_valid[data][j].clone().detach()
 
                     sample_total_loss_cv = sample_total_loss_cv / float(datasets)
                     cv_loss_sum += sample_total_loss_cv.item()

@@ -248,6 +248,7 @@ print("\nMNet (EMKFNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_false, path_M_F,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+    propagate_F=False,
 )
 
 mse_mnet_db = [10 * math.log10(MSE_arr_mnet[k * N_T:(k + 1) * N_T].mean().item())
@@ -263,6 +264,7 @@ print("\nJoint (RTSNet + MNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_joint, path_M_F_joint,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+    propagate_F=False,
 )
 
 mse_joint_db = [10 * math.log10(MSE_arr_joint[k * N_T:(k + 1) * N_T].mean().item())

@@ -379,7 +379,7 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
     lambda_F=1e-3,
     generate_f=True,
     datasets=cycle,
-    propagate_F=True,
+    propagate_F=False,
 )
 
 ###############################
@@ -400,7 +400,7 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
     lambda_F=1e-3,
     generate_f=True,
     datasets=cycle,
-    propagate_F=True,
+    propagate_F=False,
 )
 
 ###############################
