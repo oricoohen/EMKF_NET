@@ -63,12 +63,12 @@ args.wd      = 1e-3
 T_test = args.T_test
 N_T    = args.N_T
 
-q2 = 0.01
+q2 = 0.001
 r2 = 1.
 
-cycle             = 3
-# theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # matches analytic test
-theta_per_dataset = [0.08,-0.08,0.1]   # matches analytic test
+cycle             = 5
+theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # matches analytic test
+# theta_per_dataset = [0.08,-0.08,0.1]   # matches analytic test
 assert len(theta_per_dataset) == cycle
 
 # Sparse-measurement mask — must match analytic test exactly so ERTS baselines are comparable.
@@ -89,11 +89,11 @@ cycle_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Checkpoint paths — populated by microphons_training_3_dataset.py
-path_rtsnet_true  = cycle_dir + "RTSNet_true0.01.pt"
-path_rtsnet_false = cycle_dir + "RTSNet_false0.01.pt"
-path_M_F          = cycle_dir + "M_step_F_net0.01.pt"
-path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint0.01.pt"
-path_M_F_joint    = cycle_dir + "M_step_F_net_joint0.01.pt"
+path_rtsnet_true  = cycle_dir + "RTSNet_true0.001.pt"
+path_rtsnet_false = cycle_dir + "RTSNet_false0.001.pt"
+path_M_F          = cycle_dir + "M_step_F_net0.001.pt"
+path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint0.001.pt"
+path_M_F_joint    = cycle_dir + "M_step_F_net_joint0.001.pt"
 
 print("=" * 70)
 print(f"2D TDOA RTSNet / EMKFNet — {cycle}-cycle multi-dataset test")
