@@ -1291,7 +1291,7 @@ class Pipeline_mic:
         with torch.no_grad():
             for j in range(N_T):
                 x_0 = SysModel.m1x_0.clone().detach()
-                F_carried = SysModel.F.clone().detach()   # theta=0, matches training
+                F_carried = SysModel.F_test[0][j].clone().detach()
 
                 for data in range(datasets):
                     y_seq  = all_test_inputs[data][j]
@@ -1435,7 +1435,7 @@ class Pipeline_mic:
             for _ in range(self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
 
-                F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach().to(self.device)
+                F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F_train[0][n_e].clone().detach().to(self.device)
                 x_0 = SysModel.m1x_0.clone().detach().to(self.device)
                 sample_total_loss = 0.0
 
@@ -1562,7 +1562,7 @@ class Pipeline_mic:
                     if propagate_F:
                         F_base = F_current.detach()
                     else:
-                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach()
+                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F_train[0][n_e].clone().detach().to(self.device)
                     x_0 = x_curr[:, -1].detach()
 
                 sample_total_loss = sample_total_loss / float(datasets)
@@ -1588,7 +1588,7 @@ class Pipeline_mic:
 
             with torch.no_grad():
                 for j in range(self.N_CV):
-                    F_base_cv = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach().to(self.device)
+                    F_base_cv = F_init.clone().to(self.device) if F_init is not None else SysModel.F_valid[0][j].clone().detach().to(self.device)
                     x_0_cv = SysModel.m1x_0.clone().detach().to(self.device)
                     sample_total_loss_cv = 0.0
 
@@ -1776,7 +1776,7 @@ class Pipeline_mic:
             for _ in range(self.N_B):
                 n_e = random.randint(0, self.N_E - 1)
 
-                F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach().to(self.device)
+                F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F_train[0][n_e].clone().detach().to(self.device)
 
                 if x_0_train_list is not None:
                     SysModel.m1x_0 = x_0_train_list[n_e]
@@ -1908,7 +1908,7 @@ class Pipeline_mic:
                     if propagate_F:
                         F_base = F_current.detach()
                     else:
-                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F.clone().detach()
+                        F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F_train[0][n_e].clone().detach().to(self.device)
                     x_0 = x_curr[:, -1].detach()
 
                 sample_total_loss = sample_total_loss / float(datasets)
@@ -1916,10 +1916,18 @@ class Pipeline_mic:
 
             loss = batch_total_loss / self.N_B
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                list(self.model.parameters()) + list(model_mstep.parameters()),
-                max_norm=1.5
+
+            all_params = list(self.model.parameters()) + list(model_mstep.parameters())
+            bad_grad = any(
+                p.grad is not None and (torch.isnan(p.grad).any() or torch.isinf(p.grad).any())
+                for p in all_params
             )
+            if bad_grad:
+                print(f"[Joint-3ds epoch {epoch:03d}] NaN/Inf gradients → batch skipped")
+                self.optimizer_joint.zero_grad()
+                continue
+
+            torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.5)
             self.optimizer_joint.step()
 
             denom = self.N_B * datasets

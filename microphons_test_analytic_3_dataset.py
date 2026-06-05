@@ -48,10 +48,10 @@ args.T_test = 50
 
 T_test = args.T_test
 
-q2 = 0.01
-r2 = 1
+q2 = 0.001
+r2 = 10
 
-cycle = 3
+cycle = 5
 
 USE_DIAG_MODEL = False   # True: diagonal alpha model (Type 2); False: rotation theta model (Type 1)
 
@@ -73,8 +73,8 @@ if USE_DIAG_MODEL:
         for k in range(cycle)
     ]
 else:
-    # theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
-    theta_per_dataset = [0.08,-0.08, 0.1,]
+    theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
+    # theta_per_dataset = [0.08,-0.08, 0.1,]
     assert len(theta_per_dataset) == cycle
     ds_label = [f'θ={theta_per_dataset[k]:.2f}' for k in range(cycle)]
 

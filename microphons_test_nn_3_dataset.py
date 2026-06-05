@@ -84,14 +84,14 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 save_dir  = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
-# cycle_dir = save_dir + f"{cycle}cycle/"
-cycle_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
+cycle_dir = save_dir + f"{cycle}cycle/"
+# cycle_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Checkpoint paths — populated by microphons_training_3_dataset.py
-path_rtsnet_true  = cycle_dir + "RTSNet_true0.001.pt"
-path_rtsnet_false = cycle_dir + "RTSNet_false0.001.pt"
-path_M_F          = cycle_dir + "M_step_F_net0.001.pt"
+path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
+path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
+path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
 path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint0.001.pt"
 path_M_F_joint    = cycle_dir + "M_step_F_net_joint0.001.pt"
 
