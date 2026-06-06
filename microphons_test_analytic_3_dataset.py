@@ -15,7 +15,7 @@ from Simulations.TDOA_2D.parameters import (
     m, n, m1x_0, m2x_0, M_mics,
     Q_structure, R_structure,
     make_F_block, f, h, h_jacobian,
-    generate_dataset_random_theta,
+    generate_dataset_raw_batch,
     generate_false_F_list,
     make_get_F_from_matrix,
     PX_MIN, PX_MAX, PY_MIN, PY_MAX,
@@ -48,7 +48,7 @@ args.T_test = 50
 T_test = args.T_test
 
 q2 = 0.001
-r2 = 10
+r2 = 1
 
 cycle = 5
 
@@ -59,23 +59,23 @@ USE_DIAG_MODEL = False   # True: diagonal alpha model (Type 2); False: rotation 
 #     so wrong F accumulates position error between corrections.
 MEASURE_EVERY_K = 1
 
-if USE_DIAG_MODEL:
-    # a_per_dataset[k] IS F[2,2] (alpha_x) directly, b_per_dataset[k] IS F[3,3] (alpha_y) directly.
-    # vx_{t+1} = a * vx_t + noise,  vy_{t+1} = b * vy_t + noise
-    # False F uses make_F_diag(1.0, 1.0) (constant-velocity assumption).
-    a_per_dataset = [1.0, 0.98, 0.95,  1.0, 0.97]   # F[2,2] = alpha_x directly
-    b_per_dataset = [ 0.97, 1.0, 1, 1.0,  0.95]   # F[3,3] = alpha_y directly
+# if USE_DIAG_MODEL:
+#     # a_per_dataset[k] IS F[2,2] (alpha_x) directly, b_per_dataset[k] IS F[3,3] (alpha_y) directly.
+#     # vx_{t+1} = a * vx_t + noise,  vy_{t+1} = b * vy_t + noise
+#     # False F uses make_F_diag(1.0, 1.0) (constant-velocity assumption).
+#     a_per_dataset = [1.0, 0.98, 0.95,  1.0, 0.97]   # F[2,2] = alpha_x directly
+#     b_per_dataset = [ 0.97, 1.0, 1, 1.0,  0.95]   # F[3,3] = alpha_y directly
 
-    assert len(a_per_dataset) == cycle and len(b_per_dataset) == cycle
-    ds_label = [
-        f'αx={a_per_dataset[k]:.2f} αy={b_per_dataset[k]:.2f}'
-        for k in range(cycle)
-    ]
-else:
-    theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
-    # theta_per_dataset = [0.08,-0.08, 0.1,]
-    assert len(theta_per_dataset) == cycle
-    ds_label = [f'θ={theta_per_dataset[k]:.2f}' for k in range(cycle)]
+#     assert len(a_per_dataset) == cycle and len(b_per_dataset) == cycle
+#     ds_label = [
+#         f'αx={a_per_dataset[k]:.2f} αy={b_per_dataset[k]:.2f}'
+#         for k in range(cycle)
+#     ]
+# else:
+theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
+# theta_per_dataset = [0.08,-0.08, 0.1,]
+assert len(theta_per_dataset) == cycle
+ds_label = [f'θ={theta_per_dataset[k]:.2f}' for k in range(cycle)]
 
 max_em_iter = 5
 
@@ -91,6 +91,18 @@ save_dir  = "RTSNet/tdoa_2d/10/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(cycle_dir, exist_ok=True)
 
+data_path = save_dir + "test_analytic_3_dataset_data.pt"
+
+###################
+###    FLAGS     ###
+###################
+LOAD_DATA  = False  # True → skip generation, load data from data_path
+OVERSAMPLE = 1.15   # theta model: generate ceil(N_T × OVERSAMPLE) candidates
+#   (diag model uses its own standard generation regardless of OVERSAMPLE)
+# Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
+#   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
+#   USE_REFLECTION — True: bounce at walls           False: reject (good_seq=0)
+
 print("=" * 70)
 print(f"2D TDOA Analytic ERTS -- {cycle}-cycle multi-dataset test")
 print(f"  T_test={T_test}  q2={q2}  r2={r2}")
@@ -102,42 +114,59 @@ print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
 #########################################
-###  Generate test data               ###
+###  Generate / load data             ###
 #########################################
-print(f"\nGenerating {cycle} test datasets ...")
-
 all_test_inputs  = []
 all_test_targets = []
 all_F_test_true  = []
 all_F_test_false = []
 
-carry_x_test = None
-
-for k in range(cycle):
-    if USE_DIAG_MODEL:
-        alpha_x_k = a_per_dataset[k]
-        alpha_y_k = b_per_dataset[k]
-        print(f"  Dataset {k}: alpha_x={alpha_x_k:.4f}  alpha_y={alpha_y_k:.4f}")
-        xi, xt, F_te_t = generate_dataset_diag_accel(
-            args.N_T, T_test, alpha_x_k, alpha_y_k, Q, R,
-            x_init=carry_x_test,
-        )   # a_range=0 (default) → all seqs same F; F_te_t is list of N_T matrices
-        F_te_f = [make_F_diag(1.0, 1.0)] * args.N_T   # false F: constant velocity
-    else:
+if LOAD_DATA and os.path.exists(data_path):
+    print(f"\nLoading saved data from {data_path} ...")
+    _d = torch.load(data_path, weights_only=False, map_location=device)
+    all_test_inputs  = _d["all_test_inputs"]
+    all_test_targets = _d["all_test_targets"]
+    all_F_test_true  = _d["all_F_test_true"]
+    all_F_test_false = _d["all_F_test_false"]
+    print("  Done.")
+else:
+    N_gen_T = math.ceil(args.N_T * OVERSAMPLE)
+    good_seq_test = [1] * N_gen_T
+    raw_test_inputs  = [];  raw_test_targets = [];  raw_F_test = []
+    carry_test = None
+    print(f"\nGenerating {cycle} test datasets (theta model, N_gen={N_gen_T}) ...")
+    for k in range(cycle):
         theta_k = theta_per_dataset[k]
-        print(f"  Dataset {k}: theta={theta_k:.4f} rad (fixed for all sequences)")
-        xi, xt, _, F_te_t = generate_dataset_random_theta(
-            args.N_T, T_test, 0, Q, R,
-            x_init=carry_x_test, theta_base=[theta_k] * args.N_T,
+        print(f"  Dataset {k}: theta={theta_k:.4f} rad ...", end="", flush=True)
+        xi, xt, F_te, v_te = generate_dataset_raw_batch(
+            N_gen_T, T_test, 0, Q, R,
+            x_init=carry_test, theta_base=[theta_k] * N_gen_T,
         )
-        F_te_f = [make_F_block(0.0)] * args.N_T   # false F always theta=0
+        for i in range(N_gen_T):
+            if not v_te[i]: good_seq_test[i] = 0
+        raw_test_inputs.append(xi);  raw_test_targets.append(xt);  raw_F_test.append(F_te)
+        carry_test = xt[:, :, -1]
+        print(f"  good so far: {sum(good_seq_test)}/{N_gen_T}")
+    idx_te = [i for i in range(N_gen_T) if good_seq_test[i]][:args.N_T]
+    if len(idx_te) < args.N_T:
+        raise RuntimeError(
+            f"Not enough valid test sequences: {len(idx_te)}/{args.N_T}. "
+            f"Increase OVERSAMPLE ({OVERSAMPLE}).")
+    idx_te_t = torch.tensor(idx_te, dtype=torch.long)
+    for k in range(cycle):
+        all_test_inputs.append(raw_test_inputs[k][idx_te_t])
+        all_test_targets.append(raw_test_targets[k][idx_te_t])
+        all_F_test_true.append([raw_F_test[k][i] for i in idx_te])
+        all_F_test_false.append([make_F_block(0.0) for _ in idx_te])
 
-    carry_x_test = xt[:, :, -1]   # [N_T, m] -- per-sequence carry
-
-    all_test_inputs.append(xi)
-    all_test_targets.append(xt)
-    all_F_test_true.append(F_te_t)
-    all_F_test_false.append(F_te_f)
+    print(f"\n  Saving data to {data_path} ...")
+    torch.save({
+        "all_test_inputs":  all_test_inputs,
+        "all_test_targets": all_test_targets,
+        "all_F_test_true":  all_F_test_true,
+        "all_F_test_false": all_F_test_false,
+    }, data_path)
+    print("  Done.")
 
 print(f"  Test per dataset: {all_test_targets[0].size()}")
 print(f"  max_em_iter={max_em_iter}")
@@ -261,7 +290,7 @@ for seq_idx in range(10):
 
     fig.suptitle(f'Sequence {seq_idx} -- all datasets (test)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False)
 
 #########################################
 ###  Run ERTS across all datasets     ###
@@ -540,7 +569,7 @@ axes[-1].set_xlabel("time")
 fig.suptitle(f"TDOA ERTS analytic -- {cycle}-dataset sequential scenario", fontsize=13)
 plt.tight_layout()
 
-plt.show()
+plt.show(block=False)
 
 #########################################
 ###  2-D spatial popup -- seq 0        ###
@@ -602,4 +631,5 @@ fig2.suptitle(f'2D positions -- sequence 0, per dataset  |  q2={q2}  r2={r2}  T=
               fontsize=13)
 plt.tight_layout()
 
-plt.show()
+plt.show(block=False)
+plt.show()   # keep all windows open

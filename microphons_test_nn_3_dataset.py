@@ -29,7 +29,7 @@ from Simulations.TDOA_2D.parameters import (
     m, n, m1x_0, m2x_0, M_mics,
     Q_structure, R_structure,
     make_F_block, f, h, h_jacobian, make_f,
-    generate_dataset_random_theta,
+    generate_dataset_raw_batch,
     make_get_F_from_matrix,
     mic_positions,
 )
@@ -95,6 +95,17 @@ path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
 path_rtsnet_joint = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
 path_M_F_joint    = cycle_dir + "5dM_step_F_net_joint0.001.pt"
 
+data_path = save_dir + "test_nn_3_dataset_data.pt"
+
+###################
+###    FLAGS     ###
+###################
+LOAD_DATA  = False  # True → skip generation, load data from data_path
+OVERSAMPLE = 1.15   # generate ceil(N_T × OVERSAMPLE) candidates, keep best N_T
+# Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
+#   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
+#   USE_REFLECTION — True: bounce at walls           False: reject (good_seq=0)
+
 print("=" * 70)
 print(f"2D TDOA RTSNet / EMKFNet — {cycle}-cycle multi-dataset test")
 print(f"  T_test={T_test}  q2={q2}  r2={r2}")
@@ -103,33 +114,59 @@ print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
 #########################################
-###  Generate test data               ###
+###  Generate / load data             ###
 #########################################
-print(f"\nGenerating {cycle} test datasets ...")
-
 all_test_inputs  = []
 all_test_targets = []
 all_F_test_true  = []
 all_F_test_false = []
 
-carry_x_test = None
+if LOAD_DATA and os.path.exists(data_path):
+    print(f"\nLoading saved data from {data_path} ...")
+    _d = torch.load(data_path, weights_only=False, map_location=device)
+    all_test_inputs  = _d["all_test_inputs"]
+    all_test_targets = _d["all_test_targets"]
+    all_F_test_true  = _d["all_F_test_true"]
+    all_F_test_false = _d["all_F_test_false"]
+    print("  Done.")
+else:
+    N_gen_T = math.ceil(N_T * OVERSAMPLE)
+    good_seq_test = [1] * N_gen_T
+    raw_test_inputs  = [];  raw_test_targets = [];  raw_F_test = []
+    carry_test = None
+    print(f"\nGenerating {cycle} test datasets (N_gen={N_gen_T}) ...")
+    for k in range(cycle):
+        theta_k = theta_per_dataset[k]
+        print(f"  Dataset {k}: theta={theta_k:.4f} rad ...", end="", flush=True)
+        xi, xt, F_te, v_te = generate_dataset_raw_batch(
+            N_gen_T, T_test, 0, Q, R,
+            x_init=carry_test, theta_base=[theta_k] * N_gen_T,
+        )
+        for i in range(N_gen_T):
+            if not v_te[i]: good_seq_test[i] = 0
+        raw_test_inputs.append(xi);  raw_test_targets.append(xt);  raw_F_test.append(F_te)
+        carry_test = xt[:, :, -1]
+        print(f"  good so far: {sum(good_seq_test)}/{N_gen_T}")
+    idx_te = [i for i in range(N_gen_T) if good_seq_test[i]][:N_T]
+    if len(idx_te) < N_T:
+        raise RuntimeError(
+            f"Not enough valid test sequences: {len(idx_te)}/{N_T}. "
+            f"Increase OVERSAMPLE ({OVERSAMPLE}).")
+    idx_te_t = torch.tensor(idx_te, dtype=torch.long)
+    for k in range(cycle):
+        all_test_inputs.append(raw_test_inputs[k][idx_te_t])
+        all_test_targets.append(raw_test_targets[k][idx_te_t])
+        all_F_test_true.append([raw_F_test[k][i] for i in idx_te])
+        all_F_test_false.append([make_F_block(0.0) for _ in idx_te])
 
-for k in range(cycle):
-    theta_k = theta_per_dataset[k]
-    print(f"  Dataset {k}: theta={theta_k:.4f} rad")
-
-    xi, xt, _, F_te_t = generate_dataset_random_theta(
-        N_T, T_test, 0, Q, R,
-        x_init=carry_x_test, theta_base=[theta_k] * N_T,
-    )
-    F_te_f = [make_F_block(0.0) for _ in range(N_T)]
-
-    carry_x_test = xt[:, :, -1]
-
-    all_test_inputs.append(xi)
-    all_test_targets.append(xt)
-    all_F_test_true.append(F_te_t)
-    all_F_test_false.append(F_te_f)
+    print(f"\n  Saving data to {data_path} ...")
+    torch.save({
+        "all_test_inputs":  all_test_inputs,
+        "all_test_targets": all_test_targets,
+        "all_F_test_true":  all_F_test_true,
+        "all_F_test_false": all_F_test_false,
+    }, data_path)
+    print("  Done.")
 
 print(f"  Test per dataset: {all_test_targets[0].size()}")
 
