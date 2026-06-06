@@ -92,8 +92,8 @@ os.makedirs(cycle_dir, exist_ok=True)
 path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
 path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
-path_rtsnet_joint = cycle_dir + "RTSNet_falseF_joint0.001.pt"
-path_M_F_joint    = cycle_dir + "M_step_F_net_joint0.001.pt"
+path_rtsnet_joint = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
+path_M_F_joint    = cycle_dir + "5dM_step_F_net_joint0.001.pt"
 
 print("=" * 70)
 print(f"2D TDOA RTSNet / EMKFNet — {cycle}-cycle multi-dataset test")

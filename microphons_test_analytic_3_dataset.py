@@ -3,7 +3,6 @@ import math
 import torch
 import torch.nn as nn
 import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from datetime import datetime
@@ -245,6 +244,7 @@ for seq_idx in range(10):
     ax_traj.add_patch(_rect)
 
     ax_traj.set_xlabel('p_x');    ax_traj.set_ylabel('p_y')
+    ax_traj.set_xlim(-20, 20);    ax_traj.set_ylim(-10, 20)
     ax_traj.set_title('2D trajectory (o=start, x=end per dataset)')
     ax_traj.legend(fontsize=7);   ax_traj.grid(True, alpha=0.4)
 
@@ -261,12 +261,7 @@ for seq_idx in range(10):
 
     fig.suptitle(f'Sequence {seq_idx} -- all datasets (test)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
-    _plot_path = os.path.abspath(cycle_dir + f'seq{seq_idx}_data_sanity.png')
-    plt.savefig(_plot_path, dpi=150)
-    plt.close()
-    print(f"  Saved: {_plot_path}")
-    if os.name == 'nt':
-        os.startfile(_plot_path)
+    plt.show()
 
 #########################################
 ###  Run ERTS across all datasets     ###
@@ -545,10 +540,7 @@ axes[-1].set_xlabel("time")
 fig.suptitle(f"TDOA ERTS analytic -- {cycle}-dataset sequential scenario", fontsize=13)
 plt.tight_layout()
 
-plot_path = cycle_dir + "analytic_erts_y_position.png"
-plt.savefig(plot_path, dpi=250)
-print(f"  Saved: {plot_path}")
-plt.close()
+plt.show()
 
 #########################################
 ###  2-D spatial popup -- seq 0        ###
@@ -597,6 +589,7 @@ for k in range(cycle):
 
     ax2.set_xlabel('p_x (m)', fontsize=9)
     ax2.set_ylabel('p_y (m)', fontsize=9)
+    ax2.set_xlim(-20, 20);  ax2.set_ylim(-10, 20)
     ax2.set_title(f'Dataset {k}  {ds_label[k]}', fontsize=10)
     ax2.legend(fontsize=8, loc='best')
     ax2.grid(True, alpha=0.4)
@@ -609,9 +602,4 @@ fig2.suptitle(f'2D positions -- sequence 0, per dataset  |  q2={q2}  r2={r2}  T=
               fontsize=13)
 plt.tight_layout()
 
-xy_plot_path = os.path.abspath(cycle_dir + "xy_positions_seq0.png")
-plt.savefig(xy_plot_path, dpi=200, metadata={})
-plt.close()
-print(f"  Saved: {xy_plot_path}")
-if os.name == 'nt':
-    os.startfile(xy_plot_path)
+plt.show()

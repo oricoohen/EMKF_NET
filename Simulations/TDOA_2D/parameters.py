@@ -38,9 +38,17 @@ mic_positions = torch.tensor(
 )  # [M_mics, 2]
 
 # ── Trajectory validity bounds ────────────────────────────────────────────────
-PX_MIN, PX_MAX =  -9.0,  9.0   # position x
-PY_MIN, PY_MAX =   1.0,  15.0   # position y
-V_MAX          =   3.5         # max speed on either axis
+USE_BOUNDARIES = True           # True: enforce original bounds  False: unbounded (huge limits, for experiments)
+
+if USE_BOUNDARIES:
+    PX_MIN, PX_MAX =  -9.0,   9.0
+    PY_MIN, PY_MAX =   1,  15.0
+    V_MAX          =   3.5
+else:
+    PX_MIN, PX_MAX = -1000.0, 1000.0
+    PY_MIN, PY_MAX = -1000.0, 1000.0
+    V_MAX          =  1000.0
+
 MAX_RETRIES    = 100            # per-sequence retry limit
 USE_REFLECTION = True           # True: bounce at walls instead of regenerating; False: old retry behavior
 
@@ -57,7 +65,7 @@ R  = r2 * R_structure
 # p_y starts at the centre of [PY_MIN, PY_MAX] = 3.5 so noise has equal margin
 # in both directions before hitting either bound.
 v0    = 0.3
-m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],
+m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],####i changed to 5 instead of 4
                       dtype=torch.float32, device=device)  # [4, 1]
 m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 
@@ -243,8 +251,7 @@ def generate_single_traj(
 
     # ── pop up the last failed trajectory before crashing ────────────────────
     try:
-        import os, matplotlib
-        matplotlib.use('Agg')
+        import os
         import matplotlib.pyplot as _plt
         import matplotlib.patches as _mpatches
 
@@ -292,13 +299,10 @@ def generate_single_traj(
         _axes[1].set_title('v_x / v_y vs time')
         _axes[1].legend(fontsize=8); _axes[1].grid(True, alpha=0.4)
 
+        _ax.set_xlim(-20, 20);  _ax.set_ylim(-10, 20)
         _fig.suptitle(f'FAILED after {MAX_RETRIES} retries  |  {ranked_str}', fontsize=11, color='red')
         _plt.tight_layout()
-        _save = os.path.abspath('failed_trajectory_debug.png')
-        _plt.savefig(_save, dpi=150)
-        _plt.close(_fig)
-        os.startfile(_save)
-        print(f"\n  [DEBUG] Failed trajectory plot saved and opened: {_save}")
+        _plt.show()
     except Exception:
         pass  # never let the plot crash hide the real error
 

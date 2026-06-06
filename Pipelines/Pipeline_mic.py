@@ -1784,9 +1784,8 @@ class Pipeline_mic:
                 x_0 = SysModel.m1x_0.clone().detach().to(self.device)
                 sample_total_loss = 0.0
 
-                F_current = F_base  # always theta=0, matching test initialization
-
                 for data in range(datasets):
+                    F_current = F_base.clone()
                     y_seq = train_input[data][n_e]
                     x_true_seq = train_target[data][n_e]
                     T = y_seq.size(-1)
@@ -1923,12 +1922,13 @@ class Pipeline_mic:
                 for p in all_params
             )
             if bad_grad:
-                print(f"[Joint-3ds epoch {epoch:03d}] NaN/Inf gradients → batch skipped")
+                print(f"[Joint-3ds epoch {epoch:03d}] NaN/Inf gradients → skipped")
                 self.optimizer_joint.zero_grad()
                 continue
 
-            torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.5)
+            grad_norm = torch.nn.utils.clip_grad_norm_(all_params, max_norm=0.5)
             self.optimizer_joint.step()
+            print(f"  grad_norm (before clip)={grad_norm:.3f}")
 
             denom = self.N_B * datasets
             avg_x_loss_start = batch_x_loss_start / denom
