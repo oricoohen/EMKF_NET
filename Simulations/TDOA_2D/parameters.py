@@ -49,8 +49,8 @@ else:
     PY_MIN, PY_MAX = -1000.0, 1000.0
     V_MAX          =  1000.0
 
-MAX_RETRIES    = 100            # per-sequence retry limit
-USE_REFLECTION = True           # True: bounce at walls instead of regenerating; False: old retry behavior
+MAX_RETRIES    = 1000            # per-sequence retry limit
+USE_REFLECTION = False           # True: bounce at walls instead of regenerating; False: old retry behavior
 
 # ── Noise covariances ─────────────────────────────────────────────────────────
 Q_structure = torch.eye(m, dtype=torch.float32, device=device)   # [m, m] identity
@@ -469,6 +469,165 @@ def generate_dataset_random_theta(N: int, T: int, theta_true_max: float,
         )
 
     return inputs, targets, theta_list, F_list
+
+
+def _generate_one_attempt(
+    T: int,
+    theta: float,
+    Q_gen: torch.Tensor,
+    R_gen: torch.Tensor,
+    x_init=None,
+) -> tuple:
+    """One trajectory attempt with no retry. Returns (states [m,T], obs [n,T], is_valid bool)."""
+    L_q = torch.linalg.cholesky(Q_gen)
+    L_r = torch.linalg.cholesky(R_gen)
+    x   = x_init.reshape(-1).clone() if x_init is not None else m1x_0.reshape(-1).clone()
+    F_k = make_F_block(theta)
+    states = torch.zeros(m, T, device=device)
+    obs    = torch.zeros(n, T, device=device)
+    for t in range(T):
+        x = F_k @ x + L_q @ torch.randn(m, device=device)
+        y = h(x).reshape(-1) + L_r @ torch.randn(n, device=device)
+        states[:, t] = x
+        obs[:, t]    = y
+    return states, obs, _traj_valid(states)
+
+
+def generate_dataset_random_theta_pruned(
+    N: int,
+    T: int,
+    theta_true_max: float,
+    Q_gen: torch.Tensor = None,
+    R_gen: torch.Tensor = None,
+    x_init=None,
+    theta_base=None,
+    max_tries: int = 2,
+) -> tuple:
+    """
+    Like generate_dataset_random_theta but sequences that fail all max_tries
+    independent attempts are silently discarded rather than causing a RuntimeError.
+
+    Each attempt re-draws theta independently from the same range, so a bad
+    theta on try 1 gets a completely fresh chance on try 2.
+
+    Parameters
+    ----------
+    max_tries : int
+        Attempts per sequence before giving up (default 2 = one try + one retry).
+
+    Returns
+    -------
+    inputs     : [N_kept, n, T]
+    targets    : [N_kept, m, T]
+    theta_list : list[N_kept] floats
+    F_list     : list[N_kept] tensors
+    n_kept     : int
+    kept_mask  : list[N] bools  (True = sequence survived)
+    """
+    import random as _random
+    if Q_gen is None: Q_gen = Q
+    if R_gen is None: R_gen = R
+
+    per_seq = (
+        x_init is not None
+        and isinstance(x_init, torch.Tensor)
+        and x_init.dim() == 2
+    )
+
+    inputs_list  = []
+    targets_list = []
+    theta_list   = []
+    F_list       = []
+    kept_mask    = []
+
+    for i in range(N):
+        base = theta_base[i] if isinstance(theta_base, list) else 0.0
+        x0   = x_init[i] if per_seq else x_init
+
+        kept = False
+        for _try in range(max_tries):
+            theta = base + (_random.random() - 0.5) * theta_true_max
+            states, obs, valid = _generate_one_attempt(T, theta, Q_gen, R_gen, x0)
+            if valid:
+                inputs_list.append(obs)
+                targets_list.append(states)
+                theta_list.append(theta)
+                F_list.append(make_F_block(theta))
+                kept = True
+                break
+
+        kept_mask.append(kept)
+
+    n_kept      = sum(kept_mask)
+    n_discarded = N - n_kept
+    print(f"      kept {n_kept}/{N}  ({n_discarded} discarded, {100.0 * n_discarded / N:.1f}% loss)")
+
+    if n_kept == 0:
+        raise RuntimeError(
+            "generate_dataset_random_theta_pruned: all sequences discarded.\n"
+            f"Bounds: px=[{PX_MIN},{PX_MAX}], py=[{PY_MIN},{PY_MAX}], |v|<={V_MAX}."
+        )
+
+    return (
+        torch.stack(inputs_list),
+        torch.stack(targets_list),
+        theta_list,
+        F_list,
+        n_kept,
+        kept_mask,
+    )
+
+
+def generate_dataset_raw_batch(
+    N: int,
+    T: int,
+    theta_true_max: float,
+    Q_gen: torch.Tensor = None,
+    R_gen: torch.Tensor = None,
+    x_init=None,
+    theta_base=None,
+) -> tuple:
+    """
+    Generate N sequences with exactly one attempt each — no validity filtering.
+    Used by the oversample + good_seq approach: the caller tracks validity externally.
+
+    x_init: None         → all sequences start from m1x_0
+            [m] tensor   → shared single initial state
+            [N, m] tensor → per-sequence initial state (carry)
+
+    Returns
+    -------
+    inputs  : [N, n, T]
+    targets : [N, m, T]
+    F_list  : list[N] tensors
+    valid   : list[N] bools
+    """
+    import random as _random
+    if Q_gen is None: Q_gen = Q
+    if R_gen is None: R_gen = R
+
+    per_seq = (
+        x_init is not None
+        and isinstance(x_init, torch.Tensor)
+        and x_init.dim() == 2
+    )
+
+    inputs_out  = torch.zeros(N, n, T, device=device)
+    targets_out = torch.zeros(N, m, T, device=device)
+    F_list = []
+    valid  = []
+
+    for i in range(N):
+        base  = theta_base[i] if isinstance(theta_base, list) else 0.0
+        theta = base + (_random.random() - 0.5) * theta_true_max
+        x0    = x_init[i] if per_seq else x_init
+        states, obs, is_valid = _generate_one_attempt(T, theta, Q_gen, R_gen, x0)
+        inputs_out[i]  = obs
+        targets_out[i] = states
+        F_list.append(make_F_block(theta))
+        valid.append(is_valid)
+
+    return inputs_out, targets_out, F_list, valid
 
 
 def generate_false_F_list(theta_true_list: list, theta_false_max: float) -> list:

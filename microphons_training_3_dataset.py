@@ -18,7 +18,7 @@ from Simulations.TDOA_2D.parameters import (
     m, n, m1x_0, m2x_0, M_mics,
     Q_structure, R_structure,
     make_F_block, h, h_jacobian,
-    generate_dataset_random_theta,
+    generate_dataset_raw_batch,
     make_f,
     PX_MIN, PX_MAX, PY_MIN, PY_MAX,
 )
@@ -102,6 +102,19 @@ destination_path_bigru         = cycle_dir + "BiGRU.pt"
 # destination_path_M_F           = save_dir + "M_step_F_net.pt"
 # destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint.pt"
 # destination_path_M_F_joint     = save_dir + "M_step_F_net_joint.pt"
+
+data_path = save_dir + "training_3_dataset_data.pt"
+
+###################
+###    FLAGS     ###
+###################
+LOAD_DATA  = False  # True → skip generation, load data from data_path
+OVERSAMPLE = 1.5   # generate this × more candidates than N_E/N_CV/N_T
+
+# Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
+#   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
+#   USE_REFLECTION — True: bounce at walls           False: reject (good_seq=0)
+
 print("=" * 70)
 print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment (rotation theta model)")
 print(f"  T={T}  T_test={T_test}  q2={q2}  r2={r2}")
@@ -110,13 +123,8 @@ print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
 #########################################
-###  Generate data — nested lists only ###
+###  Generate / load data             ###
 #########################################
-# Matches ori_main_lor_DT_3_datasets_train.py:
-#   all_train_inputs[data]        -> [N_E, n, T]
-#   all_F_train_true[data][group] -> F matrix for that group of 10 sequences
-
-print(f"\nGenerating {cycle} datasets ...")
 
 all_train_inputs  = []
 all_train_targets = []
@@ -124,7 +132,6 @@ all_cv_inputs     = []
 all_cv_targets    = []
 all_test_inputs   = []
 all_test_targets  = []
-
 all_F_train_true  = []
 all_F_cv_true     = []
 all_F_test_true   = []
@@ -132,63 +139,133 @@ all_F_train_false = []
 all_F_cv_false    = []
 all_F_test_false  = []
 
-import random as _random
+if LOAD_DATA and os.path.exists(data_path):
+    print(f"\nLoading saved data from {data_path} ...")
+    _d = torch.load(data_path, weights_only=False, map_location=device)
+    all_train_inputs  = _d["all_train_inputs"]
+    all_train_targets = _d["all_train_targets"]
+    all_cv_inputs     = _d["all_cv_inputs"]
+    all_cv_targets    = _d["all_cv_targets"]
+    all_test_inputs   = _d["all_test_inputs"]
+    all_test_targets  = _d["all_test_targets"]
+    all_F_train_true  = _d["all_F_train_true"]
+    all_F_cv_true     = _d["all_F_cv_true"]
+    all_F_test_true   = _d["all_F_test_true"]
+    all_F_train_false = _d["all_F_train_false"]
+    all_F_cv_false    = _d["all_F_cv_false"]
+    all_F_test_false  = _d["all_F_test_false"]
+    print("  Done.")
+else:
+    N_gen_E  = math.ceil(args.N_E  * OVERSAMPLE)
+    N_gen_CV = math.ceil(args.N_CV * OVERSAMPLE)
+    N_gen_T  = math.ceil(args.N_T  * OVERSAMPLE)
 
-# Carry state between datasets (position/velocity only)
-carry_x_train = None
-carry_x_cv    = None
-carry_x_test  = None
+    # good_seq[i] == 1 means candidate i was valid in every dataset so far
+    good_seq_train = [1] * N_gen_E
+    good_seq_cv    = [1] * N_gen_CV
+    good_seq_test  = [1] * N_gen_T
 
-for k in range(cycle):
-    # Each sequence draws its own independent theta from Uniform(-theta_max, +theta_max)
-    print(f"  Dataset {k}: theta per sequence ~ Uniform(±{theta_max})")
+    # Raw (unfiltered) storage — shape [N_gen, n/m, T] per dataset
+    raw_train_inputs  = [];  raw_train_targets = [];  raw_F_train = []
+    raw_cv_inputs     = [];  raw_cv_targets    = [];  raw_F_cv    = []
+    raw_test_inputs   = [];  raw_test_targets  = [];  raw_F_test  = []
 
-    ti, tt, _, F_tr_t = generate_dataset_random_theta(args.N_E,  T,      2*theta_max, Q, R, x_init=carry_x_train)
-    ci, ct, _, F_cv_t = generate_dataset_random_theta(args.N_CV, T,      2*theta_max, Q, R, x_init=carry_x_cv)
-    xi, xt, _, F_te_t = generate_dataset_random_theta(args.N_T,  T_test, 2*theta_max, Q, R, x_init=carry_x_test)
+    carry_train = None
+    carry_cv    = None
+    carry_test  = None
 
-    carry_x_train = tt[:, :, -1]   # [N_E,  m]
-    carry_x_cv    = ct[:, :, -1]   # [N_CV, m]
-    carry_x_test  = xt[:, :, -1]   # [N_T,  m]
+    print(f"\nGenerating {cycle} datasets  "
+          f"(N_gen train={N_gen_E}  cv={N_gen_CV}  test={N_gen_T}) ...")
 
-    # False F: theta=0 (straight-line constant-velocity assumption)
-    F_tr_f = [make_F_block(0.0) for _ in range(args.N_E)]
-    F_cv_f = [make_F_block(0.0) for _ in range(args.N_CV)]
-    F_te_f = [make_F_block(0.0) for _ in range(args.N_T)]
+    for k in range(cycle):
+        print(f"  Dataset {k} ...", end="", flush=True)
 
-    all_train_inputs.append(ti);   all_train_targets.append(tt)
-    all_cv_inputs.append(ci);      all_cv_targets.append(ct)
-    all_test_inputs.append(xi);    all_test_targets.append(xt)
+        ti, tt, F_tr, v_tr = generate_dataset_raw_batch(
+            N_gen_E,  T,      2*theta_max, Q, R, x_init=carry_train)
+        ci, ct, F_cv, v_cv = generate_dataset_raw_batch(
+            N_gen_CV, T,      2*theta_max, Q, R, x_init=carry_cv)
+        xi, xt, F_te, v_te = generate_dataset_raw_batch(
+            N_gen_T,  T_test, 2*theta_max, Q, R, x_init=carry_test)
 
-    all_F_train_true.append(F_tr_t);   all_F_train_false.append(F_tr_f)
-    all_F_cv_true.append(F_cv_t);      all_F_cv_false.append(F_cv_f)
-    all_F_test_true.append(F_te_t);    all_F_test_false.append(F_te_f)
+        for i in range(N_gen_E):
+            if not v_tr[i]: good_seq_train[i] = 0
+        for i in range(N_gen_CV):
+            if not v_cv[i]: good_seq_cv[i] = 0
+        for i in range(N_gen_T):
+            if not v_te[i]: good_seq_test[i] = 0
 
-print(f"  Train per dataset: {all_train_targets[0].size()}")
+        raw_train_inputs.append(ti);  raw_train_targets.append(tt);  raw_F_train.append(F_tr)
+        raw_cv_inputs.append(ci);     raw_cv_targets.append(ct);     raw_F_cv.append(F_cv)
+        raw_test_inputs.append(xi);   raw_test_targets.append(xt);   raw_F_test.append(F_te)
+
+        carry_train = tt[:, :, -1]   # [N_gen_E,  m]
+        carry_cv    = ct[:, :, -1]   # [N_gen_CV, m]
+        carry_test  = xt[:, :, -1]   # [N_gen_T,  m]
+
+        n_ok_tr = sum(good_seq_train)
+        n_ok_cv = sum(good_seq_cv)
+        n_ok_te = sum(good_seq_test)
+        print(f"  good so far → train={n_ok_tr}/{N_gen_E}  "
+              f"cv={n_ok_cv}/{N_gen_CV}  test={n_ok_te}/{N_gen_T}")
+
+    # Select first N valid candidates
+    idx_tr = [i for i in range(N_gen_E)  if good_seq_train[i]][:args.N_E]
+    idx_cv = [i for i in range(N_gen_CV) if good_seq_cv[i]][:args.N_CV]
+    idx_te = [i for i in range(N_gen_T)  if good_seq_test[i]][:args.N_T]
+
+    if len(idx_tr) < args.N_E:
+        raise RuntimeError(
+            f"Not enough valid train sequences: got {len(idx_tr)}, need {args.N_E}. "
+            f"Increase OVERSAMPLE (currently {OVERSAMPLE}).")
+    if len(idx_cv) < args.N_CV:
+        raise RuntimeError(
+            f"Not enough valid CV sequences: got {len(idx_cv)}, need {args.N_CV}. "
+            f"Increase OVERSAMPLE (currently {OVERSAMPLE}).")
+    if len(idx_te) < args.N_T:
+        raise RuntimeError(
+            f"Not enough valid test sequences: got {len(idx_te)}, need {args.N_T}. "
+            f"Increase OVERSAMPLE (currently {OVERSAMPLE}).")
+
+    idx_tr_t = torch.tensor(idx_tr, dtype=torch.long)
+    idx_cv_t = torch.tensor(idx_cv, dtype=torch.long)
+    idx_te_t = torch.tensor(idx_te, dtype=torch.long)
+
+    for k in range(cycle):
+        all_train_inputs.append(raw_train_inputs[k][idx_tr_t])
+        all_train_targets.append(raw_train_targets[k][idx_tr_t])
+        all_cv_inputs.append(raw_cv_inputs[k][idx_cv_t])
+        all_cv_targets.append(raw_cv_targets[k][idx_cv_t])
+        all_test_inputs.append(raw_test_inputs[k][idx_te_t])
+        all_test_targets.append(raw_test_targets[k][idx_te_t])
+
+        all_F_train_true.append([raw_F_train[k][i] for i in idx_tr])
+        all_F_cv_true.append(   [raw_F_cv[k][i]    for i in idx_cv])
+        all_F_test_true.append( [raw_F_test[k][i]  for i in idx_te])
+
+        all_F_train_false.append([make_F_block(0.0) for _ in idx_tr])
+        all_F_cv_false.append(   [make_F_block(0.0) for _ in idx_cv])
+        all_F_test_false.append( [make_F_block(0.0) for _ in idx_te])
+
+    print(f"\n  Saving data to {data_path} ...")
+    torch.save({
+        "all_train_inputs":  all_train_inputs,
+        "all_train_targets": all_train_targets,
+        "all_cv_inputs":     all_cv_inputs,
+        "all_cv_targets":    all_cv_targets,
+        "all_test_inputs":   all_test_inputs,
+        "all_test_targets":  all_test_targets,
+        "all_F_train_true":  all_F_train_true,
+        "all_F_cv_true":     all_F_cv_true,
+        "all_F_test_true":   all_F_test_true,
+        "all_F_train_false": all_F_train_false,
+        "all_F_cv_false":    all_F_cv_false,
+        "all_F_test_false":  all_F_test_false,
+    }, data_path)
+    print("  Done.")
+
+print(f"\n  Train per dataset: {all_train_targets[0].size()}")
 print(f"  CV per dataset:    {all_cv_targets[0].size()}")
 print(f"  Test per dataset:  {all_test_targets[0].size()}")
-
-#########################################
-###  Data sanity check                 ###
-#########################################
-# Verify x_0 carry: last state of seq-0 in dataset k-1 must equal
-# the x_0 used to start seq-0 in dataset k.
-print("\nData sanity check — x_0 carry for sequence 0 (train):")
-print(f"  ds0 x_0 (fixed start): {m1x_0.reshape(-1).cpu().numpy().round(3)}")
-for k in range(cycle):
-    x_end = all_train_targets[k][0, :, -1].cpu()
-    print(f"  ds{k} last state : [{x_end[0]:.3f}, {x_end[1]:.3f}, {x_end[2]:.3f}, {x_end[3]:.3f}]", end="")
-    if k < cycle - 1:
-        x_next_0 = carry_x_train[0].cpu() if k == cycle - 1 else all_train_targets[k][0, :, -1].cpu()
-        print(f"  ← x_0 for ds{k+1}", end="")
-    print()
-
-print("\nData sanity check — theta per dataset (train):")
-for k in range(cycle):
-    import math as _math
-    F_vv = all_F_train_true[k][0]
-    theta_k_check = _math.atan2(F_vv[3, 2].item(), F_vv[2, 2].item())
-    print(f"  ds{k} theta = {theta_k_check:.4f} rad")
 
 # Plot sequences 0-3 across all datasets — 4 panels each
 import matplotlib.patches as mpatches
@@ -303,15 +380,15 @@ RTSNet_Pipeline_true.setssModel(sys_model_true)
 RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
 RTSNet_Pipeline_true.setTrainingParams(args)
 
-# RTSNet_Pipeline_true.train_RTS_net_3_datasets(
-#     sys_model_true,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_true,
-#     load_path_RTS=load_path_rtsnet_true,
-#     generate_f=True,
-#     datasets=cycle,
-# )
+RTSNet_Pipeline_true.train_RTS_net_3_datasets(
+    sys_model_true,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_true,
+    load_path_RTS=load_path_rtsnet_true,
+    generate_f=True,
+    datasets=cycle,
+)
 
 sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
 [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
@@ -335,15 +412,15 @@ RTSNet_Pipeline_false.setssModel(sys_model_false)
 RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
 RTSNet_Pipeline_false.setTrainingParams(args)
 
-# RTSNet_Pipeline_false.train_RTS_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_false,
-#     load_path_RTS=load_path_rtsnet_false,
-#     generate_f=True,
-#     datasets=cycle,
-# )
+RTSNet_Pipeline_false.train_RTS_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_false,
+    load_path_RTS=load_path_rtsnet_false,
+    generate_f=True,
+    datasets=cycle,
+)
 
 sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
@@ -361,41 +438,41 @@ sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 #############################
 print(f"\nMNet {cycle}-cycle training ...")
 
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=load_path_M_F,       # initialise from training-1 MNet
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-#     datasets=cycle,
-#     propagate_F=False,
-# )
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F,
+    load_path_RTS=destination_path_rtsnet_false,
+    load_mnet=load_path_M_F,       # initialise from training-1 MNet
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,
+)
 
 ###############################
 ### Joint cycle training     ###
 ###############################
 print(f"\nJoint {cycle}-cycle training ...")
 
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F_joint,
-#     destination_path_RTS=destination_path_rtsnet_jointF,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=destination_path_M_F,   # initialised by MNet training above
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-#     datasets=cycle,
-#     propagate_F=False,
-# )
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F_joint,
+    destination_path_RTS=destination_path_rtsnet_jointF,
+    load_path_RTS=destination_path_rtsnet_false,
+    load_mnet=destination_path_M_F,   # initialised by MNet training above
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,
+)
 
 # RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
 #     sys_model_false,
