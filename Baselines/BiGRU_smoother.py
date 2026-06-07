@@ -145,7 +145,8 @@ def test_bigru_smoother(
     test_input,
     test_target,
     load_path,
-    device
+    device,
+    obs_mask=None,
 ):
     """
     test_input can be:
@@ -159,6 +160,10 @@ def test_bigru_smoother(
 
     test_input = test_input.to(device)
     test_target = test_target.to(device)
+
+    if obs_mask is not None:
+        test_input = test_input.clone()
+        test_input[:, :, ~obs_mask] = 0.0
 
     model = torch.load(load_path, weights_only=False).to(device)
     model.eval()

@@ -40,9 +40,13 @@ mic_positions = torch.tensor(
 # ── Trajectory validity bounds ────────────────────────────────────────────────
 USE_BOUNDARIES = True           # True: enforce original bounds  False: unbounded (huge limits, for experiments)
 
+# if USE_BOUNDARIES:
+#     PX_MIN, PX_MAX =  -150.0,   150.0 #9
+#     PY_MIN, PY_MAX =   1,  150.0 #   1, 15
+#     V_MAX          =   3.5
 if USE_BOUNDARIES:
-    PX_MIN, PX_MAX =  -9.0,   9.0
-    PY_MIN, PY_MAX =   1,  15.0
+    PX_MIN, PX_MAX =  -9.0,   9.0 #9
+    PY_MIN, PY_MAX =   1,  15.0 #   1, 15
     V_MAX          =   3.5
 else:
     PX_MIN, PX_MAX = -1000.0, 1000.0
@@ -64,8 +68,10 @@ R  = r2 * R_structure
 # ── Initial condition (fixed and known for every sequence) ────────────────────
 # p_y starts at the centre of [PY_MIN, PY_MAX] = 3.5 so noise has equal margin
 # in both directions before hitting either bound.
+# v0    = 0.75
+# m1x_0 = torch.tensor([[15], [15], [v0], [v0]],####i 0.5.4.0.3.0.3
 v0    = 0.3
-m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],####i changed to 5 instead of 4
+m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],####i 0.5.4.0.3.0.3
                       dtype=torch.float32, device=device)  # [4, 1]
 m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 

@@ -37,6 +37,7 @@ from Simulations.TDOA_2D.ekf_erts import run_ekf_erts
 from Simulations.Extended_sysmdl import SystemModel
 from Pipelines.Pipeline_mic import Pipeline_mic as Pipeline
 from RTSNet.RTSNet_nn import RTSNetNN
+from Baselines.BiGRU_smoother import test_bigru_smoother
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Using device:", device)
@@ -61,7 +62,7 @@ args.lr      = 1e-3
 args.wd      = 1e-3
 
 T_test = args.T_test
-N_T    = args.N_T
+N_T    = args.N_T       
 
 q2 = 0.001
 r2 = 1.
@@ -72,9 +73,10 @@ theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # matches analytic test
 assert len(theta_per_dataset) == cycle
 
 # Sparse-measurement mask — must match analytic test exactly so ERTS baselines are comparable.
-MEASURE_EVERY_K = 1   # 1 = every step; >1 = sparse
+MEASURE_EVERY_K = 1   # 1 = every step (no mask); >1 = sparse
 obs_mask = torch.zeros(T_test, dtype=torch.bool)
 obs_mask[::MEASURE_EVERY_K] = True
+obs_mask = None if MEASURE_EVERY_K == 1 else obs_mask   # None → full observations (reversible)
 
 num_em_iters = 2
 
@@ -85,6 +87,7 @@ m2x_0 = m2x_0.to(device)
 
 save_dir  = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 cycle_dir = save_dir + f"{cycle}cycle/"
+# cycle_dir = save_dir
 # cycle_dir = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
 os.makedirs(cycle_dir, exist_ok=True)
 
@@ -94,14 +97,22 @@ path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
 path_rtsnet_joint = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
 path_M_F_joint    = cycle_dir + "5dM_step_F_net_joint0.001.pt"
+# path_rtsnet_true  = cycle_dir + "RTSNet_true0.001.pt"
+# path_rtsnet_false = cycle_dir + "RTSNet_false0.001.pt"
+# path_M_F          = save_dir + "M_step_F_net0.001.pt"
+# path_rtsnet_joint = save_dir + "RTSNet_falseF_joint0.001.pt"
+# path_M_F_joint    = save_dir + "M_step_F_net_joint0.001.pt"
+path_bigru        = cycle_dir + "BiGRU.pt"
 
 data_path = save_dir + "test_nn_3_dataset_data.pt"
 
 ###################
 ###    FLAGS     ###
 ###################
-LOAD_DATA  = False  # True → skip generation, load data from data_path
-OVERSAMPLE = 1.15   # generate ceil(N_T × OVERSAMPLE) candidates, keep best N_T
+LOAD_DATA      = False  # True → skip generation, load data from data_path
+OVERSAMPLE     = 1.15   # generate ceil(N_T × OVERSAMPLE) candidates, keep best N_T
+VARY_NOISE     = False   # True → r2 changes per dataset; False = original fixed-noise behaviour
+r2_per_dataset = [0.1, 0.5, 1.0, 1.5, 2.0]   # only used when VARY_NOISE=True
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
 #   USE_REFLECTION — True: bounce at walls           False: reject (good_seq=0)
@@ -137,9 +148,10 @@ else:
     print(f"\nGenerating {cycle} test datasets (N_gen={N_gen_T}) ...")
     for k in range(cycle):
         theta_k = theta_per_dataset[k]
-        print(f"  Dataset {k}: theta={theta_k:.4f} rad ...", end="", flush=True)
+        R_k = (r2_per_dataset[k] * R_structure).to(device) if VARY_NOISE else R
+        print(f"  Dataset {k}: theta={theta_k:.4f} rad  r2={r2_per_dataset[k] if VARY_NOISE else r2} ...", end="", flush=True)
         xi, xt, F_te, v_te = generate_dataset_raw_batch(
-            N_gen_T, T_test, 0, Q, R,
+            N_gen_T, T_test, 0, Q, R_k,
             x_init=carry_test, theta_base=[theta_k] * N_gen_T,
         )
         for i in range(N_gen_T):
@@ -211,21 +223,24 @@ for j in range(N_T):
     for data in range(cycle):
         y_seq  = all_test_inputs[data][j]
         x_true = all_test_targets[data][j]
+        R_erts = (r2_per_dataset[data] * R_structure).to(device) if VARY_NOISE else R
 
         get_F_true  = make_get_F_from_matrix(all_F_test_true[data][j])
         get_F_false = make_get_F_from_matrix(all_F_test_false[data][j])
 
         x_s_true, _, P_f_true, *_ = run_ekf_erts(
-            y_seq, get_F_true, Q_in=Q, R_in=R,
+            y_seq, get_F_true, Q_in=Q, R_in=R_erts,
             x_init=x0_true, P_init=P0_true,
+            obs_mask=obs_mask,
         )
         mse_true_arr[data, j] = loss_fn(x_s_true, x_true).item()
         x0_true = x_s_true[:, -1].detach()
         P0_true = P_f_true[:, :, -1].detach()
 
         x_s_false, _, P_f_false, *_ = run_ekf_erts(
-            y_seq, get_F_false, Q_in=Q, R_in=R,
+            y_seq, get_F_false, Q_in=Q, R_in=R_erts,
             x_init=x0_false, P_init=P0_false,
+            obs_mask=obs_mask,
         )
         mse_false_arr[data, j] = loss_fn(x_s_false, x_true).item()
         x0_false = x_s_false[:, -1].detach()
@@ -234,6 +249,58 @@ for j in range(N_T):
         if j == 0:
             out_true_seq0.append(x_s_true)
             out_false_seq0.append(x_s_false)
+
+#########################################
+###  F-matrix proof                   ###
+#########################################
+print("\n" + "=" * 60)
+print("F-MATRIX PROOF — verifying RTSNet receives different F")
+print("=" * 60)
+_F_t = all_F_test_true[0][0]    # true F, dataset 0, seq 0
+_F_f = all_F_test_false[0][0]   # false F, dataset 0, seq 0
+_x0  = m1x_0.reshape(-1)
+
+print(f"  Dataset 0 theta_true  = {math.atan2(_F_t[3,2].item(), _F_t[2,2].item()):.4f} rad")
+print(f"  Dataset 0 theta_false = {math.atan2(_F_f[3,2].item(), _F_f[2,2].item()):.4f} rad")
+print(f"  True  F velocity block:  [[{_F_t[2,2]:.4f}, {_F_t[2,3]:.4f}], [{_F_t[3,2]:.4f}, {_F_t[3,3]:.4f}]]")
+print(f"  False F velocity block:  [[{_F_f[2,2]:.4f}, {_F_f[2,3]:.4f}], [{_F_f[3,2]:.4f}, {_F_f[3,3]:.4f}]]")
+
+_pred_true  = _F_t @ _x0
+_pred_false = _F_f @ _x0
+_diff1 = (_pred_true - _pred_false).abs()
+print(f"\n  One-step prediction from x0={_x0.cpu().numpy().round(3)}:")
+print(f"    F_true  @ x0 = {_pred_true.cpu().detach().numpy().round(4)}")
+print(f"    F_false @ x0 = {_pred_false.cpu().detach().numpy().round(4)}")
+print(f"    |diff| t=1    = pos {_diff1[:2].norm().item():.4f} m   vel {_diff1[2:].norm().item():.4f} m/s")
+
+# Propagate T steps (no noise) to see cumulative divergence
+_traj_true  = torch.zeros(m, T_test, device=device)
+_traj_false = torch.zeros(m, T_test, device=device)
+_xT_true  = _x0.clone()
+_xT_false = _x0.clone()
+for _t in range(T_test):
+    _xT_true  = _F_t @ _xT_true
+    _xT_false = _F_f @ _xT_false
+    _traj_true[:, _t]  = _xT_true
+    _traj_false[:, _t] = _xT_false
+_diffT = (_xT_true - _xT_false).abs()
+_mse_ol = loss_fn(_traj_false, _traj_true).item()
+_mse_ol_db = 10 * math.log10(_mse_ol)
+print(f"\n  After T={T_test} steps (no noise — pure model error):")
+print(f"    F_true^T  @ x0 = {_xT_true.cpu().detach().numpy().round(3)}")
+print(f"    F_false^T @ x0 = {_xT_false.cpu().detach().numpy().round(3)}")
+print(f"    |diff| t=T     = pos {_diffT[:2].norm().item():.3f} m   vel {_diffT[2:].norm().item():.3f} m/s")
+print(f"    Open-loop MSE (false vs true trajectory): {_mse_ol:.4f} = {_mse_ol_db:.2f} dB")
+print(f"    → this is the MAXIMUM gap possible if no observations correct the error")
+
+_tmp = RTSNetNN()
+_tmp.NNBuild(sys_model_true, args)
+_tmp.update_F(_F_t)
+print(f"\n  model.F after update_F(F_true) [2,2:]  = [{_tmp.F[2,2]:.4f}, {_tmp.F[2,3]:.4f}, {_tmp.F[3,2]:.4f}, {_tmp.F[3,3]:.4f}]")
+_tmp.update_F(_F_f)
+print(f"  model.F after update_F(F_false) [2,2:] = [{_tmp.F[2,2]:.4f}, {_tmp.F[2,3]:.4f}, {_tmp.F[3,2]:.4f}, {_tmp.F[3,3]:.4f}]")
+del _tmp, _F_t, _F_f, _x0, _pred_true, _pred_false, _diff1, _xT_true, _xT_false, _diffT, _traj_true, _traj_false, _t, _mse_ol, _mse_ol_db
+print("=" * 60)
 
 #########################################
 ###  RTSNet true-F                    ###
@@ -250,6 +317,7 @@ RTSNet_Pipeline_true.setTrainingParams(args)
  rtsnet_out_true, _] = RTSNet_Pipeline_true.NNTest_3_datasets(
     sys_model_true, all_test_inputs, all_test_targets,
     path_rtsnet_true, generate_f=True, datasets=cycle,
+    obs_mask=obs_mask,
 )
 
 mse_rt_db = [10 * math.log10(MSE_arr_rt[k * N_T:(k + 1) * N_T].mean().item())
@@ -270,6 +338,7 @@ RTSNet_Pipeline_false.setTrainingParams(args)
  rtsnet_out_false, _] = RTSNet_Pipeline_false.NNTest_3_datasets(
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_false, generate_f=True, datasets=cycle,
+    obs_mask=obs_mask,
 )
 
 mse_rf_db = [10 * math.log10(MSE_arr_rf[k * N_T:(k + 1) * N_T].mean().item())
@@ -285,7 +354,7 @@ print("\nMNet (EMKFNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_false, path_M_F,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
-    propagate_F=False,
+    propagate_F=False, obs_mask=obs_mask,
 )
 
 mse_mnet_db = [10 * math.log10(MSE_arr_mnet[k * N_T:(k + 1) * N_T].mean().item())
@@ -301,11 +370,29 @@ print("\nJoint (RTSNet + MNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_joint, path_M_F_joint,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
-    propagate_F=False,
+    propagate_F=False, obs_mask=obs_mask,
 )
 
 mse_joint_db = [10 * math.log10(MSE_arr_joint[k * N_T:(k + 1) * N_T].mean().item())
                 for k in range(cycle)]
+
+#########################################
+###  BiGRU baseline                   ###
+#########################################
+print("\nBiGRU ...")
+mse_bigru_all, mse_bigru_db, bigru_x_hat = test_bigru_smoother(
+    all_test_inputs, all_test_targets, path_bigru, device, obs_mask=obs_mask,
+)
+# x_hat shape: [N_T * cycle, m, T] — datasets concatenated in order 0..cycle-1
+mse_bigru_per_ds = [
+    10 * math.log10(
+        ((bigru_x_hat[k * N_T:(k + 1) * N_T] -
+          all_test_targets[k].to(device)) ** 2).mean().item()
+    )
+    for k in range(cycle)
+]
+# per-sequence outputs for plot: bigru_x_hat[k * N_T + j] → shape [m, T]
+rtsnet_out_bigru = [bigru_x_hat[k * N_T] for k in range(cycle)]
 
 #########################################
 ###  Results summary                  ###
@@ -324,7 +411,8 @@ for k in range(cycle):
           f"  RTSNet-T: {mse_rt_db[k]:6.2f} dB"
           f"  RTSNet-F: {mse_rf_db[k]:6.2f} dB"
           f"  MNet: {mse_mnet_db[k]:6.2f} dB"
-          f"  Joint: {mse_joint_db[k]:6.2f} dB")
+          f"  Joint: {mse_joint_db[k]:6.2f} dB"
+          f"  BiGRU: {mse_bigru_per_ds[k]:6.2f} dB")
 
 print()
 print(f"  ERTS true-F    (overall) : {10*math.log10(mse_true_arr.mean().item()):.2f} dB")
@@ -333,6 +421,7 @@ print(f"  RTSNet true-F  (overall) : {MSE_dB_rt.item():.2f} dB")
 print(f"  RTSNet false-F (overall) : {MSE_dB_rf.item():.2f} dB")
 print(f"  MNet           (overall) : {MSE_dB_mnet.item():.2f} dB")
 print(f"  Joint          (overall) : {MSE_dB_joint.item():.2f} dB")
+print(f"  BiGRU          (overall) : {mse_bigru_db:.2f} dB")
 print("=" * 70)
 
 #########################################
@@ -356,6 +445,7 @@ for k in range(cycle):
     ax.plot(t_axis, rtsnet_out_false[k].cpu()[1], "-",           lw=1.5, label="RTSNet false-F", alpha=0.8)
     ax.plot(t_axis, rtsnet_out_mnet[k].cpu()[1],  "-",           lw=1.5, label="MNet",           alpha=0.7)
     ax.plot(t_axis, rtsnet_out_joint[k].cpu()[1], "-",           lw=1.5, label="Joint",          alpha=0.7)
+    ax.plot(t_axis, rtsnet_out_bigru[k].cpu()[1], "--",          lw=1.5, label="BiGRU",          alpha=0.7)
 
     ax.set_ylabel(f"ds{k} (θ={theta_per_dataset[k]:.2f})\ny position")
     ax.legend(loc="upper right", fontsize=7, ncol=3)
@@ -367,7 +457,8 @@ for k in range(cycle):
         f"RTSNet-T: {mse_rt_db[k]:.2f} dB  "
         f"RTSNet-F: {mse_rf_db[k]:.2f} dB  "
         f"MNet: {mse_mnet_db[k]:.2f} dB  "
-        f"Joint: {mse_joint_db[k]:.2f} dB",
+        f"Joint: {mse_joint_db[k]:.2f} dB  "
+        f"BiGRU: {mse_bigru_per_ds[k]:.2f} dB",
         fontsize=8,
     )
 
@@ -406,6 +497,8 @@ mnet_px   = _cat([rtsnet_out_mnet[k][0]     for k in range(cycle)])
 mnet_py   = _cat([rtsnet_out_mnet[k][1]     for k in range(cycle)])
 jnt_px    = _cat([rtsnet_out_joint[k][0]    for k in range(cycle)])
 jnt_py    = _cat([rtsnet_out_joint[k][1]    for k in range(cycle)])
+bgru_px   = _cat([rtsnet_out_bigru[k][0]    for k in range(cycle)])
+bgru_py   = _cat([rtsnet_out_bigru[k][1]    for k in range(cycle)])
 
 matplotlib.use("TkAgg")   # switch to interactive backend for popup
 
@@ -418,6 +511,7 @@ ax2d.plot(rt_t_px,   rt_t_py,   "-.",   lw=1.6,  label="RTSNet true-F",  zorder=
 ax2d.plot(rt_f_px,   rt_f_py,   "-",    lw=1.4,  label="RTSNet false-F", zorder=4, alpha=0.8)
 ax2d.plot(mnet_px,   mnet_py,   "-",    lw=1.4,  label="MNet",           zorder=4, alpha=0.8)
 ax2d.plot(jnt_px,    jnt_py,    "-",    lw=1.4,  label="Joint",          zorder=4, alpha=0.8)
+ax2d.plot(bgru_px,   bgru_py,   "--",   lw=1.4,  label="BiGRU",          zorder=4, alpha=0.8)
 
 # Dataset boundary markers (start of each dataset on the true trajectory)
 for k in range(cycle):

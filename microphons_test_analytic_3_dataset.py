@@ -273,7 +273,8 @@ for seq_idx in range(10):
     ax_traj.add_patch(_rect)
 
     ax_traj.set_xlabel('p_x');    ax_traj.set_ylabel('p_y')
-    ax_traj.set_xlim(-20, 20);    ax_traj.set_ylim(-10, 20)
+    _px0 = m1x_0.reshape(-1)[0].item();  _py0 = m1x_0.reshape(-1)[1].item()
+    ax_traj.set_xlim(_px0 - 10, _px0 + 10);    ax_traj.set_ylim(_py0 - 10, _py0 + 10)
     ax_traj.set_title('2D trajectory (o=start, x=end per dataset)')
     ax_traj.legend(fontsize=7);   ax_traj.grid(True, alpha=0.4)
 
@@ -290,7 +291,7 @@ for seq_idx in range(10):
 
     fig.suptitle(f'Sequence {seq_idx} -- all datasets (test)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
-    plt.show(block=False)
+    plt.show()   # blocking — close this window to see the next sequence
 
 #########################################
 ###  Run ERTS across all datasets     ###
@@ -618,7 +619,8 @@ for k in range(cycle):
 
     ax2.set_xlabel('p_x (m)', fontsize=9)
     ax2.set_ylabel('p_y (m)', fontsize=9)
-    ax2.set_xlim(-20, 20);  ax2.set_ylim(-10, 20)
+    _px0 = m1x_0.reshape(-1)[0].item();  _py0 = m1x_0.reshape(-1)[1].item()
+    ax2.set_xlim(_px0 - 10, _px0 + 10);  ax2.set_ylim(_py0 - 10, _py0 + 10)
     ax2.set_title(f'Dataset {k}  {ds_label[k]}', fontsize=10)
     ax2.legend(fontsize=8, loc='best')
     ax2.grid(True, alpha=0.4)

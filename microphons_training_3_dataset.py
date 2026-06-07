@@ -25,6 +25,7 @@ from Simulations.TDOA_2D.parameters import (
 from Simulations.TDOA_2D.ekf_erts import run_ekf_erts
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+torch.backends.cudnn.benchmark = True
 print("Using device:", device)
 
 loss_fn = nn.MSELoss(reduction="mean")
@@ -60,7 +61,7 @@ T_test = args.T_test
 
 ### noise levelsbut
 q2 = 0.001
-r2 = 1
+r2 = 10
 
 ### cycle: number of datasets
 cycle = 5
@@ -77,18 +78,27 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir  = "RTSNet/tdoa_2d/3mics/r1/cycle1/"
+# save_dir  = "RTSNet/tdoa_2d/3mics/new_x0/r10/"
+save_dir  = "RTSNet/tdoa_2d/3mics/r10/cycle1/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Load paths: pre-trained networks from the 1-dataset experiment
 
-load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
-load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
+# load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
+# load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
+load_path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
+load_path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 load_path_M_F = save_dir + "M_step_F_net0.001.pt"
 load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.001.pt"
 load_path_M_F_joint = save_dir + "M_step_F_net_joint0.001.pt"
+
+# load_path_rtsnet_true  = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_true0.001.pt"
+# load_path_rtsnet_false = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_false0.001.pt"
+# load_path_M_F = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dM_step_F_net0.001.pt"
+# load_path_rtsnet_F_joint = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_falseF_joint0.001.pt"
+# load_path_M_F_joint = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dM_step_F_net_joint0.001.pt"
 
 # Cycle-dataset experiment outputs
 destination_path_rtsnet_true   = cycle_dir + "5dRTSNet_true0.001.pt"
@@ -96,7 +106,7 @@ destination_path_rtsnet_false  = cycle_dir + "5dRTSNet_false0.001.pt"
 destination_path_M_F           = cycle_dir + "5dM_step_F_net0.001.pt"
 destination_path_rtsnet_jointF = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
 destination_path_M_F_joint     = cycle_dir + "5dM_step_F_net_joint0.001.pt"
-destination_path_bigru         = cycle_dir + "BiGRU.pt"
+destination_path_bigru         = "RTSNet/tdoa_2d/3mics/r10/cycle1/" + "BiGRU.pt"
 # destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
 # destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
 # destination_path_M_F           = save_dir + "M_step_F_net.pt"
@@ -109,7 +119,7 @@ data_path = save_dir + "training_3_dataset_data.pt"
 ###    FLAGS     ###
 ###################
 LOAD_DATA  = False  # True → skip generation, load data from data_path
-OVERSAMPLE = 1.5   # generate this × more candidates than N_E/N_CV/N_T
+OVERSAMPLE = 1.25   # generate this × more candidates than N_E/N_CV/N_T
 
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
@@ -390,16 +400,16 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 #     datasets=cycle,
 # )
 
-# sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
-# [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
-#  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
-#     sys_model_true,
-#     all_test_inputs,
-#     all_test_targets,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-#     datasets=cycle,
-# )
+sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
+[MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
+ rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
+    sys_model_true,
+    all_test_inputs,
+    all_test_targets,
+    destination_path_rtsnet_true,
+    generate_f=True,
+    datasets=cycle,
+)
 
 #######################
 ### RTSNet false-F  ###
@@ -422,36 +432,36 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 #     datasets=cycle,
 # )
 
-# sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
-# [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
-#  rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
-#     sys_model_false,
-#     all_test_inputs,
-#     all_test_targets,
-#     destination_path_rtsnet_false,
-#     generate_f=True,
-#     datasets=cycle,
-# )
+sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
+[MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
+ rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
+    sys_model_false,
+    all_test_inputs,
+    all_test_targets,
+    destination_path_rtsnet_false,
+    generate_f=True,
+    datasets=cycle,
+)
 
 #############################
 ### MNet cycle training    ###
 #############################
 print(f"\nMNet {cycle}-cycle training ...")
 
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=load_path_M_F,       # initialise from training-1 MNet
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-#     datasets=cycle,
-#     propagate_F=False,
-# )
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F,
+    load_path_RTS=destination_path_rtsnet_false,
+    load_mnet=load_path_M_F,       # initialise from training-1 MNet
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,
+)
 
 ###############################
 ### Joint cycle training     ###
