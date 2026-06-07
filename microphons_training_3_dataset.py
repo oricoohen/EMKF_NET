@@ -119,7 +119,7 @@ data_path = save_dir + "training_3_dataset_data.pt"
 ###    FLAGS     ###
 ###################
 LOAD_DATA  = False  # True → skip generation, load data from data_path
-OVERSAMPLE = 1.25   # generate this × more candidates than N_E/N_CV/N_T
+OVERSAMPLE = 1.5   # generate this × more candidates than N_E/N_CV/N_T
 
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
