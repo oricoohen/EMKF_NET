@@ -52,16 +52,17 @@ args.T = 50
 args.T_test = 50
 ### training parameters
 args.n_steps = 400
-args.n_batch = 20
+args.n_batch = 25
 args.lr = 1e-3
 args.wd = 1e-3
+args.use_amp = False
 
 T      = args.T
 T_test = args.T_test
 
 ### noise levelsbut
 q2 = 0.001
-r2 = 10
+r2 = 1
 
 ### cycle: number of datasets
 cycle = 5
@@ -78,27 +79,27 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-# save_dir  = "RTSNet/tdoa_2d/3mics/new_x0/r10/"
-save_dir  = "RTSNet/tdoa_2d/3mics/r10/cycle1/"
+save_dir  = "RTSNet/tdoa_2d/3mics/new_x0/r1/"
+# save_dir  = "RTSNet/tdoa_2d/3mics/r10/cycle1/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
 
 # Load paths: pre-trained networks from the 1-dataset experiment
 
-# load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
-# load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
-load_path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
-load_path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
+load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
+load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
+# load_path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
+# load_path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 load_path_M_F = save_dir + "M_step_F_net0.001.pt"
 load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.001.pt"
 load_path_M_F_joint = save_dir + "M_step_F_net_joint0.001.pt"
 
-# load_path_rtsnet_true  = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_true0.001.pt"
-# load_path_rtsnet_false = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_false0.001.pt"
-# load_path_M_F = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dM_step_F_net0.001.pt"
-# load_path_rtsnet_F_joint = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_falseF_joint0.001.pt"
-# load_path_M_F_joint = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dM_step_F_net_joint0.001.pt"
+load_path_rtsnet_true  = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_true0.001.pt"
+load_path_rtsnet_false = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_false0.001.pt"
+load_path_M_F = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dM_step_F_net0.001.pt"
+load_path_rtsnet_F_joint = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_falseF_joint0.001.pt"
+load_path_M_F_joint = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dM_step_F_net_joint0.001.pt"
 
 # Cycle-dataset experiment outputs
 destination_path_rtsnet_true   = cycle_dir + "5dRTSNet_true0.001.pt"
@@ -448,50 +449,13 @@ sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
 #############################
 print(f"\nMNet {cycle}-cycle training ...")
 
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F,
-    load_path_RTS=destination_path_rtsnet_false,
-    load_mnet=load_path_M_F,       # initialise from training-1 MNet
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-    propagate_F=False,
-)
-
-###############################
-### Joint cycle training     ###
-###############################
-print(f"\nJoint {cycle}-cycle training ...")
-
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F_joint,
-    destination_path_RTS=destination_path_rtsnet_jointF,
-    load_path_RTS=destination_path_rtsnet_false,
-    load_mnet=destination_path_M_F,   # initialised by MNet training above
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-    propagate_F=False,
-)
-
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
 #     sys_model_false,
 #     all_cv_inputs,    all_cv_targets,
 #     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F_joint,
-#     destination_path_RTS=destination_path_rtsnet_jointF,
-#     load_path_RTS=destination_path_rtsnet_jointF,
-#     load_mnet=destination_path_M_F_joint,   # initialised by MNet training above
+#     destination_path_M=destination_path_M_F,
+#     load_path_RTS=destination_path_rtsnet_false,
+#     load_mnet=load_path_M_F,       # initialise from training-1 MNet
 #     num_em_iters=num_em_iters,
 #     alpha=(0.3, 1.0, 0.85),
 #     lambda_F=1e-3,
@@ -499,6 +463,59 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
 #     datasets=cycle,
 #     propagate_F=False,
 # )
+
+
+# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_M=destination_path_M_F,
+#     load_path_RTS=destination_path_rtsnet_false,
+#     load_mnet=destination_path_M_F,       # initialise from training-1 MNet
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0, 0.85),
+#     lambda_F=1e-3,
+#     generate_f=True,
+#     datasets=cycle,
+#     propagate_F=False,
+# )
+
+###############################
+### Joint cycle training     ###
+###############################
+print(f"\nJoint {cycle}-cycle training ...")
+
+# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+#     sys_model_false,
+#     all_cv_inputs,    all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_M=destination_path_M_F_joint,
+#     destination_path_RTS=destination_path_rtsnet_jointF,
+#     load_path_RTS=destination_path_rtsnet_false,
+#     load_mnet=destination_path_M_F,   # initialised by MNet training above
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1.0, 0.85),
+#     lambda_F=1e-3,
+#     generate_f=True,
+#     datasets=cycle,
+#     propagate_F=False,
+# )
+
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F_joint,
+    destination_path_RTS=destination_path_rtsnet_jointF,
+    load_path_RTS=destination_path_rtsnet_jointF,
+    load_mnet=destination_path_M_F_joint,   # initialised by MNet training above
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,
+)
 ###############################
 ### Test MNet + Joint       ###
 ###############################

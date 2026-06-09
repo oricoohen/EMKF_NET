@@ -1503,6 +1503,15 @@ class Pipeline_mic:
                         x_loss_start = torch.mean((x_curr - x_true_seq) ** 2)
                         batch_x_loss_start += x_loss_start.detach().item()
 
+                        _dbg = (_ == 0 and data == 0)
+                        if _dbg:
+                            _fv = F_current[2:4, 2:4].detach().cpu()
+                            _tv = F_true[2:4, 2:4].detach().cpu() if hasattr(F_true, 'detach') else F_true[2:4, 2:4].cpu()
+                            print(f"  [dbg ep{epoch:03d} ds{data}] F_false_vv="
+                                  f"[[{_fv[0,0]:.4f} {_fv[0,1]:.4f}] [{_fv[1,0]:.4f} {_fv[1,1]:.4f}]]"
+                                  f"  F_true_vv="
+                                  f"[[{_tv[0,0]:.4f} {_tv[0,1]:.4f}] [{_tv[1,0]:.4f} {_tv[1,1]:.4f}]]")
+
                         for em_iter in range(num_em_iters):
 
                             x_prev = torch.empty_like(x_curr)
@@ -1900,6 +1909,14 @@ class Pipeline_mic:
                             batch_f_loss_em[em_iter] += f_loss.detach().item()
                             batch_reg_em[em_iter] += reg.detach().item()
 
+                            if _dbg:
+                                _ev = F_next[2:4, 2:4].detach().cpu()
+                                _dv = deltaF_vv.detach().cpu()
+                                print(f"  [dbg ep{epoch:03d} ds{data} em{em_iter}]"
+                                      f"  deltaF_vv=[[{_dv[0,0]:.5f} {_dv[0,1]:.5f}] [{_dv[1,0]:.5f} {_dv[1,1]:.5f}]]"
+                                      f"  F_est_vv=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
+                                      f"  f_loss={f_loss.item():.6f}  reg={reg.item():.8f}")
+
                             self.model.update_F(F_current)
                             self.model.InitSequence(x_0, T)
                             self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
@@ -1923,7 +1940,7 @@ class Pipeline_mic:
                             x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                             batch_x_loss_em[em_iter] += x_loss.detach().item()
 
-                            loss_em = 2 * f_loss + 0.5 * reg + x_loss
+                            loss_em = 10 * f_loss + 0.5 * reg + x_loss
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -1960,7 +1977,7 @@ class Pipeline_mic:
                 self.scaler.update()
                 continue
 
-            grad_norm = torch.nn.utils.clip_grad_norm_(all_params, max_norm=0.5)
+            grad_norm = torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
             self.scaler.step(self.optimizer_joint)
             self.scaler.update()
             print(f"  grad_norm (before clip)={grad_norm:.3f}")
@@ -2111,7 +2128,7 @@ class Pipeline_mic:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = 2 * f_loss_cv + 0.5 * reg_cv + x_loss_cv
+                            loss_em_cv = 10 * f_loss_cv + 0.5 * reg_cv + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
