@@ -1909,13 +1909,13 @@ class Pipeline_mic:
                             batch_f_loss_em[em_iter] += f_loss.detach().item()
                             batch_reg_em[em_iter] += reg.detach().item()
 
-                            if _dbg:
-                                _ev = F_next[2:4, 2:4].detach().cpu()
-                                _dv = deltaF_vv.detach().cpu()
-                                print(f"  [dbg ep{epoch:03d} ds{data} em{em_iter}]"
-                                      f"  deltaF_vv=[[{_dv[0,0]:.5f} {_dv[0,1]:.5f}] [{_dv[1,0]:.5f} {_dv[1,1]:.5f}]]"
-                                      f"  F_est_vv=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
-                                      f"  f_loss={f_loss.item():.6f}  reg={reg.item():.8f}")
+                            # if _dbg:
+                            #     _ev = F_next[2:4, 2:4].detach().cpu()
+                            #     _dv = deltaF_vv.detach().cpu()
+                            #     print(f"  [dbg ep{epoch:03d} ds{data} em{em_iter}]"
+                            #           f"  deltaF_vv=[[{_dv[0,0]:.5f} {_dv[0,1]:.5f}] [{_dv[1,0]:.5f} {_dv[1,1]:.5f}]]"
+                            #           f"  F_est_vv=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
+                            #           f"  f_loss={f_loss.item():.6f}  reg={reg.item():.8f}")
 
                             self.model.update_F(F_current)
                             self.model.InitSequence(x_0, T)
@@ -1940,7 +1940,7 @@ class Pipeline_mic:
                             x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                             batch_x_loss_em[em_iter] += x_loss.detach().item()
 
-                            loss_em = 10 * f_loss + 0.5 * reg + x_loss
+                            loss_em = 2 * f_loss + 0.5 * reg + x_loss
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -2128,7 +2128,7 @@ class Pipeline_mic:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = 10 * f_loss_cv + 0.5 * reg_cv + x_loss_cv
+                            loss_em_cv = 2* f_loss_cv + 0.5 * reg_cv + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
