@@ -544,7 +544,8 @@ class Pipeline_mic:
                           train_input, train_target,
                           destination_path_M, destination_path_RTS,
                           load_destination_path_M=None, num_em_iters=2,
-                          alpha=(0.3, 1.0, 0.85), lambda_F=1e-3, generate_f=True):
+                          alpha=(0.3, 1.0, 0.85), lambda_F=1e-3, generate_f=True,
+                          A1_res=False):
         """
         M-step training: freeze RTSNet, train DeltaF_MStepNet to update F.
         Statistics [A1, A2, S_delta_x, S_nu_y, C_delta_x_xminus, F_current]:
@@ -647,8 +648,9 @@ class Pipeline_mic:
                     nu_c   = nu_y - nu_y.mean(dim=1, keepdim=True)
                     S_nu_y = (nu_c @ nu_c.T) / T_seq                       # [n, n]
 
+                    A1_input = (A1 - F_current @ A2) if A1_res else A1
                     z_in = torch.cat([
-                        A1.detach().reshape(-1),
+                        A1_input.detach().reshape(-1),
                         A2.detach().reshape(-1),
                         S_delta_x.detach().reshape(-1),
                         S_nu_y.detach().reshape(-1),
@@ -772,8 +774,9 @@ class Pipeline_mic:
                         nu_c_cv   = nu_y_cv - nu_y_cv.mean(dim=1, keepdim=True)
                         S_nu_y_cv = (nu_c_cv @ nu_c_cv.T) / T_cv
 
+                        A1_cv_input = (A1_cv - F_current_cv @ A2_cv) if A1_res else A1_cv
                         z_cv = torch.cat([
-                            A1_cv.reshape(-1),
+                            A1_cv_input.reshape(-1),
                             A2_cv.reshape(-1),
                             S_delta_x_cv.reshape(-1),
                             S_nu_y_cv.reshape(-1),
@@ -837,7 +840,8 @@ class Pipeline_mic:
                                  load_destination_path_RTS=None,
                                  load_destination_path_M=None,
                                  num_em_iters=2,
-                                 alpha=(0.3, 1.0, 0.85), lambda_F=1e-3, generate_f=True):
+                                 alpha=(0.3, 1.0, 0.85), lambda_F=1e-3, generate_f=True,
+                                 A1_res=False):
         """
         Joint training: RTSNet and DeltaF_MStepNet are both updated.
         RTSNet is NOT frozen — gradients flow through both networks.
@@ -942,8 +946,9 @@ class Pipeline_mic:
                     nu_c   = nu_y - nu_y.mean(dim=1, keepdim=True)
                     S_nu_y = (nu_c @ nu_c.T) / T_seq
 
+                    A1_input = (A1 - F_current @ A2) if A1_res else A1
                     z_in = torch.cat([
-                        A1.detach().reshape(-1),
+                        A1_input.detach().reshape(-1),
                         A2.detach().reshape(-1),
                         S_delta_x.detach().reshape(-1),
                         S_nu_y.detach().reshape(-1),
@@ -1085,8 +1090,9 @@ class Pipeline_mic:
                         nu_c_cv   = nu_y_cv - nu_y_cv.mean(dim=1, keepdim=True)
                         S_nu_y_cv = (nu_c_cv @ nu_c_cv.T) / T_cv
 
+                        A1_cv_input = (A1_cv - F_current_cv @ A2_cv) if A1_res else A1_cv
                         z_cv = torch.cat([
-                            A1_cv.reshape(-1),
+                            A1_cv_input.reshape(-1),
                             A2_cv.reshape(-1),
                             S_delta_x_cv.reshape(-1),
                             S_nu_y_cv.reshape(-1),
@@ -1143,7 +1149,8 @@ class Pipeline_mic:
     # ─── F M-step Testing ─────────────────────────────────────────────────────
     def test_F_mstep_net(self, SysModel, test_input, test_target,
                          destination_path_RTS, destination_path_M,
-                         num_em_iters=1, lambda_F=1e-3, generate_f=True):
+                         num_em_iters=1, lambda_F=1e-3, generate_f=True,
+                         A1_res=False):
         """
         Apply trained DeltaF_MStepNet at test time.
         Returns [MSE_arr, MSE_avg, MSE_dB_avg, x_out_tensor, RunTime]
@@ -1221,8 +1228,9 @@ class Pipeline_mic:
                     nu_c   = nu_y - nu_y.mean(dim=1, keepdim=True)
                     S_nu_y = (nu_c @ nu_c.T) / T_seq
 
+                    A1_input = (A1 - F_current @ A2) if A1_res else A1
                     z_in = torch.cat([
-                        A1.reshape(-1),
+                        A1_input.reshape(-1),
                         A2.reshape(-1),
                         S_delta_x.reshape(-1),
                         S_nu_y.reshape(-1),
@@ -1284,7 +1292,7 @@ class Pipeline_mic:
     def test_F_mstep_net_3_datasets(self, SysModel, all_test_inputs, all_test_targets,
                                      destination_path_RTS, destination_path_M,
                                      num_em_iters=1, generate_f=True, datasets=3,
-                                     propagate_F=True, obs_mask=None):
+                                     propagate_F=True, obs_mask=None, A1_res=False):
         """
         Test MNet across `datasets` sequential datasets.
         For each test sequence j, datasets are processed in order 0→datasets-1.
@@ -1362,8 +1370,9 @@ class Pipeline_mic:
                         nu_c   = nu_y - nu_y.mean(dim=1, keepdim=True)
                         S_nu_y = (nu_c @ nu_c.T) / T
 
+                        A1_input = (A1 - F_current @ A2) if A1_res else A1
                         z_in = torch.cat([
-                            A1.reshape(-1),
+                            A1_input.reshape(-1),
                             A2.reshape(-1),
                             S_delta_x.reshape(-1),
                             S_nu_y.reshape(-1),
@@ -1426,7 +1435,7 @@ class Pipeline_mic:
     def train_F_mstep_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
                         destination_path_M, load_path_RTS, load_mnet, num_em_iters=3, F_init=None,
                         alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, datasets=3,
-                        propagate_F=True):
+                        propagate_F=True, A1_res=False):
         """
         M-step training for F (state transition matrix) across 3 datasets.
         - h is NONLINEAR and stays fixed
@@ -1543,8 +1552,9 @@ class Pipeline_mic:
 
                             C_delta_x_xminus = (delta_x @ x_minus.T) / T
 
+                            A1_input = (A1 - F_current @ A2) if A1_res else A1
                             z_in = torch.cat([
-                                A1.reshape(-1).detach(),
+                                A1_input.reshape(-1).detach(),
                                 A2.reshape(-1).detach(),
                                 S_delta_x.reshape(-1).detach(),
                                 S_nu.reshape(-1).detach(),
@@ -1697,8 +1707,9 @@ class Pipeline_mic:
 
                             C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
 
+                            A1_cv_input = (A1_cv - F_current_cv @ A2_cv) if A1_res else A1_cv
                             z_cv = torch.cat([
-                                A1_cv.reshape(-1),
+                                A1_cv_input.reshape(-1),
                                 A2_cv.reshape(-1),
                                 S_delta_x_cv.reshape(-1),
                                 S_nu_cv.reshape(-1),
@@ -1777,7 +1788,7 @@ class Pipeline_mic:
     def train_F_mstep_net_3_datasets_joint(self, SysModel, cv_input, cv_target, train_input, train_target,
                                     destination_path_M, destination_path_RTS, load_path_RTS, load_mnet, num_em_iters=3, F_init=None,
                                     alpha=(0.05, 0.1, 0.85), lambda_F=1e-3, generate_f=True, datasets=3,
-                                    x_0_train_list=None, x_0_cv_list=None, propagate_F=True):
+                                    x_0_train_list=None, x_0_cv_list=None, propagate_F=True, A1_res=False):
         """
         Joint training for F M-step + RTSNet across 3 datasets.
         - h is NONLINEAR and stays fixed
@@ -1816,6 +1827,7 @@ class Pipeline_mic:
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 for _ in range(self.N_B):
                     n_e = random.randint(0, self.N_E - 1)
+                    _dbg = (_ == 0)
 
                     F_base = F_init.clone().to(self.device) if F_init is not None else SysModel.F_train[0][n_e].clone().detach().to(self.device)
 
@@ -1889,8 +1901,9 @@ class Pipeline_mic:
 
                             C_delta_x_xminus = (delta_x @ x_minus.T) / T
 
+                            A1_input = (A1 - F_current @ A2) if A1_res else A1
                             z_in = torch.cat([
-                                A1.reshape(-1).detach(),
+                                A1_input.reshape(-1).detach(),
                                 A2.reshape(-1).detach(),
                                 S_delta_x.reshape(-1).detach(),
                                 S_nu.reshape(-1).detach(),
@@ -1909,13 +1922,13 @@ class Pipeline_mic:
                             batch_f_loss_em[em_iter] += f_loss.detach().item()
                             batch_reg_em[em_iter] += reg.detach().item()
 
-                            # if _dbg:
-                            #     _ev = F_next[2:4, 2:4].detach().cpu()
-                            #     _dv = deltaF_vv.detach().cpu()
-                            #     print(f"  [dbg ep{epoch:03d} ds{data} em{em_iter}]"
-                            #           f"  deltaF_vv=[[{_dv[0,0]:.5f} {_dv[0,1]:.5f}] [{_dv[1,0]:.5f} {_dv[1,1]:.5f}]]"
-                            #           f"  F_est_vv=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
-                            #           f"  f_loss={f_loss.item():.6f}  reg={reg.item():.8f}")
+                            if _dbg:
+                                _ev = F_next[2:4, 2:4].detach().cpu()
+                                _tv = F_true[2:4, 2:4].detach().cpu() if hasattr(F_true, 'detach') else F_true[2:4, 2:4].cpu()
+                                print(f"  [F ep{epoch:03d} ds{data} em{em_iter}]"
+                                      f"  F_est=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
+                                      f"  F_true=[[{_tv[0,0]:.4f} {_tv[0,1]:.4f}] [{_tv[1,0]:.4f} {_tv[1,1]:.4f}]]"
+                                      f"  f_loss={f_loss.item():.6f}")
 
                             self.model.update_F(F_current)
                             self.model.InitSequence(x_0, T)
@@ -2086,8 +2099,9 @@ class Pipeline_mic:
 
                             C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
 
+                            A1_cv_input = (A1_cv - F_current_cv @ A2_cv) if A1_res else A1_cv
                             z_cv = torch.cat([
-                                A1_cv.reshape(-1),
+                                A1_cv_input.reshape(-1),
                                 A2_cv.reshape(-1),
                                 S_delta_x_cv.reshape(-1),
                                 S_nu_cv.reshape(-1),

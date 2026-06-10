@@ -401,16 +401,16 @@ RTSNet_Pipeline_true.setTrainingParams(args)
 #     datasets=cycle,
 # )
 
-sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
-[MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
- rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
-    sys_model_true,
-    all_test_inputs,
-    all_test_targets,
-    destination_path_rtsnet_true,
-    generate_f=True,
-    datasets=cycle,
-)
+# sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
+# [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
+#  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
+#     sys_model_true,
+#     all_test_inputs,
+#     all_test_targets,
+#     destination_path_rtsnet_true,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 #######################
 ### RTSNet false-F  ###
@@ -433,16 +433,16 @@ RTSNet_Pipeline_false.setTrainingParams(args)
 #     datasets=cycle,
 # )
 
-sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
-[MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
- rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
-    sys_model_false,
-    all_test_inputs,
-    all_test_targets,
-    destination_path_rtsnet_false,
-    generate_f=True,
-    datasets=cycle,
-)
+# sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
+# [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
+#  rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
+#     sys_model_false,
+#     all_test_inputs,
+#     all_test_targets,
+#     destination_path_rtsnet_false,
+#     generate_f=True,
+#     datasets=cycle,
+# )
 
 #############################
 ### MNet cycle training    ###
@@ -485,14 +485,31 @@ print(f"\nMNet {cycle}-cycle training ...")
 ###############################
 print(f"\nJoint {cycle}-cycle training ...")
 
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F_joint,
+    destination_path_RTS=destination_path_rtsnet_jointF,
+    load_path_RTS=destination_path_rtsnet_false,
+    load_mnet=destination_path_M_F,   # initialised by MNet training above
+    num_em_iters=num_em_iters,
+    alpha=(0.3, 1.0, 0.85),
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,
+    A1_res= True
+)
+
 # RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
 #     sys_model_false,
 #     all_cv_inputs,    all_cv_targets,
 #     all_train_inputs, all_train_targets,
 #     destination_path_M=destination_path_M_F_joint,
 #     destination_path_RTS=destination_path_rtsnet_jointF,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=destination_path_M_F,   # initialised by MNet training above
+#     load_path_RTS=destination_path_rtsnet_jointF,
+#     load_mnet=destination_path_M_F_joint,   # initialised by MNet training above
 #     num_em_iters=num_em_iters,
 #     alpha=(0.3, 1.0, 0.85),
 #     lambda_F=1e-3,
@@ -500,22 +517,6 @@ print(f"\nJoint {cycle}-cycle training ...")
 #     datasets=cycle,
 #     propagate_F=False,
 # )
-
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F_joint,
-    destination_path_RTS=destination_path_rtsnet_jointF,
-    load_path_RTS=destination_path_rtsnet_jointF,
-    load_mnet=destination_path_M_F_joint,   # initialised by MNet training above
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-    propagate_F=False,
-)
 ###############################
 ### Test MNet + Joint       ###
 ###############################
@@ -527,7 +528,7 @@ print("\nTesting MNet ...")
  rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
     sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_false, destination_path_M_F,
-    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,propagate_F=False,
 )
 
 print("\nTesting joint ...")
@@ -535,7 +536,7 @@ print("\nTesting joint ...")
  rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
     sys_model_false, all_test_inputs, all_test_targets,
     destination_path_rtsnet_jointF, destination_path_M_F_joint,
-    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,propagate_F=False,
 )
 
 ########################################
