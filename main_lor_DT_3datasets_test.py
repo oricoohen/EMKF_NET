@@ -82,7 +82,7 @@ num_iters = 2
 
 cycles = 10
 
-r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -94,10 +94,10 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_ori_RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/10datasets/ori_RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
-destination_path_M = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
+destination_path_M = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
@@ -105,8 +105,8 @@ destination_path_M = 'RTSNet/lorenz_rotated_001/3datasets/M_step_net.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/10datasets/ori_RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_2h_ori_M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_2h_ori_RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 bigru_path = 'RTSNet/lorenz_rotated_01/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []
@@ -297,51 +297,51 @@ print('\n=== Starting AI EMKF Experiment with Pre-trained RTSNet ===')
 print('\n=== Baseline: MSE with TRUE H matrices ===')
 true_H_results = []
 true_mse_lin_sum = 0.0
-# xT0_last = None
-# for dataset_id in range(cycles):
-#     print(f"\n--- Testing Dataset {dataset_id + 1} with TRUE H ---")
-#
-#     test_input = all_inputs_by_H[dataset_id]
-#     test_target = all_targets_by_H[dataset_id]
-#     true_H_for_this_dataset = H_matrices_for_datasets[dataset_id]
-#
-#     # Set up system model with true H
-#     sys_model_true = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
-#     sys_model_true.InitSequence(m1x_0, m2x_0)  # x0 and P0
-#
-#     # Set H_test for the model (needed by NNTest)
-#     sys_model_true.H_test = true_H_for_this_dataset
-#     # sys_model_true.H_test = H_deji
-#
-#     if dataset_id == 0:
-#         # Use NNTest to get results with TRUE H
-#         #[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime]
-#         # results = RTSNet_Pipeline.NNTest(
-#         #     sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
-#         # if InitIsRandom_test:
-#         #     xT0_last = test_init.clone()
-#         # else:
-#         #     xT0_last = None
-#         results = RTSNet_Pipeline.NNTest(
-#             sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
-#     else:
-#         results = RTSNet_Pipeline.NNTest(
-#             sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
-#
-#     all_rts_trueH_x.append(results[3].detach().clone())  # [N_T, m, T]
-#     # Extract MSE in dB
-#     mse_db = results[2]  # MSE_test_dB_avg
-#     true_H_results.append(mse_db)
-#     print(f"Dataset {dataset_id + 1} - TRUE H MSE: {mse_db:.3f} dB")
-#     mse_lin = float(results[1])  # results[1] = linear MSE avg
-#     true_mse_lin_sum += mse_lin
-#
-#     # >>> propagate last smoothed x_T and P_T to next dataset <<<
-#     x_last = results[3][:, :, -1].clone()            # [N_T, m]
-#     xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
-#     pT0_last = sys_model_true.m2x_0.clone().detach()
-#
-# average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
+xT0_last = None
+for dataset_id in range(cycles):
+    print(f"\n--- Testing Dataset {dataset_id + 1} with TRUE H ---")
+
+    test_input = all_inputs_by_H[dataset_id]
+    test_target = all_targets_by_H[dataset_id]
+    true_H_for_this_dataset = H_matrices_for_datasets[dataset_id]
+
+    # Set up system model with true H
+    sys_model_true = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model_true.InitSequence(m1x_0, m2x_0)  # x0 and P0
+
+    # Set H_test for the model (needed by NNTest)
+    sys_model_true.H_test = true_H_for_this_dataset
+    # sys_model_true.H_test = H_deji
+
+    if dataset_id == 0:
+        # Use NNTest to get results with TRUE H
+        #[MSE_test_linear_arr, MSE_test_linear_avg, MSE_test_dB_avg, rtsnet_out, RunTime]
+        # results = RTSNet_Pipeline.NNTest(
+        #     sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+        # if InitIsRandom_test:
+        #     xT0_last = test_init.clone()
+        # else:
+        #     xT0_last = None
+        results = RTSNet_Pipeline.NNTest(
+            sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
+    else:
+        results = RTSNet_Pipeline.NNTest(
+            sys_model_true, test_input, test_target, destination_path_rtsnet_full,generate_h=False,generate_f=None,init_x_list=xT0_last, init_P_list=None)
+
+    all_rts_trueH_x.append(results[3].detach().clone())  # [N_T, m, T]
+    # Extract MSE in dB
+    mse_db = results[2]  # MSE_test_dB_avg
+    true_H_results.append(mse_db)
+    print(f"Dataset {dataset_id + 1} - TRUE H MSE: {mse_db:.3f} dB")
+    mse_lin = float(results[1])  # results[1] = linear MSE avg
+    true_mse_lin_sum += mse_lin
+
+    # >>> propagate last smoothed x_T and P_T to next dataset <<<
+    x_last = results[3][:, :, -1].clone()            # [N_T, m]
+    xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
+    pT0_last = sys_model_true.m2x_0.clone().detach()
+
+average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
 #############################################################################
 # AI EMKF Sequential Testing
@@ -426,62 +426,62 @@ for dataset_id in range(cycles):
     assert x0_em_last[0].ndim == 2 and x0_em_last[0].shape[1] == 1, f"x0 shape off: {x0_em_last[0].shape}"
 emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
-#############################################################################
-# # Baseline: Test with INITIAL GUESS H using NNTest
-# print('\n=== Baseline: MSE with INITIAL GUESS H ===')
-# initial_guess_results = []
-# init_mse_lin_sum = 0.0
-#
-# for dataset_id in range(cycles):
-#     print(f"\n--- Testing Dataset {dataset_id + 1} with INITIAL GUESS H ---")
-#
-#     test_input = all_inputs_by_H[dataset_id]
-#     test_target = all_targets_by_H[dataset_id]
-#
-#     # Set up system model with initial guess H
-#     sys_model_init = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
-#     sys_model_init.InitSequence(m1x_0, m2x_0)  # x0 and P0
-#
-#
-#     sys_model_init.H_test = initial_guess_H
-#     # sys_model_init.H_test = H_deji
-#     # destination_path_rtsnet_partial_exp_3
-#
-#     # Use NNTest to get results with initial guess H
-#     if dataset_id == 0:
-#         # xH0_last = test_init.clone()
-#         results = RTSNet_Pipeline.NNTest(
-#             sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
-#         # results = RTSNet_Pipeline.NNTest(
-#         #     sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint, generate_h=False,
-#         #     generate_f=None, init_x_list=xH0_last, init_P_list=None)
-#     else:
-#         results = RTSNet_Pipeline.NNTest(
-#             sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
-#
-#     all_initH_x.append(results[3].detach().clone())  # [N_T, m, T]
-#     # Extract MSE in dB
-#     mse_db = results[2]  # MSE_test_dB_avg
-#     init_mse_lin_sum += float(results[1])  # results[1] = linear MSE avg
-#
-#     # >>> propagate last smoothed x_T and P_T to next dataset <<<
-#     x_last = results[3][:, :, -1].clone()  # [N_T, m]
-#     xH0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
-#     pH0_last = sys_model_init.m2x_0.clone().detach()
-#
-#     initial_guess_results.append(mse_db)
-#     print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {mse_db:.3f} dB")
-#
-# average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(init_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
-# print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB")
+############################################################################
+# Baseline: Test with INITIAL GUESS H using NNTest
+print('\n=== Baseline: MSE with INITIAL GUESS H ===')
+initial_guess_results = []
+init_mse_lin_sum = 0.0
+
+for dataset_id in range(cycles):
+    print(f"\n--- Testing Dataset {dataset_id + 1} with INITIAL GUESS H ---")
+
+    test_input = all_inputs_by_H[dataset_id]
+    test_target = all_targets_by_H[dataset_id]
+
+    # Set up system model with initial guess H
+    sys_model_init = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model_init.InitSequence(m1x_0, m2x_0)  # x0 and P0
+
+
+    sys_model_init.H_test = initial_guess_H
+    # sys_model_init.H_test = H_deji
+    # destination_path_rtsnet_partial_exp_3
+
+    # Use NNTest to get results with initial guess H
+    if dataset_id == 0:
+        # xH0_last = test_init.clone()
+        results = RTSNet_Pipeline.NNTest(
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=None, init_P_list=None)
+        # results = RTSNet_Pipeline.NNTest(
+        #     sys_model_init, test_input, test_target, destination_path_rtsnet_partial_joint, generate_h=False,
+        #     generate_f=None, init_x_list=xH0_last, init_P_list=None)
+    else:
+        results = RTSNet_Pipeline.NNTest(
+            sys_model_init, test_input, test_target, destination_path_rtsnet_partial,generate_h=False,generate_f=None,init_x_list=xH0_last, init_P_list=None)
+
+    all_initH_x.append(results[3].detach().clone())  # [N_T, m, T]
+    # Extract MSE in dB
+    mse_db = results[2]  # MSE_test_dB_avg
+    init_mse_lin_sum += float(results[1])  # results[1] = linear MSE avg
+
+    # >>> propagate last smoothed x_T and P_T to next dataset <<<
+    x_last = results[3][:, :, -1].clone()  # [N_T, m]
+    xH0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
+    pH0_last = sys_model_init.m2x_0.clone().detach()
+
+    initial_guess_results.append(mse_db)
+    print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {mse_db:.3f} dB")
+
+average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(init_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
+print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB")
 
 #############################################################################
 # print('\n=== SUMMARY COMPARISON ===')
-# print(f"TRUE H (perfect):        {average_true_H_mse_db:.3f} dB")
-# print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
+print(f"TRUE H (perfect):        {average_true_H_mse_db:.3f} dB")
+print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
 print(f"EMKF FINAL (learned):    {emkf_final_mse_db:.3f} dB")
-# print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
-# print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
+print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
+print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
 
 
 import matplotlib.pyplot as plt
@@ -494,9 +494,9 @@ sample_idx = 0  # choose which test sequence to display
 
 # Glue across datasets: result shape [m, cycles*T]
 x_true_glued = torch.cat([all_true_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
-# x_rts_trueH_glued = torch.cat([all_rts_trueH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
+x_rts_trueH_glued = torch.cat([all_rts_trueH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
 x_emkf_glued = torch.cat([all_emkf_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
-# x_initH_glued = torch.cat([all_initH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
+x_initH_glued = torch.cat([all_initH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
 
 T_len = all_true_x[0].shape[2]
 total_T = x_true_glued.shape[1]
@@ -524,7 +524,7 @@ fig = plt.figure(figsize=(9, 7))
 ax = fig.add_subplot(111, projection='3d')
 
 ax.plot(x_true_glued[0].numpy(), x_true_glued[1].numpy(), x_true_glued[2].numpy(), label="True x", linewidth=2)
-# ax.plot(x_rts_trueH_glued[0].numpy(), x_rts_trueH_glued[1].numpy(), x_rts_trueH_glued[2].numpy(), label="RTSNet TRUE H", linewidth=2)
+ax.plot(x_rts_trueH_glued[0].numpy(), x_rts_trueH_glued[1].numpy(), x_rts_trueH_glued[2].numpy(), label="RTSNet TRUE H", linewidth=2)
 ax.plot(x_emkf_glued[0].numpy(), x_emkf_glued[1].numpy(), x_emkf_glued[2].numpy(), label="EMKF learned H", linewidth=2)
 # ax.plot(x_initH_glued[0].numpy(), x_initH_glued[1].numpy(), x_initH_glued[2].numpy(), label="RTSNet initial H", linewidth=2)
 

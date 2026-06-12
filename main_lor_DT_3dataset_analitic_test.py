@@ -97,16 +97,17 @@ args.T_test = 30 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
-max_iter = 10
+max_iter = 3
 
 cycles = 10
 
-r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.005], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
-Q = q2[0] * Q_structure
-R = r2[0] * R_structure
+Q_true = q2[0] * Q_structure
+R_true = r2[0] * R_structure
+
 print('q2 is:', q2)
 print('r2 is:', r2)
 
@@ -118,7 +119,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.09, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.1, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
@@ -138,7 +139,7 @@ for dataset_id in range(1, cycles+1):
     print(H_current[1])
 
     # Create system model with FIXED F and current H
-    sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model = SystemModel(f, Q_true, hRotate, R_true, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
     # Create folder and file names
@@ -186,26 +187,35 @@ for d in range(cycles):
 # ============================================================
 # Estimate Q,R from the TRUE generated data
 # ============================================================
-qr_est = estimate_Q_R_from_true_data(
-    all_inputs_by_H=all_inputs_by_H,
-    all_targets_by_H=all_targets_by_H,
-    all_H_matrices=all_H_matrices,
-    f=f,
-    Q_structure=None,
-    R_structure=None,
-    device=DEVICE,
-    dtype=DTYPE
-)
+# qr_est = estimate_Q_R_from_true_data(
+#     all_inputs_by_H=all_inputs_by_H,
+#     all_targets_by_H=all_targets_by_H,
+#     all_H_matrices=all_H_matrices,
+#     f=f,
+#     Q_structure=None,
+#     R_structure=None,
+#     device=DEVICE,
+#     dtype=DTYPE
+# )
+#
+# Q_hat = qr_est["Q_hat_full"]
+# R_hat = qr_est["R_hat_full"]
+#
+# print("\n=== Estimated noise statistics from TRUE data ===")
+# print(f"count_q = {qr_est['count_q']}, count_r = {qr_est['count_r']}")
+# print("Q_hat (structured) =\n", Q_hat)
+# print("R_hat (structured) =\n", R_hat)
+# Q = Q_hat
+# R = R_hat
 
-Q_hat = qr_est["Q_hat_full"]
-R_hat = qr_est["R_hat_full"]
 
-print("\n=== Estimated noise statistics from TRUE data ===")
-print(f"count_q = {qr_est['count_q']}, count_r = {qr_est['count_r']}")
-print("Q_hat (structured) =\n", Q_hat)
-print("R_hat (structured) =\n", R_hat)
-Q = Q_hat
-R = R_hat
+
+r2_false = torch.tensor([10.0], device=device)
+q2_false = torch.mul(v, r2_false)
+
+
+Q_false = q2_false[0] * Q_structure
+R_false = r2_false[0] * R_structure
 #############################################################################
 # Calculate MSE for each dataset with TRUE H (what would happen without EMKF)
 x0_last = None
@@ -218,7 +228,7 @@ for dataset_id in range(cycles):
     true_H_for_this_dataset = H_matrices_for_datasets[dataset_id]
 
     # Use the TRUE H matrix for this dataset
-    sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
 
@@ -257,30 +267,31 @@ for dataset_id in range(cycles):
     test_target = all_targets_by_H[dataset_id]
 
     # Use the TRUE H matrix for this dataset
-    sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
 
-    # if dataset_id == 0:
-    #     [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-    #         sys_model, test_input, test_target,
-    #         H_list=H_initial_estimate,
-    #         generate_h=False,
-    #         init_x_list=None,
-    #         init_P_list=None
-    #     )
-    # else:
-    #     [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-    #         sys_model, test_input, test_target,
-    #         H_list=H_initial_estimate,
-    #         generate_h=False,
-    #         init_x_list=x0_last,
-    #         init_P_list=p0_last
-    #     )
+    if dataset_id == 0:
+        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+            sys_model, test_input, test_target,
+            H_list=H_initial_estimate,
+            generate_h=False,
+            init_x_list=None,
+            init_P_list=None
+        )
+    else:
+        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+            sys_model, test_input, test_target,
+            H_list=H_initial_estimate,
+            generate_h=False,
+            init_x_list=x0_last,
+            init_P_list=p0_last
+        )
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     all_initH_x.append(x_list.detach().clone())
     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
-    p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
+    # p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
+    p0_last = [m2x_0.clone() for k in range(args.N_T)]
     mse_total_false +=_mse_avg.item()
     print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {_mse_db.item():.3f} dB")
 
@@ -306,7 +317,7 @@ for dataset_id in range(cycles):
 
 
     # Create system model for EMKF with FIXED F
-    sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
 
@@ -316,16 +327,16 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         H_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last,x_list_emkf = EMKF_H_analitic_f_nonlinear(
             sys_model,  H_current_estimate, test_input,m1x_0,m2x_0,  test_target,
-            max_it=3, generate_h=False,init_x_list=None, init_P_list=None)
+            max_it=max_iter, generate_h=False,init_x_list=None, init_P_list=None)
     else:
         H_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last,x_list_emkf = EMKF_H_analitic_f_nonlinear(
             sys_model, H_current_estimate,test_input,m1x_0,m2x_0, test_target,
-            max_it=3, generate_h=False,init_x_list=x0_last, init_P_list=p0_last)
+            max_it=max_iter, generate_h=False,init_x_list=x0_last, init_P_list=p0_last)
     all_emkf_x.append(x_list_emkf)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     x0_last = [x_last[k].clone() for k in range(args.N_T)]
     p0_last = [p_last[k].clone() for k in range(args.N_T)]
-
+    # p0_last = [m2x_0.clone() for k in range(args.N_T)]
     # H_matrices has N_T (amount of seq) list inside where each list has max_it + initial guess H matrices
     # Update H estimate for next iteration (use the result from EMKF)
     H_current_estimate = [Hs_per_seq[-1].clone() for Hs_per_seq in H_matrices]
