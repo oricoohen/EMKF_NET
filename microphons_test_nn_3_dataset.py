@@ -96,8 +96,8 @@ path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
 path_rtsnet_true  =  "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/"+ "5dRTSNet_true0.001.pt"
 path_rtsnet_false = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_false0.001.pt"
 path_M_F          = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net0.001.pt"
-path_rtsnet_joint = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_falseF_joint0.001_new_with_res.pt"
-path_M_F_joint    = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net_joint0.001_new_with_res.pt"
+path_rtsnet_joint = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_falseF_joint0.001_no_res.pt"
+path_M_F_joint    = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net_joint0.001_no_res.pt"
 # path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
 # path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 # path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
@@ -113,7 +113,7 @@ data_path = save_dir + "test_nn_3_dataset_data.pt"
 LOAD_DATA      = False  # True → skip generation, load data from data_path
 OVERSAMPLE     = 1.15   # generate ceil(N_T × OVERSAMPLE) candidates, keep best N_T
 VARY_NOISE     = False   # True → r2 changes per dataset; False = original fixed-noise behaviour
-A1_RES         = True   # True → feed A1-F@A2 (residual) to MNet instead of raw A1
+A1_RES         = False   # True → feed A1-F@A2 (residual) to MNet instead of raw A1
 r2_per_dataset = [0.1, 0.5, 1.0, 1.5, 2.0]   # only used when VARY_NOISE=True
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded

@@ -454,7 +454,7 @@ RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
     all_cv_inputs,    all_cv_targets,
     all_train_inputs, all_train_targets,
     destination_path_M=destination_path_M_F,
-    load_path_RTS=destination_path_rtsnet_false,
+    load_path_RTS=destination_path_rtsnet_true,
     load_mnet=load_path_M_F,       # initialise from training-1 MNet
     num_em_iters=num_em_iters,
     alpha=(0.3, 1.0, 0.85),
