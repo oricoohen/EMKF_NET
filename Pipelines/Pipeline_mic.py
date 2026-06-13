@@ -1349,7 +1349,15 @@ class Pipeline_mic:
                     for t in range(T - 3, -1, -1):
                         x_s[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_s[:, t + 2])
 
-                    x_loss_per_iter[0] += loss_fn(x_s, x_true).item()
+                    _init_loss = loss_fn(x_s, x_true).item()
+                    x_loss_per_iter[0] += _init_loss
+
+                    # capture for per-sequence print (first 5 sequences)
+                    if j < 5:
+                        _seq_F_start = F_current.clone().detach()
+                        _seq_x_init  = _init_loss
+                        _seq_F_em    = [None] * num_em_iters
+                        _seq_x_em    = [0.0]  * num_em_iters
 
                     # ── EM iterations ────────────────────────────────────────
                     for em_iter in range(num_em_iters):
@@ -1386,6 +1394,9 @@ class Pipeline_mic:
                         F_next[2:4, 2:4] = F_current[2:4, 2:4] + deltaF_vv
                         F_current  = F_next
 
+                        if j < 5:
+                            _seq_F_em[em_iter] = F_next.clone().detach()
+
                         self.model.update_F(F_current)
                         self.model.InitSequence(x_0, T)
                         self.model.init_hidden()
@@ -1404,7 +1415,29 @@ class Pipeline_mic:
                         for t in range(T - 3, -1, -1):
                             x_s[:, t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_s[:, t + 2])
 
-                        x_loss_per_iter[em_iter + 1] += loss_fn(x_s, x_true).item()
+                        _em_loss = loss_fn(x_s, x_true).item()
+                        x_loss_per_iter[em_iter + 1] += _em_loss
+                        if j < 5:
+                            _seq_x_em[em_iter] = _em_loss
+
+                    # ── print F evolution for first 5 sequences ──────────────
+                    if j < 5:
+                        _F_true_seq = SysModel.F_test_TRUE[data][j] if hasattr(SysModel, 'F_test_TRUE') else None
+                        _th_s  = math.atan2(_seq_F_start[3, 2].item(), _seq_F_start[2, 2].item())
+                        _xi_db = 10 * math.log10(max(_seq_x_init, 1e-10))
+                        _em_parts = []
+                        for _k in range(num_em_iters):
+                            if _seq_F_em[_k] is not None:
+                                _th_e  = math.atan2(_seq_F_em[_k][3, 2].item(), _seq_F_em[_k][2, 2].item())
+                                _xl_db = 10 * math.log10(max(_seq_x_em[_k], 1e-10))
+                                _em_parts.append(f"F_em{_k+1} θ={_th_e:.4f} x={_xl_db:.2f}dB")
+                        _tr_str = ""
+                        if _F_true_seq is not None:
+                            _ftt   = _F_true_seq.detach() if hasattr(_F_true_seq, 'detach') else _F_true_seq
+                            _th_t  = math.atan2(_ftt[3, 2].item(), _ftt[2, 2].item())
+                            _tr_str = f"  |  F_true θ={_th_t:.4f}"
+                        print(f"[TEST seq{j} ds{data}] F_start θ={_th_s:.4f} x_init={_xi_db:.2f}dB"
+                              f"  |  {'  |  '.join(_em_parts)}{_tr_str}")
 
                     MSE_arr[data * N_T + j] = loss_fn(x_s, x_true).item()
                     x_out_list.append(x_s)
@@ -1594,7 +1627,7 @@ class Pipeline_mic:
                             x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                             batch_x_loss_em[em_iter] += x_loss.detach().item()
 
-                            loss_em = 2 * f_loss + 0.5 * reg + x_loss
+                            loss_em = 200* f_loss + reg + x_loss
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -1748,7 +1781,7 @@ class Pipeline_mic:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = 2 * f_loss_cv + 0.5 * reg_cv + x_loss_cv
+                            loss_em_cv = 200 * f_loss_cv +  reg_cv + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -1809,6 +1842,9 @@ class Pipeline_mic:
             list(self.model.parameters()) + list(model_mstep.parameters()),
             lr=self.learningRate
         )
+        scheduler_joint = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer_joint, mode='min', factor=0.5, patience=15, min_lr=1e-6
+        )
 
         self.MSE_cv_dB_opt = 1000
         self.MSE_cv_idx_opt = 0
@@ -1823,6 +1859,14 @@ class Pipeline_mic:
             batch_x_loss_em = [0.0] * num_em_iters
             batch_f_loss_em = [0.0] * num_em_iters
             batch_reg_em = [0.0] * num_em_iters
+
+            # F-summary storage for first batch sample (one print per epoch)
+            _ep_F_start = [None] * datasets
+            _ep_F_em    = [[None] * num_em_iters for _d in range(datasets)]
+            _ep_F_true  = [None] * datasets
+            _ep_f_loss  = [[0.0] * num_em_iters for _d in range(datasets)]
+            _ep_x_start = [0.0] * datasets
+            _ep_x_em    = [[0.0] * num_em_iters for _d in range(datasets)]
 
             with autocast(device_type=self.device.type, enabled=self.use_amp):
                 for _ in range(self.N_B):
@@ -1870,6 +1914,12 @@ class Pipeline_mic:
                         y_curr = y_seq
                         x_loss_start = torch.mean((x_curr - x_true_seq) ** 2)
                         batch_x_loss_start += x_loss_start.detach().item()
+
+                        if _dbg:
+                            _ep_F_start[data] = F_current.detach().clone()
+                            _ft_tmp = F_true.detach() if hasattr(F_true, 'detach') else F_true
+                            _ep_F_true[data]  = _ft_tmp.clone()
+                            _ep_x_start[data] = x_loss_start.detach().item()
 
                         for em_iter in range(num_em_iters):
 
@@ -1923,12 +1973,8 @@ class Pipeline_mic:
                             batch_reg_em[em_iter] += reg.detach().item()
 
                             if _dbg:
-                                _ev = F_next[2:4, 2:4].detach().cpu()
-                                _tv = F_true[2:4, 2:4].detach().cpu() if hasattr(F_true, 'detach') else F_true[2:4, 2:4].cpu()
-                                print(f"  [F ep{epoch:03d} ds{data} em{em_iter}]"
-                                      f"  F_est=[[{_ev[0,0]:.4f} {_ev[0,1]:.4f}] [{_ev[1,0]:.4f} {_ev[1,1]:.4f}]]"
-                                      f"  F_true=[[{_tv[0,0]:.4f} {_tv[0,1]:.4f}] [{_tv[1,0]:.4f} {_tv[1,1]:.4f}]]"
-                                      f"  f_loss={f_loss.item():.6f}")
+                                _ep_F_em[data][em_iter] = F_next.detach().clone()
+                                _ep_f_loss[data][em_iter] = f_loss.detach().item()
 
                             self.model.update_F(F_current)
                             self.model.InitSequence(x_0, T)
@@ -1952,8 +1998,10 @@ class Pipeline_mic:
 
                             x_loss = torch.mean((x_curr - x_true_seq) ** 2)
                             batch_x_loss_em[em_iter] += x_loss.detach().item()
+                            if _dbg:
+                                _ep_x_em[data][em_iter] = x_loss.detach().item()
 
-                            loss_em = 2 * f_loss + 0.5 * reg + x_loss
+                            loss_em = 5 * f_loss + 0.5 * reg + x_loss
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -2008,6 +2056,27 @@ class Pipeline_mic:
                 for k in range(num_em_iters)
             ])
             print(f"[epoch {epoch:03d}] x_loss_start={avg_x_loss_start:.6f} {em_msg} loss_all={loss.item():.6f}")
+
+            # ── F θ-summary (first sample of batch) ─────────────────────────
+            print(f"[epoch {epoch:03d}] F-θ summary (sample 0 of batch):")
+            for _d in range(datasets):
+                if _ep_F_start[_d] is None:
+                    continue
+                _fs  = _ep_F_start[_d]
+                _ft  = _ep_F_true[_d]
+                _th_s = math.atan2(_fs[3, 2].item(), _fs[2, 2].item())
+                _th_t = math.atan2(_ft[3, 2].item(), _ft[2, 2].item())
+                _xl_s = 10 * math.log10(max(_ep_x_start[_d], 1e-10))
+                _em_parts = []
+                for _k in range(num_em_iters):
+                    if _ep_F_em[_d][_k] is not None:
+                        _fe    = _ep_F_em[_d][_k]
+                        _th_e  = math.atan2(_fe[3, 2].item(), _fe[2, 2].item())
+                        _fl_db = 10 * math.log10(max(_ep_f_loss[_d][_k], 1e-10))
+                        _xl_db = 10 * math.log10(max(_ep_x_em[_d][_k], 1e-10))
+                        _em_parts.append(f"F_em{_k+1} θ={_th_e:.4f} f={_fl_db:.2f}dB x={_xl_db:.2f}dB")
+                _em_str = "  |  ".join(_em_parts)
+                print(f"  ds{_d}: F_start θ={_th_s:.4f} x={_xl_s:.2f}dB  |  {_em_str}  |  F_true θ={_th_t:.4f}")
 
             # Validation
             model_mstep.eval()
@@ -2142,7 +2211,7 @@ class Pipeline_mic:
                             x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
                             batch_cv_x_loss_em[em_iter] += x_loss_cv.item()
 
-                            loss_em_cv = 2* f_loss_cv + 0.5 * reg_cv + x_loss_cv
+                            loss_em_cv = 5* f_loss_cv + 0.5 * reg_cv + x_loss_cv
 
                             if em_iter == 0:
                                 weight = alpha[0]
@@ -2175,7 +2244,13 @@ class Pipeline_mic:
                 f"cv_reg{k}={avg_cv_reg_em[k]:.6f}"
                 for k in range(num_em_iters)
             ])
-            print(f"[epoch {epoch:03d}] cv_x_loss_start={avg_cv_x_loss_start:.6f} {cv_em_msg} cv_all={cv_epoch:.6f}")
+
+            prev_lr = self.optimizer_joint.param_groups[0]['lr']
+            scheduler_joint.step(cv_epoch)
+            curr_lr = self.optimizer_joint.param_groups[0]['lr']
+            lr_str = f"  lr {prev_lr:.2e}→{curr_lr:.2e}" if curr_lr != prev_lr else f"  lr={curr_lr:.2e}"
+
+            print(f"[epoch {epoch:03d}] cv_x_loss_start={avg_cv_x_loss_start:.6f} {cv_em_msg} cv_all={cv_epoch:.6f}{lr_str}")
             print(f"BEST: epoch={self.MSE_cv_idx_opt}  best_cv_loss={self.MSE_cv_dB_opt:.6f}")
 
             if cv_epoch < self.MSE_cv_dB_opt:

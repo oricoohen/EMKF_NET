@@ -96,8 +96,8 @@ path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
 path_rtsnet_true  =  "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/"+ "5dRTSNet_true0.001.pt"
 path_rtsnet_false = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_false0.001.pt"
 path_M_F          = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net0.001.pt"
-path_rtsnet_joint = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_falseF_joint0.001.pt"
-path_M_F_joint    = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net_joint0.001.pt"
+path_rtsnet_joint = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dRTSNet_falseF_joint0.001_new_with_res.pt"
+path_M_F_joint    = "RTSNet/tdoa_2d/3mics/new_x0/r1/5cycle/" + "5dM_step_F_net_joint0.001_new_with_res.pt"
 # path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
 # path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
 # path_M_F          = cycle_dir + "5dM_step_F_net0.001.pt"
@@ -113,6 +113,7 @@ data_path = save_dir + "test_nn_3_dataset_data.pt"
 LOAD_DATA      = False  # True → skip generation, load data from data_path
 OVERSAMPLE     = 1.15   # generate ceil(N_T × OVERSAMPLE) candidates, keep best N_T
 VARY_NOISE     = False   # True → r2 changes per dataset; False = original fixed-noise behaviour
+A1_RES         = True   # True → feed A1-F@A2 (residual) to MNet instead of raw A1
 r2_per_dataset = [0.1, 0.5, 1.0, 1.5, 2.0]   # only used when VARY_NOISE=True
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
@@ -314,15 +315,15 @@ RTSNet_Pipeline_true.setssModel(sys_model_true)
 RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
 RTSNet_Pipeline_true.setTrainingParams(args)
 
-[MSE_arr_rt, MSE_avg_rt, MSE_dB_rt,
- rtsnet_out_true, _] = RTSNet_Pipeline_true.NNTest_3_datasets(
-    sys_model_true, all_test_inputs, all_test_targets,
-    path_rtsnet_true, generate_f=True, datasets=cycle,
-    obs_mask=obs_mask,
-)
-
-mse_rt_db = [10 * math.log10(MSE_arr_rt[k * N_T:(k + 1) * N_T].mean().item())
-             for k in range(cycle)]
+# [MSE_arr_rt, MSE_avg_rt, MSE_dB_rt,
+#  rtsnet_out_true, _] = RTSNet_Pipeline_true.NNTest_3_datasets(
+#     sys_model_true, all_test_inputs, all_test_targets,
+#     path_rtsnet_true, generate_f=True, datasets=cycle,
+#     obs_mask=obs_mask,
+# )
+#
+# mse_rt_db = [10 * math.log10(MSE_arr_rt[k * N_T:(k + 1) * N_T].mean().item())
+#              for k in range(cycle)]
 
 #########################################
 ###  RTSNet false-F                   ###
@@ -334,16 +335,16 @@ RTSNet_Pipeline_false = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_falseF")
 RTSNet_Pipeline_false.setssModel(sys_model_false)
 RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
 RTSNet_Pipeline_false.setTrainingParams(args)
-
-[MSE_arr_rf, MSE_avg_rf, MSE_dB_rf,
- rtsnet_out_false, _] = RTSNet_Pipeline_false.NNTest_3_datasets(
-    sys_model_false, all_test_inputs, all_test_targets,
-    path_rtsnet_false, generate_f=True, datasets=cycle,
-    obs_mask=obs_mask,
-)
-
-mse_rf_db = [10 * math.log10(MSE_arr_rf[k * N_T:(k + 1) * N_T].mean().item())
-             for k in range(cycle)]
+#
+# [MSE_arr_rf, MSE_avg_rf, MSE_dB_rf,
+#  rtsnet_out_false, _] = RTSNet_Pipeline_false.NNTest_3_datasets(
+#     sys_model_false, all_test_inputs, all_test_targets,
+#     path_rtsnet_false, generate_f=True, datasets=cycle,
+#     obs_mask=obs_mask,
+# )
+#
+# mse_rf_db = [10 * math.log10(MSE_arr_rf[k * N_T:(k + 1) * N_T].mean().item())
+#              for k in range(cycle)]
 
 #########################################
 ###  MNet (EMKFNet)                   ###
@@ -355,7 +356,7 @@ print("\nMNet (EMKFNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_false, path_M_F,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
-    propagate_F=False, obs_mask=obs_mask,
+    propagate_F=False, obs_mask=obs_mask, A1_res=A1_RES,
 )
 
 mse_mnet_db = [10 * math.log10(MSE_arr_mnet[k * N_T:(k + 1) * N_T].mean().item())
@@ -371,7 +372,7 @@ print("\nJoint (RTSNet + MNet) ...")
     sys_model_false, all_test_inputs, all_test_targets,
     path_rtsnet_joint, path_M_F_joint,
     num_em_iters=num_em_iters, generate_f=True, datasets=cycle,
-    propagate_F=False, obs_mask=obs_mask,
+    propagate_F=False, obs_mask=obs_mask, A1_res=A1_RES,
 )
 
 mse_joint_db = [10 * math.log10(MSE_arr_joint[k * N_T:(k + 1) * N_T].mean().item())
@@ -409,8 +410,8 @@ for k in range(cycle):
     print(f"  Dataset {k} (theta={theta_per_dataset[k]:.2f})"
           f"  ERTS-T: {mse_true_db[k]:6.2f} dB"
           f"  ERTS-F: {mse_false_db[k]:6.2f} dB"
-          f"  RTSNet-T: {mse_rt_db[k]:6.2f} dB"
-          f"  RTSNet-F: {mse_rf_db[k]:6.2f} dB"
+          # f"  RTSNet-T: {mse_rt_db[k]:6.2f} dB"
+          # f"  RTSNet-F: {mse_rf_db[k]:6.2f} dB"
           f"  MNet: {mse_mnet_db[k]:6.2f} dB"
           f"  Joint: {mse_joint_db[k]:6.2f} dB"
           f"  BiGRU: {mse_bigru_per_ds[k]:6.2f} dB")
@@ -418,8 +419,8 @@ for k in range(cycle):
 print()
 print(f"  ERTS true-F    (overall) : {10*math.log10(mse_true_arr.mean().item()):.2f} dB")
 print(f"  ERTS false-F   (overall) : {10*math.log10(mse_false_arr.mean().item()):.2f} dB")
-print(f"  RTSNet true-F  (overall) : {MSE_dB_rt.item():.2f} dB")
-print(f"  RTSNet false-F (overall) : {MSE_dB_rf.item():.2f} dB")
+# print(f"  RTSNet true-F  (overall) : {MSE_dB_rt.item():.2f} dB")
+# print(f"  RTSNet false-F (overall) : {MSE_dB_rf.item():.2f} dB")
 print(f"  MNet           (overall) : {MSE_dB_mnet.item():.2f} dB")
 print(f"  Joint          (overall) : {MSE_dB_joint.item():.2f} dB")
 print(f"  BiGRU          (overall) : {mse_bigru_db:.2f} dB")
@@ -442,8 +443,8 @@ for k in range(cycle):
     ax.plot(t_axis, states.cpu()[1],                              lw=2.5, label="true p_y")
     ax.plot(t_axis, out_true_seq0[k].cpu()[1],   "--",           lw=2,   label="ERTS true-F")
     ax.plot(t_axis, out_false_seq0[k].cpu()[1],  ":",            lw=2,   label="ERTS false-F")
-    ax.plot(t_axis, rtsnet_out_true[k].cpu()[1],  "-.",          lw=2,   label="RTSNet true-F")
-    ax.plot(t_axis, rtsnet_out_false[k].cpu()[1], "-",           lw=1.5, label="RTSNet false-F", alpha=0.8)
+    # ax.plot(t_axis, rtsnet_out_true[k].cpu()[1],  "-.",          lw=2,   label="RTSNet true-F")
+    # ax.plot(t_axis, rtsnet_out_false[k].cpu()[1], "-",           lw=1.5, label="RTSNet false-F", alpha=0.8)
     ax.plot(t_axis, rtsnet_out_mnet[k].cpu()[1],  "-",           lw=1.5, label="MNet",           alpha=0.7)
     ax.plot(t_axis, rtsnet_out_joint[k].cpu()[1], "-",           lw=1.5, label="Joint",          alpha=0.7)
     ax.plot(t_axis, rtsnet_out_bigru[k].cpu()[1], "--",          lw=1.5, label="BiGRU",          alpha=0.7)
@@ -453,10 +454,10 @@ for k in range(cycle):
     ax.grid(True, linestyle="--", alpha=0.5)
     ax.set_title(
         f"Dataset {k} — "
-        f"ERTS-T: {mse_true_db[k]:.2f} dB  "
-        f"ERTS-F: {mse_false_db[k]:.2f} dB  "
-        f"RTSNet-T: {mse_rt_db[k]:.2f} dB  "
-        f"RTSNet-F: {mse_rf_db[k]:.2f} dB  "
+        # f"ERTS-T: {mse_true_db[k]:.2f} dB  "
+        # f"ERTS-F: {mse_false_db[k]:.2f} dB  "
+        # f"RTSNet-T: {mse_rt_db[k]:.2f} dB  "
+        # f"RTSNet-F: {mse_rf_db[k]:.2f} dB  "
         f"MNet: {mse_mnet_db[k]:.2f} dB  "
         f"Joint: {mse_joint_db[k]:.2f} dB  "
         f"BiGRU: {mse_bigru_per_ds[k]:.2f} dB",
@@ -490,10 +491,10 @@ erts_t_px = _cat([out_true_seq0[k][0]       for k in range(cycle)])
 erts_t_py = _cat([out_true_seq0[k][1]       for k in range(cycle)])
 erts_f_px = _cat([out_false_seq0[k][0]      for k in range(cycle)])
 erts_f_py = _cat([out_false_seq0[k][1]      for k in range(cycle)])
-rt_t_px   = _cat([rtsnet_out_true[k][0]     for k in range(cycle)])
-rt_t_py   = _cat([rtsnet_out_true[k][1]     for k in range(cycle)])
-rt_f_px   = _cat([rtsnet_out_false[k][0]    for k in range(cycle)])
-rt_f_py   = _cat([rtsnet_out_false[k][1]    for k in range(cycle)])
+# rt_t_px   = _cat([rtsnet_out_true[k][0]     for k in range(cycle)])
+# rt_t_py   = _cat([rtsnet_out_true[k][1]     for k in range(cycle)])
+# rt_f_px   = _cat([rtsnet_out_false[k][0]    for k in range(cycle)])
+# rt_f_py   = _cat([rtsnet_out_false[k][1]    for k in range(cycle)])
 mnet_px   = _cat([rtsnet_out_mnet[k][0]     for k in range(cycle)])
 mnet_py   = _cat([rtsnet_out_mnet[k][1]     for k in range(cycle)])
 jnt_px    = _cat([rtsnet_out_joint[k][0]    for k in range(cycle)])
@@ -508,8 +509,8 @@ fig2d, ax2d = plt.subplots(figsize=(10, 8))
 ax2d.plot(true_px,   true_py,   "k-",   lw=2.5,  label="True",           zorder=6)
 ax2d.plot(erts_t_px, erts_t_py, "--",   lw=1.8,  label="ERTS true-F",    zorder=5)
 ax2d.plot(erts_f_px, erts_f_py, ":",    lw=1.8,  label="ERTS false-F",   zorder=5)
-ax2d.plot(rt_t_px,   rt_t_py,   "-.",   lw=1.6,  label="RTSNet true-F",  zorder=5)
-ax2d.plot(rt_f_px,   rt_f_py,   "-",    lw=1.4,  label="RTSNet false-F", zorder=4, alpha=0.8)
+# ax2d.plot(rt_t_px,   rt_t_py,   "-.",   lw=1.6,  label="RTSNet true-F",  zorder=5)
+# ax2d.plot(rt_f_px,   rt_f_py,   "-",    lw=1.4,  label="RTSNet false-F", zorder=4, alpha=0.8)
 ax2d.plot(mnet_px,   mnet_py,   "-",    lw=1.4,  label="MNet",           zorder=4, alpha=0.8)
 ax2d.plot(jnt_px,    jnt_py,    "-",    lw=1.4,  label="Joint",          zorder=4, alpha=0.8)
 ax2d.plot(bgru_px,   bgru_py,   "--",   lw=1.4,  label="BiGRU",          zorder=4, alpha=0.8)

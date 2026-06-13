@@ -191,14 +191,14 @@ qr_est = estimate_Q_R_from_true_data(
     all_targets_by_H=all_targets_by_H,
     all_H_matrices=all_H_matrices,
     f=f,
-    Q_structure=None,
-    R_structure=None,
+    Q_structure=Q_structure,
+    R_structure=R_structure,
     device=DEVICE,
     dtype=DTYPE
 )
 
-Q_hat = qr_est["Q_hat_full"]
-R_hat = qr_est["R_hat_full"]
+Q_hat = qr_est["Q_hat_structured"]
+R_hat = qr_est["R_hat_structured"]
 
 print("\n=== Estimated noise statistics from TRUE data ===")
 print(f"count_q = {qr_est['count_q']}, count_r = {qr_est['count_r']}")
@@ -293,6 +293,8 @@ print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB"
 print('\n=== MSE with EMKF H matrices ===')
 mse_total = 0
 H_current_estimate = [H_initial_estimate[k].clone() for k in range(args.N_T)]  # Start with initial guess
+x0_last = None
+p0_last = None
 for dataset_id in range(cycles):
     print(f"\n--- EMKF Iteration {dataset_id + 1} ---")
     print(f"Using dataset {dataset_id + 1}")
@@ -316,11 +318,11 @@ for dataset_id in range(cycles):
     if dataset_id == 0:
         H_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last,x_list_emkf = EMKF_H_analitic_f_nonlinear(
             sys_model,  H_current_estimate, test_input,m1x_0,m2x_0,  test_target,
-            max_it=3, generate_h=False,init_x_list=None, init_P_list=None)
+            max_it=max_iter, generate_h=False,init_x_list=None, init_P_list=None, shared_h=True)
     else:
         H_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last,x_list_emkf = EMKF_H_analitic_f_nonlinear(
             sys_model, H_current_estimate,test_input,m1x_0,m2x_0, test_target,
-            max_it=3, generate_h=False,init_x_list=x0_last, init_P_list=p0_last)
+            max_it=max_iter, generate_h=False,init_x_list=x0_last, init_P_list=p0_last, shared_h=True)
     all_emkf_x.append(x_list_emkf)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     x0_last = [x_last[k].clone() for k in range(args.N_T)]

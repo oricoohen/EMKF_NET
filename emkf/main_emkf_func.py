@@ -493,7 +493,9 @@ def EMKF_H_analitic(sys_model, F, H_0_matrices, Q, R, Y, x_0, P_0, X, max_it=3, 
     return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list
 
 
-def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3, generate_h=True, init_x_list=None, init_P_list=None):
+def EMKF_H_analitic_f_nonlinear(
+        sys_model, H_0_matrices, Y, x_0, P_0, X, max_it=3,
+        generate_h=True, init_x_list=None, init_P_list=None, shared_h=False):
     """
     EM algorithm for estimating observation matrix H.
 
@@ -520,6 +522,7 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
       generate_h   : if True, use grouped H (index = j // 10); else one H per sequence
       init_x_list  : optional list of initial state means per sequence
       init_P_list  : optional list of initial covariances per sequence
+      shared_h     : if True, estimate one H jointly from all sequences
 
     Returns:
       H_matrices   : list of H estimates per sequence, length N_seq, each list has (max_it+1) H estimates
@@ -527,6 +530,12 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
       last_x_list  : list of final smoothed states x_T for each sequence
       last_P_list  : list of final smoothed covariances P_T for each sequence
     """
+
+    if shared_h:
+        return _EMKF_H_analytic_shared(
+            sys_model, H_0_matrices, Y, x_0, P_0, X, max_it,
+            generate_h, init_x_list, init_P_list
+        )
 
     m = sys_model.m  # state dimension
     n = sys_model.n  # observation dimension
@@ -644,6 +653,81 @@ def EMKF_H_analitic_f_nonlinear(sys_model, H_0_matrices, Y, x_0, P_0, X,max_it=3
     iterations_list = [max_it-1 for _ in range(N_seq)]
 
     return H_matrices, likelihoods, iterations_list, final_mean_mse, last_x_list, last_P_list,full_x_list
+
+
+def _EMKF_H_analytic_shared(
+        sys_model, H_0_matrices, Y, x_0, P_0, X, max_it,
+        generate_h, init_x_list, init_P_list):
+    """Estimate one observation matrix jointly from all sequences."""
+    m = sys_model.m
+    n = sys_model.n
+    N_seq = Y.size(0)
+
+    if init_x_list is None:
+        init_x_list = [x_0 for _ in range(N_seq)]
+    if init_P_list is None:
+        init_P_list = [P_0 for _ in range(N_seq)]
+
+    initial_H = []
+    for j in range(N_seq):
+        h_index = j // 10 if generate_h else j
+        initial_H.append(H_0_matrices[h_index])
+    H_est = torch.stack(initial_H).mean(dim=0)
+    H_history = [H_est.clone()]
+
+    print(f"\n{'='*60}")
+    print("Starting shared-H EM estimation")
+    print(f"  Sequences: {N_seq}, State dim: {m}, Obs dim: {n}")
+    print(f"  Iterations: {max_it}")
+    print(f"{'='*60}\n")
+
+    mse_history = []
+    for q in range(max_it):
+        H_list = [H_est for _ in range(N_seq)]
+        _, mse_avg, mse_db, X_smooth, P_smooth, _ = S_Test_ext_H(
+            sys_model, Y, X, H_list=H_list, generate_h=False,
+            init_x_list=init_x_list, init_P_list=init_P_list
+        )
+        mse_history.append(mse_avg.detach().clone())
+        print(f"Iter {q:02d}: mean MSE = {mse_db.item():.3f} dB")
+
+        C1 = torch.einsum("jnt,jmt->nm", Y, X_smooth)
+        C2 = torch.einsum("jmt,jkt->mk", X_smooth, X_smooth)
+        C2 = C2 + P_smooth.sum(dim=(0, 3))
+        C2 = 0.5 * (C2 + C2.T)
+
+        scale = torch.trace(C2).abs() / max(m, 1)
+        ridge = 1e-6 * torch.clamp(scale, min=1.0)
+        C2 = C2 + ridge * torch.eye(m, device=C2.device, dtype=C2.dtype)
+
+        H_est = torch.linalg.solve(C2.T, C1.T).T
+        H_history.append(H_est.clone())
+
+    # The last M-step changes H, so run one final E-step for consistent outputs.
+    H_list = [H_est for _ in range(N_seq)]
+    _, final_mse, final_mse_db, X_smooth, P_smooth, _ = S_Test_ext_H(
+        sys_model, Y, X, H_list=H_list, generate_h=False,
+        init_x_list=init_x_list, init_P_list=init_P_list
+    )
+    print(f"Final:   mean MSE = {final_mse_db.item():.3f} dB")
+
+    last_x_list = [
+        X_smooth[j, :, -1].unsqueeze(-1).clone() for j in range(N_seq)
+    ]
+    last_P_list = [
+        P_smooth[j, :, :, -1].clone() for j in range(N_seq)
+    ]
+    full_x_list = [X_smooth[j].clone() for j in range(N_seq)]
+    H_matrices = [
+        [H.clone() for H in H_history] for _ in range(N_seq)
+    ]
+    likelihoods = [[] for _ in range(N_seq)]
+    iterations_list = [max_it for _ in range(N_seq)]
+
+    return (
+        H_matrices, likelihoods, iterations_list, final_mse,
+        last_x_list, last_P_list, full_x_list
+    )
 
 
 def EMKF_FH_analytic(sys_model, F_init_list, H_init_list, Q, R, Y, x_0, P_0, X_true,max_it=5, generate_f=True, generate_h=True,init_x_list=None, init_P_list=None,  update_F=True, update_H=True):
