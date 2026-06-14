@@ -73,16 +73,16 @@ H_design = H_design.to(device)
 args = config.general_settings()
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 30    # Length of the time series for training and cross-validation sequences.
-args.T_test = 30 # Length of the time series for test sequences.
+args.T = 200    # Length of the time series for training and cross-validation sequences.
+args.T_test = 200 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
 num_iters = 2
 
-cycles = 10
+cycles = 3
 
-r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -94,10 +94,10 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_ori_RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/10datasets/ori_RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
-destination_path_M = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net.pt'
+destination_path_M = 'RTSNet/lorenz_rotated_1/10datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
@@ -105,10 +105,10 @@ destination_path_M = 'RTSNet/lorenz_rotated_0001/3datasets/M_step_net.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_2h_ori_M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/10datasets/0.4var_2h_ori_RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
-bigru_path = 'RTSNet/lorenz_rotated_01/10datasets/benchmarks/bigru_smoother1_datasets.pt'
+bigru_path = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []
 
 initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
@@ -252,29 +252,29 @@ for d in range(cycles):
 
 
 
-# bigru_mse_lin_sum = 0.0
-# bigru_results = []
-#
-# for dataset_id in range(cycles):
-#
-#     print(f"\n--- BiGRU Dataset {dataset_id + 1} ---")
-#
-#     mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
-#         test_input=all_inputs_by_H[dataset_id],
-#         test_target=all_targets_by_H[dataset_id],
-#         load_path=bigru_path,
-#         device=device
-#     )
-#
-#     bigru_results.append(mse_bigru_db)  # just for printing
-#     bigru_mse_lin_sum += mse_bigru      # accumulate LINEAR MSE
-#
-#     print(f"Dataset {dataset_id+1} - BiGRU MSE: {mse_bigru_db:.3f} dB")
-# avg_bigru_mse = bigru_mse_lin_sum / cycles
-# avg_bigru_mse_db = 10 * torch.log10(torch.tensor(avg_bigru_mse, device=device))
+bigru_mse_lin_sum = 0.0
+bigru_results = []
 
-# print("\n=== BiGRU SUMMARY ===")
-# print(f"Average BiGRU MSE: {avg_bigru_mse_db.item():.3f} dB")
+for dataset_id in range(cycles):
+
+    print(f"\n--- BiGRU Dataset {dataset_id + 1} ---")
+
+    mse_bigru, mse_bigru_db, x_bigru = test_bigru_smoother(
+        test_input=all_inputs_by_H[dataset_id],
+        test_target=all_targets_by_H[dataset_id],
+        load_path=bigru_path,
+        device=device
+    )
+
+    bigru_results.append(mse_bigru_db)  # just for printing
+    bigru_mse_lin_sum += mse_bigru      # accumulate LINEAR MSE
+
+    print(f"Dataset {dataset_id+1} - BiGRU MSE: {mse_bigru_db:.3f} dB")
+avg_bigru_mse = bigru_mse_lin_sum / cycles
+avg_bigru_mse_db = 10 * torch.log10(torch.tensor(avg_bigru_mse, device=device))
+
+print("\n=== BiGRU SUMMARY ===")
+print(f"Average BiGRU MSE: {avg_bigru_mse_db.item():.3f} dB")
 
 
 # Create RTSNet

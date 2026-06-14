@@ -92,8 +92,8 @@ args = config.general_settings()
 #################################################################################
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 30    # Length of the time series for training and cross-validation sequences.
-args.T_test = 30 # Length of the time series for test sequences.
+args.T = 500    # Length of the time series for training and cross-validation sequences.
+args.T_test = 500 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
@@ -101,7 +101,7 @@ max_iter = 3
 
 cycles = 10
 
-r2 = torch.tensor([0.002], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -210,7 +210,7 @@ for d in range(cycles):
 
 
 
-r2_false = torch.tensor([0.002], device=device)
+r2_false = torch.tensor([10], device=device)
 q2_false = torch.mul(v, r2_false)
 
 
