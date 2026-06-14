@@ -73,8 +73,8 @@ H_design = H_design.to(device)
 args = config.general_settings()
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 500    # Length of the time series for training and cross-validation sequences.
-args.T_test = 500 # Length of the time series for test sequences.
+args.T = 1000    # Length of the time series for training and cross-validation sequences.
+args.T_test = 1000 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
