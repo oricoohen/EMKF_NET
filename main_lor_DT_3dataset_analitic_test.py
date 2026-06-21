@@ -92,14 +92,14 @@ args = config.general_settings()
 #################################################################################
 args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 500    # Length of the time series for training and cross-validation sequences.
-args.T_test = 500 # Length of the time series for test sequences.
+args.T = 200    # Length of the time series for training and cross-validation sequences.
+args.T_test = 200 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
-max_iter = 3
+max_iter = 10
 
-cycles = 10
+cycles = 3
 
 r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2

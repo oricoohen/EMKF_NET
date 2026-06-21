@@ -66,7 +66,7 @@ LengthIsRandom = False
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 3000
+args.N_E = 1500
 args.N_CV = 200
 args.N_T = 200
 args.T = 200
@@ -82,7 +82,7 @@ torch.manual_seed(1)
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1.], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -98,17 +98,17 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/final/RTSNet_partial_joint_final.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/final/M_step_net_joint_final.pt'
+load_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/final/RTSNet_partial_joint_final.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/final/M_step_net_joint_final.pt'
 # load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_RTSNet_partial_joint.pt'
 # load_path_M_joint = 'RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/200/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/200/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/3datasets/200/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/200/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/200/RTSNet_partial_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
@@ -186,9 +186,9 @@ for dataset_id in range(cycles):
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
 
-    # train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
-    # val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
-    # test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
+    train_rotate =rotate_H(H_train_mat, theta=0.4, many=True, randomit=True)
+    val_rotate = rotate_H(H_val_mat, theta=0.4, many=True, randomit=True)
+    test_rotate = rotate_H(H_test_mat_list, theta=0.4, many=True, randomit=True)
     train_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_train_mat))]
     val_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_val_mat))]
     test_rotate = [H_Rotate.clone().to(device) for _ in range(len(H_test_mat_list))]
@@ -361,13 +361,13 @@ print("\nStarting training...")
 
 ######################RTSNet Full Training - H Estimation######################
 print('RTSNet Full Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
-                        , load_path_rtsnet_full, H_init=None, datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model_true, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_rtsnet_full
+#                         , load_path_rtsnet_full, H_init=None, datasets=cycles)
 #
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
-RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
-                        , load_path_RTS = load_path_rtsnet_partial, H_init=H_Rotate, datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
+#                         , load_path_RTS = load_path_rtsnet_partial, H_init=H_Rotate, datasets=cycles)
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
