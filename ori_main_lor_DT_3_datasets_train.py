@@ -100,8 +100,8 @@ print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
 load_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/final/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/final/M_step_net_joint.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net.pt'
 # load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_RTSNet_partial_joint.pt'
 # load_path_M_joint = 'RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_M_step_net_joint.pt'
 destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_full.pt'
