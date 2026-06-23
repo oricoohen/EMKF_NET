@@ -1592,6 +1592,97 @@ class Pipeline_ERTS:
         # 4. Return the single tensor
         return V_tensor
 
+    def NNTest_no_p(self, SysModel, test_input, test_target, load_model_path, generate_f=True, init_x_list=None,
+                    init_P_list=None, non_linear_h=False):
+
+        tp = torch.float32
+        print("Testing RTSNet...")
+        self.N_T = len(test_input)
+
+        self.MSE_test_linear_arr = torch.empty([self.N_T], device=self.device, dtype=tp)
+
+        # MSE LOSS Function
+        loss_fn = nn.MSELoss(reduction='mean')
+
+        # Load models
+        self.model = torch.load(load_model_path, weights_only=False).to(self.device).eval()
+
+        torch.no_grad()
+
+        x_out_list = []
+
+        start = time.time()
+
+        with torch.no_grad():
+            for j in range(0, self.N_T):
+                y_mdl_tst = test_input[j]
+                SysModel.T_test = y_mdl_tst.size()[-1]
+                x_out_test_forward_1 = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+                x_out_test = torch.empty(SysModel.m, SysModel.T_test, device=self.device, dtype=tp)
+
+                # choose initials for this sequence j (same logic as NNTest)
+                if (init_x_list is not None) and (init_P_list is not None):
+                    P0 = init_P_list
+                    x0 = init_x_list[j]
+                else:
+                    P0 = SysModel.m2x_0
+                    x0 = SysModel.m1x_0
+                # initialize prior Sigma and hidden for this sequence
+                self.model.prior_Sigma = P0
+                self.model.InitSequence(x0, SysModel.T_test)
+                self.model.init_hidden()
+
+                if generate_f != True:  ####if we valid with different f
+                    SysModel.F = SysModel.F_test[j]
+                else:
+                    index = j // 10
+                    SysModel.F = SysModel.F_test[index]
+                self.model.update_F(SysModel.F)
+                # Forward pass and compute P-smooth
+                self.model.sigma_list = []
+                self.model.smoother_gain_list = []
+                for t in range(0, SysModel.T_test):
+                    x_out_test_forward_1[:, t] = self.model(y_mdl_tst[:, t], None, None, None)
+                    P_test_forward = self.model.h_Sigma.clone().detach()
+                    self.model.sigma_list.append(P_test_forward)  # [1, 1, m²]
+                x_out_test[:, SysModel.T_test - 1] = x_out_test_forward_1[:, SysModel.T_test - 1]
+                self.model.InitBackward(x_out_test[:, SysModel.T_test - 1])
+                x_out_test[:, SysModel.T_test - 2] = self.model(None, x_out_test_forward_1[:, SysModel.T_test - 2],
+                                                                x_out_test_forward_1[:, SysModel.T_test - 1], None)
+                self.model.smoother_gain_list.append(self.model.SGain.clone().detach())
+
+                for t in range(SysModel.T_test - 3, -1, -1):  # T-3 to 0
+                    x_out_test[:, t] = self.model(None, x_out_test_forward_1[:, t], x_out_test_forward_1[:, t + 1],
+                                                  x_out_test[:, t + 2])
+                    self.model.smoother_gain_list.append(self.model.SGain.clone().detach())  ##there are T-1 s gain
+
+                self.MSE_test_linear_arr[j] = loss_fn(x_out_test, test_target[j]).item()
+
+                x_out_list.append(x_out_test)
+                # print('x_latst',x_out_test[:, -1])
+
+        end = time.time()
+        t = end - start
+
+        # Average
+        self.MSE_test_linear_avg = torch.mean(self.MSE_test_linear_arr)
+        self.MSE_test_dB_avg = 10 * torch.log10(self.MSE_test_linear_avg)
+
+        # Standard deviation
+        self.MSE_test_linear_std = torch.std(self.MSE_test_linear_arr, unbiased=True)
+
+        # Confidence interval
+        self.test_std_dB = 10 * torch.log10(self.MSE_test_linear_std + self.MSE_test_linear_avg) - self.MSE_test_dB_avg
+
+        # Print MSE and std
+        str = self.modelName + "-" + "MSE Test:"
+        print(str, self.MSE_test_dB_avg, "[dB]")
+        str = self.modelName + "-" + "STD Test:"
+        print(str, self.test_std_dB, "[dB]")
+        # Print Run Time
+        print("Inference Time:", t)
+
+        return [self.MSE_test_linear_arr, self.MSE_test_linear_avg, self.MSE_test_dB_avg, torch.stack(x_out_list), t]
     def NNTest(self, SysModel, test_input, test_target,load_model_path, generate_f=False,generate_h=False,init_x_list=None, init_P_list=None,non_linear_h=False):
 
         tp = torch.float32
