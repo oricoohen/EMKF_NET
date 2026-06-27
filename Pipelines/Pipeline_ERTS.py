@@ -1606,6 +1606,11 @@ class Pipeline_ERTS:
 
         # Load models
         self.model = torch.load(load_model_path, weights_only=False).to(self.device).eval()
+        # Restore H/F in case the checkpoint predates these attributes being saved
+        if not hasattr(self.model, 'H'):
+            self.model.H = SysModel.H.to(self.device)
+        if not hasattr(self.model, 'F'):
+            self.model.F = SysModel.F.to(self.device)
 
         torch.no_grad()
 

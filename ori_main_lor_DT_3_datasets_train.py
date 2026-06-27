@@ -371,22 +371,22 @@ print('RTSNet PARTIAL Training - H Estimation')
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
-RTSNet_Pipeline.train_H_mstep_net_3_datasets(
-    SysModel=sys_model,
-    cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
-    cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
-    train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
-    train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
-    destination_path_M=destination_path_M_reg,
-    load_path_RTS=destination_path_rtsnet_partial,
-    load_mnet=load_path_M_joint,
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1., 0.85),          # Weights for EM iterations
-    lambda_H=1e-3,                    # Regularization on ΔH
-    generate_h=True,                  # Use grouped H (h_index = n_e // 10)
-    H_init=H_Rotate,                   # Start from the rotated H
-    datasets=cycles                        # Number of datasets
-)
+# RTSNet_Pipeline.train_H_mstep_net_3_datasets(
+#     SysModel=sys_model,
+#     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
+#     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
+#     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
+#     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
+#     destination_path_M=destination_path_M_reg,
+#     load_path_RTS=destination_path_rtsnet_partial,
+#     load_mnet=load_path_M_joint,
+#     num_em_iters=num_em_iters,
+#     alpha=(0.3, 1., 0.85),          # Weights for EM iterations
+#     lambda_H=1e-3,                    # Regularization on ΔH
+#     generate_h=True,                  # Use grouped H (h_index = n_e // 10)
+#     H_init=H_Rotate,                   # Start from the rotated H
+#     datasets=cycles                        # Number of datasets
+# )
 print('MNET AND RTSNET JOINT Training - H Estimation')
 RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
     SysModel=sys_model,
@@ -399,7 +399,7 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
     load_path_RTS=destination_path_rtsnet_partial,
     load_mnet=destination_path_M_reg,
     num_em_iters=num_em_iters,
-    alpha=(0.4, 1., 0.),          # Weights for EM iterations
+    alpha=(0.3, 1., 0.),          # Weights for EM iterations
     lambda_H=1e-3,                    # Regularization on ΔH
     generate_h=True,                  # Use grouped H (h_index = n_e // 10)
     H_init=None,                   # Start from the rotated H
