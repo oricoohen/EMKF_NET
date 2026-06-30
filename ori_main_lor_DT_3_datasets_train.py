@@ -66,14 +66,14 @@ LengthIsRandom = False
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 1500
+args.N_E = 1000
 args.N_CV = 200
 args.N_T = 200
-args.T = 200
-args.T_test = 200
+args.T = 150
+args.T_test = 150
 ### training parameters
 args.n_steps = 400
-args.n_batch = 15
+args.n_batch = 3
 args.lr = 1e-3
 args.wd = 1e-3
 
@@ -98,26 +98,26 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
+# load_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_full.pt'
+# load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial.pt'
+# load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial_joint.pt'
+# load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net_joint.pt'
 # load_path_rtsnet_partial_joint ='RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_RTSNet_partial_joint.pt'
 # load_path_M_joint = 'RTSNet/lorenz_rotated_1/10datasets/0.4var_2h_ori_M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial_joint.pt'
+# destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_partial.pt'
+# destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/150/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_partial_joint.pt'
 # destination_path_M_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint10 = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint2h.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_jointb.pt'
 # bigru_path = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 for p in [
-    destination_path_rtsnet_full,
+    # destination_path_rtsnet_full,
     destination_path_rtsnet_partial,
-    destination_path_M_reg,
+    # destination_path_M_reg,
     destination_path_M_joint,
     destination_path_rtsnet_partial_joint,
     # bigru_path,
@@ -252,11 +252,11 @@ print(f"H deviation (rotated - true) norm: {(all_H_matrices_train_rotate[0][0] -
 
 # Check load paths exist
 import os
-for name, p in [("rtsnet_full", load_path_rtsnet_full),
-                ("rtsnet_partial", load_path_rtsnet_partial),
-                ("rtsnet_partial_joint", load_path_rtsnet_partial_joint),
-                ("M_joint", load_path_M_joint)]:
-    print(f"load {name}: {'EXISTS' if os.path.exists(p) else 'MISSING'} -> {p}")
+# for name, p in [("rtsnet_full", load_path_rtsnet_full),
+#                 ("rtsnet_partial", load_path_rtsnet_partial),
+#                 ("rtsnet_partial_joint", load_path_rtsnet_partial_joint),
+#                 ("M_joint", load_path_M_joint)]:
+#     print(f"load {name}: {'EXISTS' if os.path.exists(p) else 'MISSING'} -> {p}")
 # Verify structure
 # assert len(all_train_inputs) == 3, "Should have 3 datasets"
 assert all_train_inputs[0].shape[0] == args.N_E, f"Train should have {args.N_E} sequences"
@@ -366,8 +366,8 @@ print('RTSNet Full Training - H Estimation')
 #
 ######################RTSNet PARTIAL Training - H Estimation######################
 print('RTSNet PARTIAL Training - H Estimation')
-# RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
-#                         , load_path_RTS = load_path_rtsnet_partial, H_init=H_Rotate, datasets=cycles)
+RTSNet_Pipeline.train_RTS_net_3_datasets(sys_model, all_cv_inputs, all_cv_targets, all_train_inputs, all_train_targets,destination_path_RTS =destination_path_rtsnet_partial
+                        , load_path_RTS = destination_path_rtsnet_partial_joint, H_init=H_Rotate, datasets=cycles)
 
 print('MNETl Training - H Estimation')
 # Call the H training function - CORRECTED: Pass train and cv data, not test data
@@ -396,8 +396,8 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint(
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
     destination_path_M=destination_path_M_joint,
     destination_path_RTS=destination_path_rtsnet_partial_joint,
-    load_path_RTS=destination_path_rtsnet_partial,
-    load_mnet=destination_path_M_reg,
+    load_path_RTS=destination_path_rtsnet_partial_joint,
+    load_mnet=destination_path_M_joint,
     num_em_iters=num_em_iters,
     alpha=(0.3, 1., 0.),          # Weights for EM iterations
     lambda_H=1e-3,                    # Regularization on ΔH
