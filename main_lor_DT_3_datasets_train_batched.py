@@ -101,11 +101,11 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/200/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_partial.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/150/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/150/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/100/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/100/RTSNet_partial.pt'
 destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/100/M_step_net.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/100/M_step_net_joint.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/100/RTSNet_partial_joint.pt'
@@ -241,6 +241,17 @@ sys_model.H_train_TRUE = all_H_matrices_train
 sys_model.H_valid_TRUE = all_H_matrices_cv
 sys_model.H_test_TRUE = all_H_matrices_test
 
+# TRUE system model: H_train holds the TRUE H matrices (oracle smoother reference).
+# Used to train the "true" RTSNet, which sees each sequence's correct H.
+sys_model_true = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)
+sys_model_true.InitSequence(m1x_0, m2x_0)
+sys_model_true.H_train = all_H_matrices_train
+sys_model_true.H_valid = all_H_matrices_cv
+sys_model_true.H_test = all_H_matrices_test
+sys_model_true.H_train_TRUE = all_H_matrices_train
+sys_model_true.H_valid_TRUE = all_H_matrices_cv
+sys_model_true.H_test_TRUE = all_H_matrices_test
+
 print("✓ System model configured with 3-dataset H structure")
 
 # Create RTSNet
@@ -279,36 +290,58 @@ print(f"  F is FIXED (not estimated)")
 print("\nStarting training (batched)...")
 
 # Make sure the output directories exist
-for _p in [destination_path_rtsnet_partial_joint, destination_path_M_joint]:
+for _p in [destination_path_rtsnet_full, destination_path_rtsnet_partial,
+           destination_path_rtsnet_partial_joint, destination_path_M_joint]:
     os.makedirs(os.path.dirname(_p), exist_ok=True)
 
-# ALL sequences start from the SAME initial observation matrix H_init.
-# (single [n, m] matrix, shared across every sequence; change here if needed)
+# The wrong observation matrix every sequence starts from (single [n,m], shared).
 H_init_common = H_Rotate
 
+
+def _fresh_rtsnet(ssm):
+    """A freshly-built RTSNet so each training starts from scratch (not warm-started)."""
+    net = RTSNetNN()
+    net.NNBuild(ssm, args)
+    return net.to(device)
+
+
 # ============================================================================ #
-# STEP 1 - train the RTSNet smoother (batched), from the freshly-built RTSNet.   #
-# Every sequence uses the shared H_init_common.                                  #
-# Numerically equivalent to train_RTS_net_3_datasets, ~13x faster.               #
+# STEP 1a - TRUE RTSNet: trained with the TRUE per-sequence H (oracle smoother). #
+# Uses sys_model_true (H_train = true H) and H_init=None.                        #
 # ============================================================================ #
-print("\n[STEP 1] Training RTSNet smoother (batched)...")
+print("\n[STEP 1a] Training TRUE RTSNet (batched, true H per sequence)...")
+# RTSNet_Pipeline.model = _fresh_rtsnet(sys_model_true)
 # RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
-#     sys_model,
+#     sys_model_true,
 #     all_cv_inputs, all_cv_targets,
 #     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_partial_joint,
-#     load_path_RTS=load_path_rtsnet_partial,               # train from the freshly-built RTSNet
-#     H_init=H_init_common,             # SAME H_init for every sequence
-#     datasets=3)
+#     destination_path_RTS=destination_path_rtsnet_full,
+#     load_path_RTS=None,               # train from scratch
+#     H_init=None,                      # per-sequence TRUE H (oracle)
+#     datasets=cycles)
+
+# ============================================================================ #
+# STEP 1b - FALSE RTSNet: trained with the WRONG H_init (H_Rotate), the same     #
+# matrix for every sequence.                                                     #
+# ============================================================================ #
+print("\n[STEP 1b] Training FALSE RTSNet (batched, wrong H_init=H_Rotate)...")
+RTSNet_Pipeline.model = _fresh_rtsnet(sys_model)
+RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
+    sys_model,
+    all_cv_inputs, all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_partial,
+    load_path_RTS=None,               # train from scratch
+    H_init=H_init_common,             # SAME wrong H for every sequence
+    datasets=cycles)
 
 # Save an initial M-net checkpoint so STEP 2 has one to load.
-# torch.save(RTSNet_Pipeline.M_model_H, destination_path_M_joint)
+torch.save(RTSNet_Pipeline.M_model_H, destination_path_M_joint)
 
 # ============================================================================ #
 # STEP 2 - joint RTSNet + M-net training (batched).                              #
-# Loads the RTSNet from STEP 1; every sequence starts from the shared H_init and #
-# the M-net refines H via EM. Numerically equivalent to                          #
-# train_H_mstep_net_3_datasets_joint, ~15x faster.                               #
+# Loads the FALSE RTSNet from STEP 1b; every sequence starts from the shared      #
+# wrong H_init and the M-net refines H via EM.                                    #
 # ============================================================================ #
 print("\n[STEP 2] Joint RTSNet + M-net training (batched)...")
 RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint_batched(
@@ -319,17 +352,19 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint_batched(
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, T]
     destination_path_M=destination_path_M_joint,
     destination_path_RTS=destination_path_rtsnet_partial_joint,
-    load_path_RTS=load_path_rtsnet_partial_joint,   # RTSNet from STEP 1
-    load_mnet=load_path_M_joint,
+    load_path_RTS=destination_path_rtsnet_partial,   # FALSE RTSNet from STEP 1b
+    load_mnet=destination_path_M_joint,
     num_em_iters=num_em_iters,
     alpha=(0.5, 1., 0.85),            # Weights for EM iterations
     lambda_H=1e-3,                    # Regularization on ΔH
     generate_h=True,                  # H_true indexed per group (h_index = n_e // 10)
-    H_init=H_init_common,             # SAME H_init for every sequence
-    datasets=3)                       # Number of datasets
+    H_init=H_init_common,             # SAME wrong H for every sequence
+    datasets=cycles)                  # Number of datasets
 
 print("\n" + "="*80)
 print("TRAINING COMPLETE (BATCHED)")
 print("="*80)
-print(f"Best M-network model saved to: {destination_path_M_joint}")
-print(f"Best RTSNet model saved to:    {destination_path_rtsnet_partial_joint}")
+print(f"TRUE  RTSNet saved to: {destination_path_rtsnet_full}")
+print(f"FALSE RTSNet saved to: {destination_path_rtsnet_partial}")
+print(f"Joint RTSNet saved to: {destination_path_rtsnet_partial_joint}")
+print(f"M-network    saved to: {destination_path_M_joint}")
