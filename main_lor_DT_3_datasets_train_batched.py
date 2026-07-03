@@ -85,7 +85,7 @@ torch.manual_seed(1)
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -101,14 +101,14 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/200/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/3datasets/200/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/200/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/3datasets/100/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/3datasets/100/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_01/3datasets/100/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_01/3datasets/100/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/3datasets/100/RTSNet_partial_joint.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/3datasets/150/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/150/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/150/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_001/3datasets/100/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_001/3datasets/100/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_001/3datasets/100/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_001/3datasets/100/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_001/3datasets/100/RTSNet_partial_joint.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
