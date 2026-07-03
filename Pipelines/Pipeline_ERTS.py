@@ -5776,7 +5776,7 @@ class Pipeline_ERTS:
 
     ################################################################################################################################################
     def one_train_m_step_net(self, SysModel, cv_input, cv_target, train_input, train_target,
-                        destination_path_M, destination_path_RTS,  lambda_F=1e-3, generate_f=True, non_linear_h=False):
+                        destination_path_M, destination_path_RTS,  lambda_F=1e-3, generate_f=True, non_linear_h=False,generate_h=False):
         """
         Single-function M-step training (no helpers, no .to(...)).
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
@@ -5938,7 +5938,7 @@ class Pipeline_ERTS:
                 x_loss_after = torch.mean((x_smooth - x_true_seq) ** 2)
 
                 # ---- compute loss ----
-                loss = 15* f_loss + reg + x_loss_after
+                loss = 4* f_loss + reg + x_loss_after
 
                 # ---- backward + step (one SGD step per sequence) ----
                 self.M_optimizer.zero_grad()

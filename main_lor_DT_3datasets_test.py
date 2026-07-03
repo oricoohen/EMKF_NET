@@ -17,6 +17,8 @@ from Baselines.BiGRU_smoother import train_bigru_smoother, test_bigru_smoother
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
 import shutil
+import os
+import time
 print("Pipeline Start")
 import random
 # === ADD: global device/dtype ===
@@ -71,12 +73,18 @@ Q_structure = Q_structure.to(device)
 R_structure = R_structure.to(device)
 H_design = H_design.to(device)
 args = config.general_settings()
-args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 10   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 200    # Length of the time series for training and cross-validation sequences.
-args.T_test = 200 # Length of the time series for test sequences.
+args.T = 150    # Length of the time series for training and cross-validation sequences.
+args.T_test = 150 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
+
+# ============================================================
+# FLAGS
+# GENERATE_DATA : True = regenerate datasets, False = load existing
+# ============================================================
+GENERATE_DATA = True
 
 num_iters = 2
 
@@ -94,10 +102,10 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_10/3datasets/200/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_10/3datasets/200/RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
-destination_path_M = 'RTSNet/lorenz_rotated_1/10datasets/M_step_net.pt'
+destination_path_M = 'RTSNet/lorenz_rotated_10/3datasets/200/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
@@ -105,8 +113,8 @@ destination_path_M = 'RTSNet/lorenz_rotated_1/10datasets/M_step_net.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/200/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/200/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
 bigru_path = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother1_datasets.pt'
 H_matrices_for_datasets_d = []
@@ -117,7 +125,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.1, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.3, many=True, randomit=False)
     # H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=the[i], many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
@@ -143,67 +151,35 @@ for dataset_id in range(1, cycles+1):
     sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 
-    # Create folder and file names
-    dataFolderName = f'Simulations/Lorenz_Atractor/data/test_r=1/'
-    dataFileName = f'snr_0{args.T_test}_dataset0_{dataset_id}.pt'
-    dataFileName_H = f'snr_0_H_dataset0_{dataset_id}.pt'
-    dataFileName_F = f'snr_0_F_dataset0_{dataset_id}.pt'
-    # Generate data with FIXED F and DIVERSE H
-    print(f"Generating data for dataset {dataset_id}...")
+    # Folder and file names — keyed by r2, T, cycles
+    r2_val = int(r2[0].item())
+    dataFolderName = f'Simulations/Lorenz_Atractor/data/r2_{r2_val}_T{args.T_test}_c{cycles}/'
+    dataFileName   = f'dataset_{dataset_id}.pt'
+    dataFileName_H = f'dataset_{dataset_id}_H.pt'
+    dataFileName_F = f'dataset_{dataset_id}_F.pt'
 
-    if dataset_id == 1:
-        # if InitIsRandom_test:
-        #     DataGen(args, sys_model,
-        #     dataFolderName + dataFileName,
-        #     dataFolderName + dataFileName_F,
-        #     fileName_H=dataFolderName + dataFileName_H,
-        #     delta=1,
-        #     randomInit_train=False,
-        #     randomInit_cv=False,
-        #     randomInit_test=True,
-        #     randomLength=False,
-        #     Test=True,
-        #     F_gen=False,  # F is FIXED across datasets
-        #     H_gen=H_current,
-        #     x0_list=x0_last,
-        #     H_init=H_current)  # Use x0_last for continuity in test set
-        #     [training_input, training_target, training_init, cv_input, cv_target, cv_init, test_input, test_target,test_init] = torch.load(
-        #     dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
-        # else:
+    if GENERATE_DATA:
+        print(f"Generating data for dataset {dataset_id}...")
+        os.makedirs(dataFolderName, exist_ok=True)
         DataGen(args, sys_model,
-                    dataFolderName + dataFileName,
-                    dataFolderName + dataFileName_F,
-                    fileName_H=dataFolderName + dataFileName_H,
-                    delta=1,
-                    randomInit_train=False,
-                    randomInit_cv=False,
-                    randomInit_test=False,
-                    randomLength=False,
-                    Test=True,
-                    F_gen=False,  # F is FIXED across datasets
-                    H_gen=H_current,
-                    x0_list=x0_last,
-                    H_init=H_current)  # Use x0_last for continuity in test set
-        [training_input, training_target, cv_input, cv_target, test_input, test_target] = torch.load(
-                dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+                dataFolderName + dataFileName,
+                dataFolderName + dataFileName_F,
+                fileName_H=dataFolderName + dataFileName_H,
+                delta=1,
+                randomInit_train=False,
+                randomInit_cv=False,
+                randomInit_test=False,
+                randomLength=False,
+                Test=True,
+                F_gen=False,
+                H_gen=H_current,
+                x0_list=x0_last,
+                H_init=H_current)
     else:
-        DataGen(args, sys_model,
-            dataFolderName + dataFileName,
-            dataFolderName + dataFileName_F,
-            fileName_H=dataFolderName + dataFileName_H,
-            delta=1,
-            randomInit_train=False,
-            randomInit_cv=False,
-            randomInit_test=False,
-            randomLength=False,
-            Test=True,
-            F_gen=False,  # F is FIXED across datasets
-            H_gen=H_current,
-            x0_list=x0_last,
-            H_init=H_current)  # Use x0_last for continuity in test set
-        #Load the generated data
-        [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
-            dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
+        print(f"Loading existing data for dataset {dataset_id}...")
+
+    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
+        dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
 
     [H_train_mat, H_val_mat, H_test_mat_list] = torch.load(dataFolderName + dataFileName_H, map_location=DEVICE)
     # print(f"H matrices loaded for dataset {H_test_mat_list}:")
@@ -255,6 +231,7 @@ for d in range(cycles):
 bigru_mse_lin_sum = 0.0
 bigru_results = []
 
+t_start_bigru = time.perf_counter()
 for dataset_id in range(cycles):
 
     print(f"\n--- BiGRU Dataset {dataset_id + 1} ---")
@@ -270,6 +247,7 @@ for dataset_id in range(cycles):
     bigru_mse_lin_sum += mse_bigru      # accumulate LINEAR MSE
 
     print(f"Dataset {dataset_id+1} - BiGRU MSE: {mse_bigru_db:.3f} dB")
+t_end_bigru = time.perf_counter()
 avg_bigru_mse = bigru_mse_lin_sum / cycles
 avg_bigru_mse_db = 10 * torch.log10(torch.tensor(avg_bigru_mse, device=device))
 
@@ -298,6 +276,7 @@ print('\n=== Baseline: MSE with TRUE H matrices ===')
 true_H_results = []
 true_mse_lin_sum = 0.0
 xT0_last = None
+t_start_true_h = time.perf_counter()
 for dataset_id in range(cycles):
     print(f"\n--- Testing Dataset {dataset_id + 1} with TRUE H ---")
 
@@ -340,6 +319,7 @@ for dataset_id in range(cycles):
     x_last = results[3][:, :, -1].clone()            # [N_T, m]
     xT0_last = [x_last[j].unsqueeze(-1) for j in range(x_last.size(0))]  # list of [m,1]
     pT0_last = sys_model_true.m2x_0.clone().detach()
+t_end_true_h = time.perf_counter()
 
 average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
@@ -350,6 +330,7 @@ print('\n=== AI EMKF Sequential Learning and Testing ===')
 emkf_mse_lin_sum = 0.0
 #################################################################################################################################
 
+t_start_emkf = time.perf_counter()
 for dataset_id in range(cycles):
     print(f"\n--- AI EMKF Processing Dataset {dataset_id + 1} ---")
 
@@ -424,6 +405,7 @@ for dataset_id in range(cycles):
     x0_em_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
 
     assert x0_em_last[0].ndim == 2 and x0_em_last[0].shape[1] == 1, f"x0 shape off: {x0_em_last[0].shape}"
+t_end_emkf = time.perf_counter()
 emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
 ############################################################################
@@ -432,6 +414,7 @@ print('\n=== Baseline: MSE with INITIAL GUESS H ===')
 initial_guess_results = []
 init_mse_lin_sum = 0.0
 
+t_start_init_h = time.perf_counter()
 for dataset_id in range(cycles):
     print(f"\n--- Testing Dataset {dataset_id + 1} with INITIAL GUESS H ---")
 
@@ -471,6 +454,7 @@ for dataset_id in range(cycles):
 
     initial_guess_results.append(mse_db)
     print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {mse_db:.3f} dB")
+t_end_init_h = time.perf_counter()
 
 average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(init_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB")
@@ -482,6 +466,16 @@ print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
 print(f"EMKF FINAL (learned):    {emkf_final_mse_db:.3f} dB")
 print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
 print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
+
+_N_seqs = cycles * args.N_T
+print(f"\n========== Latency Summary ==========")
+print(f"{'Algorithm':<28} {'Total (s)':>10} {'ms/seq':>8}")
+print(f"{'-'*48}")
+print(f"{'BiGRU Smoother':<28} {t_end_bigru - t_start_bigru:>10.2f} {(t_end_bigru - t_start_bigru) / _N_seqs * 1000:>8.1f}")
+print(f"{'RTSNet TRUE H':<28} {t_end_true_h - t_start_true_h:>10.2f} {(t_end_true_h - t_start_true_h) / _N_seqs * 1000:>8.1f}")
+print(f"{'AI EMKF (RTSNet+Mstep)':<28} {t_end_emkf - t_start_emkf:>10.2f} {(t_end_emkf - t_start_emkf) / _N_seqs * 1000:>8.1f}")
+print(f"{'RTSNet INIT GUESS H':<28} {t_end_init_h - t_start_init_h:>10.2f} {(t_end_init_h - t_start_init_h) / _N_seqs * 1000:>8.1f}")
+print(f"{'='*48}")
 
 
 import matplotlib.pyplot as plt

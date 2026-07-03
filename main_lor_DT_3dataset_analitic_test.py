@@ -33,6 +33,7 @@ cudnn.benchmark = True
 
 
 import shutil
+import time
 print("Pipeline Start")
 import random
 # === ADD: global device/dtype ===
@@ -90,7 +91,7 @@ args = config.general_settings()
 
 ############################################################################
 #################################################################################
-args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 10   # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 200    # Length of the time series for training and cross-validation sequences.
 args.T_test = 200 # Length of the time series for test sequences.
@@ -119,7 +120,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.1, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.3, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
@@ -222,6 +223,7 @@ x0_last = None
 p0_last = None
 print('\n=== MSE with TRUE H matrices ===')
 true_mse_lin_sum = 0.0
+t_start_true_h = time.perf_counter()
 for dataset_id in range(cycles):
     test_input = all_inputs_by_H[dataset_id]
     test_target = all_targets_by_H[dataset_id]
@@ -250,6 +252,7 @@ for dataset_id in range(cycles):
     p0_last = [p_list[k, :, :, -1].clone() for k in range(args.N_T)]
     true_mse_lin_sum += _mse_avg.item()
     print(f"Dataset {dataset_id + 1} - TRUE H MSE: {_mse_db.item():.3f} dB")
+t_end_true_h = time.perf_counter()
 
 # Calculate and print average with true H
 average_true_H_mse_db = 10*torch.log10(torch.tensor(true_mse_lin_sum / cycles))
@@ -262,38 +265,38 @@ x0_last = None
 p0_last = None
 print('\n=== MSE with INITIAL GUESS H  ===')
 mse_total_false = 0
-for dataset_id in range(cycles):
-    test_input = all_inputs_by_H[dataset_id]
-    test_target = all_targets_by_H[dataset_id]
-
-    # Use the TRUE H matrix for this dataset
-    sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
-    sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
-
-
-    if dataset_id == 0:
-        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-            sys_model, test_input, test_target,
-            H_list=H_initial_estimate,
-            generate_h=False,
-            init_x_list=None,
-            init_P_list=None
-        )
-    else:
-        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-            sys_model, test_input, test_target,
-            H_list=H_initial_estimate,
-            generate_h=False,
-            init_x_list=x0_last,
-            init_P_list=p0_last
-        )
-    # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
-    all_initH_x.append(x_list.detach().clone())
-    x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
-    # p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
-    p0_last = [m2x_0.clone() for k in range(args.N_T)]
-    mse_total_false +=_mse_avg.item()
-    print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {_mse_db.item():.3f} dB")
+# for dataset_id in range(cycles):
+#     test_input = all_inputs_by_H[dataset_id]
+#     test_target = all_targets_by_H[dataset_id]
+#
+#     # Use the TRUE H matrix for this dataset
+#     sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+#     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
+#
+#
+#     if dataset_id == 0:
+#         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+#             sys_model, test_input, test_target,
+#             H_list=H_initial_estimate,
+#             generate_h=False,
+#             init_x_list=None,
+#             init_P_list=None
+#         )
+#     else:
+#         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+#             sys_model, test_input, test_target,
+#             H_list=H_initial_estimate,
+#             generate_h=False,
+#             init_x_list=x0_last,
+#             init_P_list=p0_last
+#         )
+#     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
+#     all_initH_x.append(x_list.detach().clone())
+#     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
+#     # p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
+#     p0_last = [m2x_0.clone() for k in range(args.N_T)]
+#     mse_total_false +=_mse_avg.item()
+#     print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {_mse_db.item():.3f} dB")
 
 # Calculate and print average with initial guess
 average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(mse_total_false / cycles))
@@ -304,6 +307,7 @@ print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB"
 print('\n=== MSE with EMKF H matrices ===')
 mse_total = 0
 H_current_estimate = [H_initial_estimate[k].clone() for k in range(args.N_T)]  # Start with initial guess
+t_start_emkf = time.perf_counter()
 for dataset_id in range(cycles):
     print(f"\n--- EMKF Iteration {dataset_id + 1} ---")
     print(f"Using dataset {dataset_id + 1}")
@@ -350,6 +354,7 @@ for dataset_id in range(cycles):
     print(f"True H was:\n{true_H_for_this_dataset[0]}")
 
     mse_total += mse_avg_T.item()
+t_end_emkf = time.perf_counter()
 
 MSE_total_db = 10 * torch.log10(torch.tensor(mse_total / cycles))
 
@@ -365,6 +370,14 @@ print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
 print(f"EMKF FINAL (learned):    {MSE_total_db:.3f} dB")
 print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - MSE_total_db):.3f} dB")
 print(f"Gap to perfect (TRUE H): {(MSE_total_db - average_true_H_mse_db):.3f} dB")
+
+_N_seqs = cycles * args.N_T
+print(f"\n========== Latency Summary ==========")
+print(f"{'Algorithm':<28} {'Total (s)':>10} {'ms/seq':>8}")
+print(f"{'-'*48}")
+print(f"{'RTS Smoother TRUE H':<28} {t_end_true_h - t_start_true_h:>10.2f} {(t_end_true_h - t_start_true_h) / _N_seqs * 1000:>8.1f}")
+print(f"{'EMKF Analytic':<28} {t_end_emkf - t_start_emkf:>10.2f} {(t_end_emkf - t_start_emkf) / _N_seqs * 1000:>8.1f}")
+print(f"{'='*48}")
 
 
 import matplotlib.pyplot as plt
