@@ -73,8 +73,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 40
-args.T_test = 40
+args.T = 50
+args.T_test = 50
 ### training parameters
 args.n_steps = 300
 args.n_batch = 15
@@ -105,12 +105,12 @@ print("="*80)
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
 load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
 load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/40/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/40/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/40/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/40/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/40/RTSNet_partial_joint.pt'
-destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/40/bigru_smoother.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/50/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/50/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_partial_joint.pt'
+destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/50/bigru_smoother.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
