@@ -25,6 +25,7 @@ from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
 from RTSNet.RTSNet_nn import RTSNetNN
+from Baselines.BiGRU_smoother import train_bigru_smoother
 
 # === CHANGED: use the batched pipeline ===
 from Pipelines.Pipeline_ERTS_batched import Pipeline_ERTS_batched as Pipeline
@@ -72,8 +73,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 100
-args.T_test = 100
+args.T = 10
+args.T_test = 10
 ### training parameters
 args.n_steps = 500
 args.n_batch = 15
@@ -85,7 +86,7 @@ torch.manual_seed(1)
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -101,14 +102,15 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/150/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/150/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/150/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_0001/3datasets/100/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_0001/3datasets/100/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_0001/3datasets/100/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_0001/3datasets/100/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_0001/3datasets/100/RTSNet_partial_joint.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/20/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/20/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/20/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/20/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/20/RTSNet_partial_joint.pt'
+destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/20/bigru_smoother.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
@@ -291,7 +293,8 @@ print("\nStarting training (batched)...")
 
 # Make sure the output directories exist
 for _p in [destination_path_rtsnet_full, destination_path_rtsnet_partial,
-           destination_path_rtsnet_partial_joint, destination_path_M_joint]:
+           destination_path_rtsnet_partial_joint, destination_path_M_joint,
+           destination_path_bigru]:
     os.makedirs(os.path.dirname(_p), exist_ok=True)
 
 # The wrong observation matrix every sequence starts from (single [n,m], shared).
@@ -306,19 +309,41 @@ def _fresh_rtsnet(ssm):
 
 
 # ============================================================================ #
+# BASELINE - BiGRU smoother: data-driven baseline, no system model needed.      #
+# Concatenates all datasets; already fully batched (standard minibatch GRU).    #
+# ============================================================================ #
+print("\n[BASELINE] Training BiGRU smoother...")
+train_bigru_smoother(
+    train_input=all_train_inputs,   # list of 3 tensors [N_E, n, T] — auto-concatenated
+    train_target=all_train_targets,
+    cv_input=all_cv_inputs,
+    cv_target=all_cv_targets,
+    n=n,
+    m=m,
+    save_path=destination_path_bigru,
+    device=device,
+    epochs=300,
+    batch_size=32,
+    lr=1e-3,
+    hidden_size=128,
+    num_layers=2,
+)
+
+
+# ============================================================================ #
 # STEP 1a - TRUE RTSNet: trained with the TRUE per-sequence H (oracle smoother). #
 # Uses sys_model_true (H_train = true H) and H_init=None.                        #
 # ============================================================================ #
 print("\n[STEP 1a] Training TRUE RTSNet (batched, true H per sequence)...")
-# RTSNet_Pipeline.model = _fresh_rtsnet(sys_model_true)
-# RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
-#     sys_model_true,
-#     all_cv_inputs, all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_full,
-#     load_path_RTS=None,               # train from scratch
-#     H_init=None,                      # per-sequence TRUE H (oracle)
-#     datasets=cycles)
+RTSNet_Pipeline.model = _fresh_rtsnet(sys_model_true)
+RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
+    sys_model_true,
+    all_cv_inputs, all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_full,
+    load_path_RTS=None,               # train from scratch
+    H_init=None,                      # per-sequence TRUE H (oracle)
+    datasets=cycles)
 
 # ============================================================================ #
 # STEP 1b - FALSE RTSNet: trained with the WRONG H_init (H_Rotate), the same     #
@@ -364,7 +389,8 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint_batched(
 print("\n" + "="*80)
 print("TRAINING COMPLETE (BATCHED)")
 print("="*80)
-print(f"TRUE  RTSNet saved to: {destination_path_rtsnet_full}")
-print(f"FALSE RTSNet saved to: {destination_path_rtsnet_partial}")
-print(f"Joint RTSNet saved to: {destination_path_rtsnet_partial_joint}")
-print(f"M-network    saved to: {destination_path_M_joint}")
+print(f"BiGRU smoother saved to: {destination_path_bigru}")
+print(f"TRUE  RTSNet saved to:   {destination_path_rtsnet_full}")
+print(f"FALSE RTSNet saved to:   {destination_path_rtsnet_partial}")
+print(f"Joint RTSNet saved to:   {destination_path_rtsnet_partial_joint}")
+print(f"M-network    saved to:   {destination_path_M_joint}")
