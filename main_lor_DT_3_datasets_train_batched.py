@@ -73,8 +73,8 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 10
-args.T_test = 10
+args.T = 40
+args.T_test = 40
 ### training parameters
 args.n_steps = 500
 args.n_batch = 15
