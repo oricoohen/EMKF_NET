@@ -76,7 +76,7 @@ args.N_T = 200
 args.T = 50
 args.T_test = 50
 ### training parameters
-args.n_steps = 500
+args.n_steps = 300
 args.n_batch = 15
 args.lr = 1e-3
 args.wd = 1e-3
