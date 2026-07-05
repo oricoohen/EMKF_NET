@@ -73,10 +73,10 @@ args = config.general_settings()
 args.N_E = 1000
 args.N_CV = 100
 args.N_T = 200
-args.T = 50
-args.T_test = 50
+args.T = 30
+args.T_test = 30
 ### training parameters
-args.n_steps = 300
+args.n_steps = 500
 args.n_batch = 15
 args.lr = 1e-3
 args.wd = 1e-3
@@ -105,12 +105,12 @@ print("="*80)
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
 load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint.pt'
 load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/50/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/50/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/50/RTSNet_partial_joint.pt'
-destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/50/bigru_smoother.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
+destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/30/bigru_smoother.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
@@ -313,21 +313,21 @@ def _fresh_rtsnet(ssm):
 # Concatenates all datasets; already fully batched (standard minibatch GRU).    #
 # ============================================================================ #
 print("\n[BASELINE] Training BiGRU smoother...")
-train_bigru_smoother(
-    train_input=all_train_inputs,   # list of 3 tensors [N_E, n, T] — auto-concatenated
-    train_target=all_train_targets,
-    cv_input=all_cv_inputs,
-    cv_target=all_cv_targets,
-    n=n,
-    m=m,
-    save_path=destination_path_bigru,
-    device=device,
-    epochs=300,
-    batch_size=32,
-    lr=1e-3,
-    hidden_size=128,
-    num_layers=2,
-)
+# train_bigru_smoother(
+#     train_input=all_train_inputs,   # list of 3 tensors [N_E, n, T] — auto-concatenated
+#     train_target=all_train_targets,
+#     cv_input=all_cv_inputs,
+#     cv_target=all_cv_targets,
+#     n=n,
+#     m=m,
+#     save_path=destination_path_bigru,
+#     device=device,
+#     epochs=300,
+#     batch_size=32,
+#     lr=1e-3,
+#     hidden_size=128,
+#     num_layers=2,
+# )
 
 
 # ============================================================================ #
@@ -336,14 +336,14 @@ train_bigru_smoother(
 # ============================================================================ #
 print("\n[STEP 1a] Training TRUE RTSNet (batched, true H per sequence)...")
 RTSNet_Pipeline.model = _fresh_rtsnet(sys_model_true)
-RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
-    sys_model_true,
-    all_cv_inputs, all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_full,
-    load_path_RTS=None,               # train from scratch
-    H_init=None,                      # per-sequence TRUE H (oracle)
-    datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
+#     sys_model_true,
+#     all_cv_inputs, all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_RTS=destination_path_rtsnet_full,
+#     load_path_RTS=None,               # train from scratch
+#     H_init=None,                      # per-sequence TRUE H (oracle)
+#     datasets=cycles)
 
 # ============================================================================ #
 # STEP 1b - FALSE RTSNet: trained with the WRONG H_init (H_Rotate), the same     #
@@ -351,14 +351,14 @@ RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
 # ============================================================================ #
 print("\n[STEP 1b] Training FALSE RTSNet (batched, wrong H_init=H_Rotate)...")
 RTSNet_Pipeline.model = _fresh_rtsnet(sys_model)
-RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
-    sys_model,
-    all_cv_inputs, all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_RTS=destination_path_rtsnet_partial,
-    load_path_RTS=load_path_rtsnet_partial_joint,               # train from scratch
-    H_init=H_init_common,             # SAME wrong H for every sequence
-    datasets=cycles)
+# RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
+#     sys_model,
+#     all_cv_inputs, all_cv_targets,
+#     all_train_inputs, all_train_targets,
+#     destination_path_RTS=destination_path_rtsnet_partial,
+#     load_path_RTS=load_path_rtsnet_partial_joint,               # train from scratch
+#     H_init=H_init_common,             # SAME wrong H for every sequence
+#     datasets=cycles)
 
 # Save an initial M-net checkpoint so STEP 2 has one to load.
 torch.save(RTSNet_Pipeline.M_model_H, destination_path_M_joint)
@@ -377,7 +377,7 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint_batched(
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, T]
     destination_path_M=destination_path_M_joint,
     destination_path_RTS=destination_path_rtsnet_partial_joint,
-    load_path_RTS=destination_path_rtsnet_partial,   # FALSE RTSNet from STEP 1b
+    load_path_RTS=destination_path_rtsnet_partial_joint,   # FALSE RTSNet from STEP 1b
     load_mnet=destination_path_M_joint,
     num_em_iters=num_em_iters,
     alpha=(0.5, 1., 0.85),            # Weights for EM iterations
