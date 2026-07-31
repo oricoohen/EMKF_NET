@@ -4935,7 +4935,7 @@ class Pipeline_ERTS:
 
     def end_To_end_m_net(self, SysModel, cv_input, cv_target, train_input, train_target,
                         destination_path_M, destination_path_RTS,load_base_m_mmodel = None,load_rts=None, num_em_iters=3,
-                        alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False):
+                        alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, non_linear_h=False, generate_h=False):
         """
         Single-function M-step training (no helpers, no .to(...)).
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
@@ -5323,6 +5323,242 @@ class Pipeline_ERTS:
             print(
                 f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
 
+    def end_To_end_m_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS, load_base_m_mmodel=None, load_rts=None,
+                        num_em_iters=3, alpha=(0.05, 0.1, 0.85), lambda_F=1e-3,
+                        generate_f=True, non_linear_h=False, generate_h=False, datasets=3):
+        """
+        JOINT / end-to-end M-step training across `datasets` sequential datasets.
+        - One trainable RTSNet + one trainable M-net per EM iteration.
+        - F_base = nominal [[0.83,0.2],[0.2,0.83]]; F and x_0 are carried across the
+          datasets (same sequential structure as train_mstep_net_3_datasets and the
+          3-dataset test), so the joint model is trained ON the chained scenario.
+        - Saves LISTS: destination_path_M[k] / destination_path_RTS[k] per EM iter.
+        Data contract: train_input/target, cv_input/target are lists of `datasets`;
+        SysModel.F_train_TRUE / F_valid_TRUE are lists of `datasets` F-lists.
+        """
+        self.N_E = len(train_input[0])
+        self.N_CV = len(cv_input[0])
+        m = SysModel.m
+
+        # Base RTSNet -> one trainable copy per EM iteration
+        base_rts = torch.load(load_rts, weights_only=False).to(self.device).train()
+        self.RTS_models = [copy.deepcopy(base_rts).to(self.device).train() for _ in range(num_em_iters)]
+
+        # One M-net per EM iteration (warm-start from a checkpoint or from self.M_model)
+        self.M_models = []
+        for _ in range(num_em_iters):
+            if load_base_m_mmodel is not None:
+                M_model = torch.load(load_base_m_mmodel, map_location=self.device, weights_only=False).to(self.device)
+            else:
+                M_model = copy.deepcopy(self.M_model).to(self.device)
+            self.M_models.append(M_model.train())
+
+        stable_lr = self.learningRate * 0.1
+        self.M_optimizers = [torch.optim.Adam(M.parameters(), lr=stable_lr, weight_decay=self.weightDecay)
+                             for M in self.M_models]
+        self.RTS_optimizers = [torch.optim.Adam(R.parameters(), lr=stable_lr, weight_decay=self.weightDecay)
+                               for R in self.RTS_models]
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            # ---------------- Training ----------------
+            for M_model in self.M_models:
+                M_model.train()
+            for RTS_model in self.RTS_models:
+                RTS_model.train()
+            for opt in self.M_optimizers:
+                opt.zero_grad()
+            for opt in self.RTS_optimizers:
+                opt.zero_grad()
+
+            train_loss_sum = 0.0
+            epoch_loss_sum = 0.0
+
+            for _ in range(self.N_B):
+                n_e = random.randint(0, self.N_E - 1)
+                F_base = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=device)
+                x_0 = SysModel.m1x_0
+                total_loss = 0.0
+
+                for data in range(datasets):
+                    y_seq = train_input[data][n_e]        # [n, T]
+                    x_true_seq = train_target[data][n_e]  # [m, T]
+                    T = y_seq.size(-1)
+
+                    if generate_f is True:
+                        f_index = n_e // 10
+                        F_true = SysModel.F_train_TRUE[data][f_index]
+                    else:
+                        F_true = SysModel.F_train_TRUE[data][n_e]
+
+                    F_current = F_base
+                    for em_iter in range(num_em_iters):
+                        M_k = self.M_models[em_iter]
+                        self.model = self.RTS_models[em_iter]
+
+                        self.model.update_F(F_current)
+                        self.model.InitSequence(x_0, T)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+
+                        x_forward = torch.empty(m, T, device=device)
+                        x_smooth = torch.empty(m, T, device=device)
+                        for t in range(T):
+                            x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                        x_smooth[:, T - 1] = x_forward[:, T - 1]
+                        self.model.InitBackward(x_smooth[:, T - 1])
+                        x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                        for t in range(T - 3, -1, -1):
+                            x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+
+                        x_curr = x_smooth
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+                        A1 = (x_curr @ x_prev.T) / T
+                        A2 = (x_prev @ x_prev.T) / T
+                        x_minus = F_current @ x_prev
+                        delta_x = x_curr - x_minus
+                        delta_mean = delta_x.mean(dim=1, keepdim=True)
+                        delta_centered = delta_x - delta_mean
+                        S_delta_x = (delta_centered @ delta_centered.T) / T
+                        if non_linear_h:
+                            y_hat_list = []
+                            for t in range(T):
+                                x_t = x_curr[:, t].view(SysModel.m, 1)
+                                y_hat_list.append(SysModel.h(x_t).view(-1))
+                            Hx_curr = torch.stack(y_hat_list, dim=1)
+                        else:
+                            Hx_curr = SysModel.H @ x_curr
+                        nu = y_seq - Hx_curr
+                        nu_mean = nu.mean(dim=1, keepdim=True)
+                        nu_centered = nu - nu_mean
+                        S_nu = (nu_centered @ nu_centered.T) / T
+                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+
+                        z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1),
+                                          S_nu.reshape(-1), C_delta_x_xminus.reshape(-1),
+                                          F_current.reshape(-1)], dim=0).reshape(1, -1)
+
+                        deltaF = M_k(z_in)
+                        deltaF_mat = deltaF.view(m, m)
+                        F_next = F_current + deltaF_mat
+
+                        f_loss = torch.mean((F_next - F_true) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                        loss_em = f_loss + reg + x_loss
+
+                        weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
+                        total_loss += weight * loss_em
+                        F_current = F_next
+
+                    # carry learned F and last smoothed state to the next dataset
+                    F_base = F_current.detach()
+                    x_0 = x_curr[:, -1].detach()
+
+                epoch_loss_sum += total_loss
+                train_loss_sum += (total_loss / float(datasets * num_em_iters)).detach().item()
+
+            epoch_loss_mean = epoch_loss_sum / float(self.N_B)
+            epoch_loss_mean.backward()
+            for M_model, opt in zip(self.M_models, self.M_optimizers):
+                torch.nn.utils.clip_grad_norm_(M_model.parameters(), max_norm=1.0)
+                opt.step()
+            for RTS_model, opt_rts in zip(self.RTS_models, self.RTS_optimizers):
+                torch.nn.utils.clip_grad_norm_(RTS_model.parameters(), max_norm=1.0)
+                opt_rts.step()
+
+            # ---------------- Validation ----------------
+            for M_model in self.M_models:
+                M_model.eval()
+            for RTS_model in self.RTS_models:
+                RTS_model.eval()
+            cv_loss_sum = 0.0
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    F_base_cv = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=device)
+                    x_0_cv = SysModel.m1x_0
+                    total_loss_cv = 0.0
+                    for data in range(datasets):
+                        y_cv = cv_input[data][j]
+                        x_true_cv_seq = cv_target[data][j]
+                        T_cv = y_cv.size(-1)
+                        if generate_f is True:
+                            f_index_cv = j // 10
+                            F_true_cv = SysModel.F_valid_TRUE[data][f_index_cv]
+                        else:
+                            F_true_cv = SysModel.F_valid_TRUE[data][j]
+                        F_current_cv = F_base_cv.clone()
+                        for em_iter in range(num_em_iters):
+                            M_k = self.M_models[em_iter]
+                            self.model = self.RTS_models[em_iter]
+                            self.model.update_F(F_current_cv)
+                            self.model.InitSequence(x_0_cv, T_cv)
+                            self.model.init_hidden()
+                            self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+                            x_f_cv = torch.empty(m, T_cv, device=device)
+                            x_s_cv = torch.empty(m, T_cv, device=device)
+                            for t in range(T_cv):
+                                x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+                            x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                            self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                            x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                            for t in range(T_cv - 3, -1, -1):
+                                x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+                            x_curr = x_s_cv
+                            x_prev = torch.empty_like(x_curr)
+                            x_prev[:, 0] = x_0_cv.view(-1)
+                            x_prev[:, 1:] = x_curr[:, :-1]
+                            A1_cv = (x_curr @ x_prev.T) / T_cv
+                            A2_cv = (x_prev @ x_prev.T) / T_cv
+                            x_minus_cv = F_current_cv @ x_prev
+                            delta_x_cv = x_curr - x_minus_cv
+                            delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                            delta_centered_cv = delta_x_cv - delta_mean_cv
+                            S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+                            if non_linear_h:
+                                y_hat_cv_list = []
+                                for t in range(T_cv):
+                                    x_t = x_curr[:, t].view(SysModel.m, 1)
+                                    y_hat_cv_list.append(SysModel.h(x_t).view(-1))
+                                Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)
+                            else:
+                                Hx_curr_cv = SysModel.H.to(device) @ x_curr
+                            nu_cv = y_cv - Hx_curr_cv
+                            nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                            nu_centered_cv = nu_cv - nu_mean_cv
+                            S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            z_cv = torch.cat([A1_cv.reshape(-1), A2_cv.reshape(-1), S_delta_x_cv.reshape(-1),
+                                              S_nu_cv.reshape(-1), C_delta_x_xminus_cv.reshape(-1),
+                                              F_current_cv.reshape(-1)], dim=0).reshape(1, -1)
+                            dF_cv = M_k(z_cv)
+                            dF_cv_mat = dF_cv.view(m, m)
+                            F_next_cv = F_current_cv + dF_cv_mat
+                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)
+                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                            loss_em_cv = f_loss_cv + reg_cv + x_loss_cv
+                            weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
+                            total_loss_cv += weight * loss_em_cv
+                            F_current_cv = F_next_cv
+                        x_0_cv = x_curr[:, -1].detach()
+                        F_base_cv = F_current_cv.detach()
+                    cv_loss_sum += (total_loss_cv / float(num_em_iters * datasets)).item()
+
+            train_epoch = train_loss_sum / max(1, self.N_B)
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                for k in range(num_em_iters):
+                    torch.save(self.M_models[k], destination_path_M[k])
+                    torch.save(self.RTS_models[k], destination_path_RTS[k])
+            print(f"[JOINT-3ds] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
     def test_mstep_net(self, SysModel, test_input, test_target,
                        destination_path_RTS,destination_path_M, num_em_iters=3,
                        alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, generate_h=False, init_x_list=None, init_P_list=None, non_linear_h=False):
@@ -5556,7 +5792,7 @@ class Pipeline_ERTS:
         return mean_x_mse_per_iter_np,mean_x_mse_per_iter_db_np, final_F_list,final_x_list
 
     def end_to_end_test_mstep_net(self, SysModel, test_input, test_target,destination_path_RTS,destination_path_M, num_em_iters=3,
-                       alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False):
+                       alpha=(0.0, 0.0, 1.0), lambda_F=1e-3, generate_f=True, init_x_list=None, init_P_list=None, non_linear_h=False, generate_h=False):
         """
         Testing-only version for the M-step network.
         - Freeze RTSNet loaded from destination_path_RTS and use it only to compute x_smooth.
@@ -9062,9 +9298,9 @@ class Pipeline_ERTS:
                         # loss_em = 3 * f_loss + reg + x_loss + 1e-2 * y_loss
                         ##########################################################
                         if em_iter == num_em_iters - 1:
-                            loss_em = f_loss + reg + x_loss
+                            loss_em = 5*f_loss + reg + x_loss
                         else:
-                            loss_em = f_loss + reg+ x_loss
+                            loss_em = 5*f_loss + reg+ x_loss
     #############################################################################################################
                         # loss_em = 3 * f_loss + reg + x_loss
                         # Apply your specific weighting: 0.05, 0.1, 0.85
@@ -9207,9 +9443,9 @@ class Pipeline_ERTS:
                             # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv + 1e-2 * y_loss_cv
                             ##########################################################
                             if em_iter == num_em_iters - 1:
-                                loss_em_cv = f_loss_cv + reg_cv + x_loss_cv
+                                loss_em_cv = 5*f_loss_cv + reg_cv + x_loss_cv
                             else:
-                                loss_em_cv =  f_loss_cv + reg_cv + x_loss_cv
+                                loss_em_cv =  5*f_loss_cv + reg_cv + x_loss_cv
                             #########################################################################
                             # loss_em_cv = 3 * f_loss_cv + reg_cv + x_loss_cv
                             if em_iter == 0:
@@ -9236,6 +9472,193 @@ class Pipeline_ERTS:
                 torch.save(model_mstep, destination_path_M)
 
             print(f"[M-step] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
+
+    def joint_train_mnet_rtsnet_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,
+                        destination_path_M, destination_path_RTS, load_rts=None, load_m=None,
+                        num_em_iters=3, alpha=(0.05, 0.1, 0.85), lambda_F=1e-3,
+                        generate_f=True, non_linear_h=False, datasets=3):
+        """
+        JOINT training of ONE mnet + ONE RTSNet across `datasets` sequential datasets.
+        Same logic/statistics as train_mstep_net_3_datasets, but the RTSNet is TRAINABLE
+        and optimized jointly with the mnet by a single optimizer.
+        Per dataset the EM is unrolled with the SAME rtsnet + SAME mnet reused each iter:
+            RTSNet -> mnet -> RTSNet -> mnet -> RTSNet   (num_em_iters smoother passes)
+        F and x_0 are carried across the datasets. Saves the single trained
+        mnet -> destination_path_M and the single trained RTSNet -> destination_path_RTS.
+        """
+        self.N_E = len(train_input[0])
+        self.N_CV = len(cv_input[0])
+        m = SysModel.m
+
+        # ONE RTSNet, TRAINABLE (joint)
+        self.model = torch.load(load_rts, weights_only=False).to(self.device).train()
+        for p in self.model.parameters():
+            p.requires_grad_(True)
+
+        # ONE mnet, TRAINABLE (warm-start from load_m if given, else the pipeline default)
+        if load_m is not None:
+            self.M_model = torch.load(load_m, weights_only=False).to(self.device)
+        model_mstep = self.M_model.train()
+
+        # ONE joint optimizer over BOTH nets
+        self.optimizer_joint = torch.optim.Adam(
+            list(self.model.parameters()) + list(model_mstep.parameters()),
+            lr=self.learningRate, weight_decay=self.weightDecay)
+
+        self.MSE_cv_dB_opt = 1000
+        self.MSE_cv_idx_opt = 0
+
+        for epoch in range(self.N_steps):
+            model_mstep.train(); self.model.train()
+            train_loss_sum = 0.0
+            for _ in range(self.N_B):
+                self.optimizer_joint.zero_grad()
+                n_e = random.randint(0, self.N_E - 1)
+                F_base = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=device)
+                x_0 = SysModel.m1x_0
+                total_loss = 0.0
+                for data in range(datasets):
+                    y_seq = train_input[data][n_e]
+                    x_true_seq = train_target[data][n_e]
+                    T = y_seq.size(-1)
+                    if generate_f is True:
+                        F_true = SysModel.F_train_TRUE[data][n_e // 10]
+                    else:
+                        F_true = SysModel.F_train_TRUE[data][n_e]
+                    F_current = F_base
+                    for em_iter in range(num_em_iters):
+                        self.model.update_F(F_current)
+                        self.model.InitSequence(x_0, T)
+                        self.model.init_hidden()
+                        self.model.prior_Sigma = SysModel.m2x_0.clone().detach()
+                        x_forward = torch.empty(m, T, device=device)
+                        x_smooth = torch.empty(m, T, device=device)
+                        for t in range(T):
+                            x_forward[:, t] = self.model(y_seq[:, t], None, None, None)
+                        x_smooth[:, T - 1] = x_forward[:, T - 1]
+                        self.model.InitBackward(x_smooth[:, T - 1])
+                        x_smooth[:, T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
+                        for t in range(T - 3, -1, -1):
+                            x_smooth[:, t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth[:, t + 2])
+                        x_curr = x_smooth
+                        x_prev = torch.empty_like(x_curr)
+                        x_prev[:, 0] = x_0.view(-1)
+                        x_prev[:, 1:] = x_curr[:, :-1]
+                        A1 = (x_curr @ x_prev.T) / T
+                        A2 = (x_prev @ x_prev.T) / T
+                        x_minus = F_current @ x_prev
+                        delta_x = x_curr - x_minus
+                        delta_mean = delta_x.mean(dim=1, keepdim=True)
+                        delta_centered = delta_x - delta_mean
+                        S_delta_x = (delta_centered @ delta_centered.T) / T
+                        if non_linear_h:
+                            y_hat_list = [SysModel.h(x_curr[:, t].view(m, 1)).view(-1) for t in range(T)]
+                            Hx_curr = torch.stack(y_hat_list, dim=1)
+                        else:
+                            Hx_curr = SysModel.H @ x_curr
+                        nu = y_seq - Hx_curr
+                        nu_mean = nu.mean(dim=1, keepdim=True)
+                        nu_centered = nu - nu_mean
+                        S_nu = (nu_centered @ nu_centered.T) / T
+                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1),
+                                          S_nu.reshape(-1), C_delta_x_xminus.reshape(-1),
+                                          F_current.reshape(-1)], dim=0).reshape(1, -1)
+                        deltaF = model_mstep(z_in)
+                        deltaF_mat = deltaF.view(m, m)
+                        F_next = F_current + deltaF_mat
+                        f_loss = torch.mean((F_next - F_true) ** 2)
+                        reg = lambda_F * torch.mean(deltaF_mat ** 2)
+                        x_loss = torch.mean((x_curr - x_true_seq) ** 2)
+                        loss_em = f_loss + reg + x_loss
+                        weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
+                        total_loss += weight * loss_em
+                        F_current = F_next
+                    F_base = F_current.detach()
+                    x_0 = x_curr[:, -1].detach()
+                loss = total_loss / float(datasets * num_em_iters)
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(
+                    list(self.model.parameters()) + list(model_mstep.parameters()), max_norm=1.0)
+                self.optimizer_joint.step()
+                train_loss_sum += loss.detach().item()
+
+            # ---------------- Validation ----------------
+            model_mstep.eval(); self.model.eval()
+            cv_loss_sum = 0.0
+            with torch.no_grad():
+                for j in range(self.N_CV):
+                    F_base_cv = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=device)
+                    x_0_cv = SysModel.m1x_0
+                    total_loss_cv = 0.0
+                    for data in range(datasets):
+                        y_cv = cv_input[data][j]
+                        x_true_cv_seq = cv_target[data][j]
+                        T_cv = y_cv.size(-1)
+                        if generate_f is True:
+                            F_true_cv = SysModel.F_valid_TRUE[data][j // 10]
+                        else:
+                            F_true_cv = SysModel.F_valid_TRUE[data][j]
+                        F_current_cv = F_base_cv.clone()
+                        for em_iter in range(num_em_iters):
+                            self.model.update_F(F_current_cv)
+                            self.model.InitSequence(x_0_cv, T_cv)
+                            self.model.init_hidden()
+                            self.model.prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
+                            x_f_cv = torch.empty(m, T_cv, device=device)
+                            x_s_cv = torch.empty(m, T_cv, device=device)
+                            for t in range(T_cv):
+                                x_f_cv[:, t] = self.model(y_cv[:, t], None, None, None)
+                            x_s_cv[:, T_cv - 1] = x_f_cv[:, T_cv - 1]
+                            self.model.InitBackward(x_s_cv[:, T_cv - 1])
+                            x_s_cv[:, T_cv - 2] = self.model(None, x_f_cv[:, T_cv - 2], x_f_cv[:, T_cv - 1], None)
+                            for t in range(T_cv - 3, -1, -1):
+                                x_s_cv[:, t] = self.model(None, x_f_cv[:, t], x_f_cv[:, t + 1], x_s_cv[:, t + 2])
+                            x_curr = x_s_cv
+                            x_prev = torch.empty_like(x_curr)
+                            x_prev[:, 0] = x_0_cv.view(-1)
+                            x_prev[:, 1:] = x_curr[:, :-1]
+                            A1_cv = (x_curr @ x_prev.T) / T_cv
+                            A2_cv = (x_prev @ x_prev.T) / T_cv
+                            x_minus_cv = F_current_cv @ x_prev
+                            delta_x_cv = x_curr - x_minus_cv
+                            delta_mean_cv = delta_x_cv.mean(dim=1, keepdim=True)
+                            delta_centered_cv = delta_x_cv - delta_mean_cv
+                            S_delta_x_cv = (delta_centered_cv @ delta_centered_cv.T) / T_cv
+                            if non_linear_h:
+                                y_hat_cv_list = [SysModel.h(x_curr[:, t].view(m, 1)).view(-1) for t in range(T_cv)]
+                                Hx_curr_cv = torch.stack(y_hat_cv_list, dim=1)
+                            else:
+                                Hx_curr_cv = SysModel.H.to(device) @ x_curr
+                            nu_cv = y_cv - Hx_curr_cv
+                            nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
+                            nu_centered_cv = nu_cv - nu_mean_cv
+                            S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
+                            C_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            z_cv = torch.cat([A1_cv.reshape(-1), A2_cv.reshape(-1), S_delta_x_cv.reshape(-1),
+                                              S_nu_cv.reshape(-1), C_cv.reshape(-1),
+                                              F_current_cv.reshape(-1)], dim=0).reshape(1, -1)
+                            dF_cv = model_mstep(z_cv)
+                            dF_cv_mat = dF_cv.view(m, m)
+                            F_next_cv = F_current_cv + dF_cv_mat
+                            f_loss_cv = torch.mean((F_next_cv - F_true_cv) ** 2)
+                            reg_cv = lambda_F * torch.mean(dF_cv_mat ** 2)
+                            x_loss_cv = torch.mean((x_curr - x_true_cv_seq) ** 2)
+                            loss_em_cv = f_loss_cv + reg_cv + x_loss_cv
+                            weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
+                            total_loss_cv += weight * loss_em_cv
+                            F_current_cv = F_next_cv
+                        x_0_cv = x_curr[:, -1].detach()
+                        F_base_cv = F_current_cv.detach()
+                    cv_loss_sum += (total_loss_cv / float(num_em_iters * datasets)).item()
+
+            train_epoch = train_loss_sum / max(1, self.N_B)
+            cv_epoch = cv_loss_sum / max(1, self.N_CV)
+            if cv_epoch < self.MSE_cv_dB_opt:
+                self.MSE_cv_dB_opt = cv_epoch
+                torch.save(model_mstep, destination_path_M)
+                torch.save(self.model, destination_path_RTS)
+            print(f"[JOINT 1mnet+1rts] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
 
     def train_RTS_net_3_datasets(self, SysModel, cv_input, cv_target, train_input, train_target,destination_path_RTS
                         , load_path_RTS,H_init=None
@@ -12738,2005 +13161,3 @@ class Pipeline_ERTS:
         # return loss_list, final_H_list, final_x_list, mean_loss, mean_x_mse_per_iter_np, mean_x_mse_per_iter_db_np
         return mean_x_mse_per_iter_np,mean_H_mse_per_iter, final_H_list, final_x_list
 
-#     def NNTrain_stocks(self, SysModel,cv_input, cv_target,train_input, train_target,path_results,load_model_path=None,generate_f=True, generate_h=False,
-#                 train_x0=None, cv_x0=None):
-#         """
-#         Inputs:
-#             SysModel:
-#                 Contains the fixed observation model H, initial F (learned/updated in training),
-#                 and dimensions m (state) and n (measurement).
-#
-#             train_input / cv_input:
-#                 List of sequences (rolling windows) of measurements.
-#                 Each element is a Tensor of shape [n, T] (usually n=1 for a single stock price).
-#                 Example: y_window = [y(t0), ..., y(t0+T-1)].
-#
-#             train_target / cv_target:
-#                 List of "next-day" target sequences aligned to each window.
-#                 Each element is a Tensor containing the true next measurements:
-#                     y_next = [y(t0+1), ..., y(t0+T)]
-#                 Shape should match the loss indexing:
-#                     - If you use y_next[:, t] for t=0..T-1, then y_next is [n, T]
-#                     - If you store [y(t0), ..., y(t0+T)] (length T+1), then use y_next[:, t+1]
-#
-#             train_x0 / cv_x0:
-#                 List of scalars (one per window) giving the measurement BEFORE the window:
-#                     y(t0-1)
-#                 Used to build the initial state:
-#                     x0 = [ y(t0-1) , 0.5 ]   (fixed momentum)
-#
-#         Training objective:
-#             For each t in 0..T-1, predict the next-day measurement:
-#                 y_pred(t+1|t) = H F x_forward(t)
-#             and minimize a weighted MSE:
-#                 loss = sum_t w_t * MSE(y_pred(t+1|t), y_true(t+1))
-#             with increasing weights w_t so the last prediction gets the most weight.
-#         """
-#         self.N_E = len(train_input)
-#         self.N_CV = len(cv_input)
-#
-#
-#         self.MSE_cv_linear_epoch = torch.empty([self.N_steps], device=self.device)
-#         self.MSE_cv_dB_epoch = torch.empty([self.N_steps], device=self.device)
-#
-#         MSE_train_linear_batch = torch.empty([self.N_B], device=self.device)
-#         self.MSE_train_linear_epoch = torch.empty([self.N_steps], device=self.device)
-#         self.MSE_train_dB_epoch = torch.empty([self.N_steps], device=self.device)
-#
-#         if load_model_path is not None:
-#             print("loading model_and keep training them")
-#             self.model = torch.load(load_model_path, map_location=self.device, weights_only=False).to(self.device).eval()
-#             self.optimizer = torch.optim.Adam(self.model.parameters(),
-#                                               lr=self.learningRate,
-#                                               weight_decay=self.weightDecay)
-#
-#         # Training Mode
-#         self.model.train()
-#
-#         ##############
-#         ### Epochs ###
-#         ##############
-#         self.MSE_cv_dB_opt = 1000
-#         self.MSE_cv_idx_opt = 0
-#         nan_streak = 0
-#
-#         for ti in range(0, self.N_steps):
-#
-#             ###############################
-#             ### Training Sequence Batch ###
-#             ###############################
-#             self.model.train()
-#             self.optimizer.zero_grad()
-#
-#             Batch_Optimizing_LOSS_sum = 0
-#
-#             for j in range(0, self.N_B):
-#
-#                 self.model.init_hidden()
-#                 n_e = random.randint(0, self.N_E - 1)
-#                 y_next_day = train_target[n_e]        # [n, T]
-#                 y_training = train_input[n_e]         # [n, T]
-#
-#                 # =========================================================
-#                 # PER-WINDOW NORMALIZATION (can be reproduced at test time)
-#                 # Normalize each window independently by its own statistics
-#                 # =========================================================
-#                 y_mean = y_training.mean()
-#                 y_std = y_training.std()
-#                 if y_std < 1e-6:  # avoid division by zero for constant windows
-#                     y_std = torch.tensor(1.0, device=y_training.device, dtype=y_training.dtype)
-#
-#                 y_training_norm = (y_training - y_mean) / y_std
-#                 y_next_day_norm = (y_next_day - y_mean) / y_std
-#
-#                 if generate_f is True:  ####if we train with different f
-#                     index = n_e // 10
-#                     SysModel.F = SysModel.F_train[index]
-#                     self.model.update_F(SysModel.F)
-#                 else:
-#                     # Use the first (and only) F matrix when not varying F
-#                     if isinstance(SysModel.F_train, list):
-#                         SysModel.F = SysModel.F_train[0]
-#                     else:
-#                         SysModel.F = SysModel.F_train
-#                     self.model.update_F(SysModel.F)
-#
-#
-#                 SysModel.T = y_training_norm.size()[-1]
-#
-#                 # =========================================================
-#                 # PER-SEQUENCE x0:
-#                 # x0[0] = price_before_window  → normalize by window stats
-#                 # x0[1] = trend0               → keep as-is (already a price-difference scale)
-#                 # =========================================================
-#                 x0_raw = train_x0[n_e]  # [2] tensor: [price, trend]
-#                 # Normalize both components by y_std so x0 lives in same space as RTSNet states
-#                 # price: subtract mean AND divide by std; trend: divide by std only (it's a difference)
-#                 x0_norm = torch.stack([
-#                     (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                     x0_raw[1] / y_std               # trend: scale only (no mean shift, same units as price)
-#                 ])
-#                 SysModel.m1x_0 = x0_norm.view(SysModel.m, 1)  # [m, 1] = [2, 1]
-#
-#                 # Init Hidden State
-#                 self.model.InitSequence(SysModel.m1x_0, SysModel.T)
-#                 self.model.init_hidden()
-#
-#                 # FIXED: Forward pass - use list comprehension to preserve computation graph
-#                 x_out_training_forward_list = [self.model(y_training_norm[:, t], None, None, None)
-#                                                for t in range(SysModel.T)]
-#                 x_out_training_forward = torch.stack(x_out_training_forward_list, dim=1)  # [m, T]
-#
-#                 # FIXED: Backward smoothing - use list to preserve computation graph
-#                 x_out_training_list = [None] * SysModel.T
-#                 x_out_training_list[SysModel.T - 1] = x_out_training_forward[:, SysModel.T - 1]
-#                 self.model.InitBackward(x_out_training_list[SysModel.T - 1])
-#
-#                 if SysModel.T >= 2:
-#                     x_out_training_list[SysModel.T - 2] = self.model(None,
-#                                                                       x_out_training_forward[:, SysModel.T - 2],
-#                                                                       x_out_training_forward[:, SysModel.T - 1],
-#                                                                       None)
-#                 for t in range(SysModel.T - 3, -1, -1):
-#                     x_out_training_list[t] = self.model(None,
-#                                                         x_out_training_forward[:, t],
-#                                                         x_out_training_forward[:, t + 1],
-#                                                         x_out_training_list[t + 2])
-#
-#                 x_out_training = torch.stack(x_out_training_list, dim=1)  # [m, T]
-#
-#                 # =========================================================
-#                 # LOSS: weighted next-day prediction (per t)
-#                 # Using SMOOTHED states for better estimates
-#                 # ASSUMPTION: T >= 2 always
-#                 # y_next_day_norm is [y_2, y_3, ..., y_{T+1}] (length T)
-#                 # We predict y_{t+1} from x_t using H*F*x_t
-#                 # PLUS extra prediction y_{T+1} from x_T with weight=2
-#                 # =========================================================
-#                 HF = SysModel.H @ SysModel.F  # [n, m]
-#
-#                 # Weights for standard predictions: increasing over time
-#                 weights = torch.arange(1, SysModel.T + 1, device=y_training_norm.device, dtype=y_training_norm.dtype)
-#                 weights = weights / torch.sum(weights)  # normalize
-#
-#                 rtsnet_loss = 0
-#                 for t in range(0, SysModel.T):
-#                     y_pred_next_t = HF @ x_out_training[:, t]   # [n] - using SMOOTHED state
-#                     y_true_next_t = y_next_day_norm[:, t]       # [n] - this is y_{t+2} for t=0, y_{t+3} for t=1, etc.
-#                     rtsnet_loss = rtsnet_loss + weights[t] * self.loss_fn(y_pred_next_t, y_true_next_t)
-#
-#                 # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                 x_last = x_out_training[:, -1]  # x_T
-#                 y_pred_Tp1 = HF @ x_last  # predict y_{T+1}
-#                 y_true_Tp1 = y_next_day_norm[:, -1]  # y_{T+1}
-#                 loss_last = self.loss_fn(y_pred_Tp1, y_true_Tp1)
-#                 rtsnet_loss = rtsnet_loss + 2.0 * loss_last  # Double weight for last prediction
-#
-#                 # =========================================================
-#                 # MINI-BATCH: Accumulate loss across all sequences in batch
-#                 # DON'T call backward inside loop!
-#                 # =========================================================
-#                 Batch_Optimizing_LOSS_sum += rtsnet_loss  # keep gradient graph alive
-#                 MSE_train_linear_batch[j] = rtsnet_loss.detach().item()  # log without gradient
-#
-#             # =========================================================
-#             # MINI-BATCH: Single backward on accumulated batch loss
-#             # =========================================================
-#             Batch_Optimizing_LOSS_mean = Batch_Optimizing_LOSS_sum / self.N_B
-#             Batch_Optimizing_LOSS_mean.backward()  # single backward for entire batch
-#
-#             # Gradient check
-#             bad_grad = False
-#             for p in self.model.parameters():
-#                 if p.grad is None:
-#                     continue
-#                 if torch.isnan(p.grad).any() or torch.isinf(p.grad).any():
-#                     bad_grad = True
-#                     break
-#
-#             if bad_grad:
-#                 print("NaN/Inf gradients → batch skipped")
-#                 nan_streak += 1
-#                 if nan_streak >= 3:
-#                     print("Stopping training (3 consecutive bad batches).")
-#                     # Save the best model found so far before early exit
-#                     if self.MSE_cv_idx_opt < ti and hasattr(self, 'best_model_state'):
-#                         os.makedirs(os.path.dirname(path_results) if os.path.dirname(path_results) else '.', exist_ok=True)
-#                         torch.save(self.best_model_state, path_results)
-#                         print(f"Saved best model from epoch {self.MSE_cv_idx_opt} to {path_results}")
-#                     return
-#                 self.model.zero_grad(set_to_none=True)
-#                 continue
-#
-#             nan_streak = 0
-#
-#             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-#             self.optimizer.step()  # Single update per mini-batch
-#
-#             # Logging
-#             self.MSE_train_linear_epoch[ti] = torch.mean(MSE_train_linear_batch)
-#             self.MSE_train_dB_epoch[ti] = 10 * torch.log10(self.MSE_train_linear_epoch[ti])
-#
-#             #################################
-#             ### Validation Sequence Batch ###
-#             #################################
-#             self.model.eval()
-#             with torch.no_grad():
-#                 MSE_cv_linear_batch = torch.empty([self.N_CV], device=self.device)
-#
-#                 for j in range(0, self.N_CV):
-#                     y_cv = cv_input[j]                    # [n, T_test]
-#                     y_next_day_cv = cv_target[j]          # [n, T_test]
-#
-#                     # =========================================================
-#                     # PER-WINDOW NORMALIZATION (same as training)
-#                     # =========================================================
-#                     y_mean = y_cv.mean()
-#                     y_std = y_cv.std()
-#                     if y_std < 1e-6:
-#                         y_std = torch.tensor(1.0, device=y_cv.device, dtype=y_cv.dtype)
-#
-#                     y_cv_norm = (y_cv - y_mean) / y_std
-#                     y_next_day_cv_norm = (y_next_day_cv - y_mean) / y_std
-#
-#                     SysModel.T_test = y_cv_norm.size()[-1]
-#
-#                     if generate_f is True:  ####if we valid with different f
-#                         index = j // 10
-#                         SysModel.F = SysModel.F_valid[index]
-#                         self.model.update_F(SysModel.F)
-#                     else:
-#                         # Use the first (and only) F matrix when not varying F
-#                         if isinstance(SysModel.F_valid, list):
-#                             SysModel.F = SysModel.F_valid[0]
-#                         else:
-#                             SysModel.F = SysModel.F_valid
-#                         self.model.update_F(SysModel.F)
-#
-#                     if generate_h is True:  ####if we valid with different h
-#                         index = j // 10
-#                         SysModel.H = SysModel.H_valid[index]
-#                         # Note: update_H not available in base RTSNet
-#                     else:
-#                         # Use the first (and only) H matrix when not varying H
-#                         if isinstance(SysModel.H_valid, list):
-#                             SysModel.H = SysModel.H_valid[0]
-#                         else:
-#                             SysModel.H = SysModel.H_valid
-#
-#                     # x0 (CV): normalize both components by y_std
-#                     x0_raw = cv_x0[j]  # [2] tensor
-#                     x0_norm_cv = torch.stack([
-#                         (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                         x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                     ])
-#                     SysModel.m1x_0 = x0_norm_cv.view(SysModel.m, 1)  # [m, 1] = [2, 1]
-#                     self.model.InitSequence(SysModel.m1x_0, SysModel.T_test)
-#                     self.model.init_hidden()
-#
-#                     # FIXED: Forward pass - use list comprehension (consistency in no_grad context)
-#                     x_out_cv_forward_list = [self.model(y_cv_norm[:, t], None, None, None)
-#                                              for t in range(SysModel.T_test)]
-#                     x_out_cv_forward = torch.stack(x_out_cv_forward_list, dim=1)  # [m, T_test]
-#
-#                     # FIXED: Backward pass - use list comprehension (SMOOTHING IN CV!)
-#                     x_out_cv_list = [None] * SysModel.T_test
-#                     x_out_cv_list[SysModel.T_test - 1] = x_out_cv_forward[:, SysModel.T_test - 1]
-#                     self.model.InitBackward(x_out_cv_list[SysModel.T_test - 1])
-#
-#                     if SysModel.T_test >= 2:
-#                         x_out_cv_list[SysModel.T_test - 2] = self.model(None,
-#                                                                          x_out_cv_forward[:, SysModel.T_test - 2],
-#                                                                          x_out_cv_forward[:, SysModel.T_test - 1],
-#                                                                          None)
-#                     for t in range(SysModel.T_test - 3, -1, -1):
-#                         x_out_cv_list[t] = self.model(None,
-#                                                       x_out_cv_forward[:, t],
-#                                                       x_out_cv_forward[:, t + 1],
-#                                                       x_out_cv_list[t + 2])
-#
-#                     x_out_cv = torch.stack(x_out_cv_list, dim=1)  # [m, T_test]
-#
-#                     # =========================================================
-#                     # CV LOSS: weighted next-day prediction (per t)
-#                     # FIXED: Use SMOOTHED states (x_out_cv) just like training!
-#                     # PLUS extra prediction y_{T+1} from x_T with weight=2
-#                     # =========================================================
-#                     HF = SysModel.H @ SysModel.F
-#
-#                     weights = torch.arange(1, SysModel.T_test + 1, device=y_cv_norm.device, dtype=y_cv_norm.dtype)
-#                     weights = weights / torch.sum(weights)
-#
-#                     cv_loss = 0
-#                     for t in range(0, SysModel.T_test):
-#                         y_pred_next_t = HF @ x_out_cv[:, t]  # FIXED: Use smoothed states
-#                         y_true_next_t = y_next_day_cv_norm[:, t]
-#                         cv_loss = cv_loss + weights[t] * self.loss_fn(y_pred_next_t, y_true_next_t)
-#
-#                     # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                     x_last = x_out_cv[:, -1]
-#                     y_pred_Tp1 = HF @ x_last
-#                     y_true_Tp1 = y_next_day_cv_norm[:, -1]
-#                     loss_last = self.loss_fn(y_pred_Tp1, y_true_Tp1)
-#                     cv_loss = cv_loss + 2.0 * loss_last
-#
-#                     MSE_cv_linear_batch[j] = cv_loss.item()
-#
-#                 # Average CV
-#                 self.MSE_cv_linear_epoch[ti] = torch.mean(MSE_cv_linear_batch)
-#                 self.MSE_cv_dB_epoch[ti] = 10 * torch.log10(self.MSE_cv_linear_epoch[ti])
-#
-#                 if (self.MSE_cv_dB_epoch[ti] < self.MSE_cv_dB_opt):
-#                     self.MSE_cv_dB_opt = self.MSE_cv_dB_epoch[ti]
-#                     self.MSE_cv_idx_opt = ti
-#                     torch.save(self.model, path_results)
-#
-#             ########################
-#             ### Training Summary ###
-#             ########################
-#             print(ti, "MSE Training :", self.MSE_train_dB_epoch[ti], "[dB]", "MSE Validation :",
-#                   self.MSE_cv_dB_epoch[ti], "[dB]")
-#
-#             if (ti > 1):
-#                 d_train = self.MSE_train_dB_epoch[ti] - self.MSE_train_dB_epoch[ti - 1]
-#                 d_cv = self.MSE_cv_dB_epoch[ti] - self.MSE_cv_dB_epoch[ti - 1]
-#                 print("diff MSE Training :", d_train, "[dB]", "diff MSE Validation :", d_cv, "[dB]")
-#
-#             print("Optimal idx:", self.MSE_cv_idx_opt, "Optimal :", self.MSE_cv_dB_opt, "[dB]")
-#
-#         return [self.MSE_cv_linear_epoch, self.MSE_cv_dB_epoch,
-#                 self.MSE_train_linear_epoch, self.MSE_train_dB_epoch]
-#
-#     def NNTest_stocks_last(self, SysModel, test_input, test_target, load_model_path,
-#                            generate_f=False, generate_h=False, test_x0=None):
-#
-#         tp = torch.float32
-#         print("Testing RTSNet (stocks – last step only, forward+backward)")
-#
-#         self.N_T = len(test_input)
-#
-#         # Load trained RTSNet
-#         self.model = torch.load(load_model_path, weights_only=False).eval()
-#
-#         pred_prices = torch.empty(self.N_T, device=self.device, dtype=tp)
-#         real_prices = torch.empty(self.N_T, device=self.device, dtype=tp)
-#         sq_err_arr = torch.empty(self.N_T, device=self.device, dtype=tp)
-#         rel_err_arr = torch.empty(self.N_T, device=self.device, dtype=tp)
-#         rel_err_arr_abs = torch.empty(self.N_T, device=self.device, dtype=tp)
-#
-#         with torch.no_grad():
-#             for j in range(0, self.N_T):
-#
-#                 # --------------------------------------------------
-#                 # Window + target (target is y(t0+TAU))
-#                 # --------------------------------------------------
-#                 y_win = test_input[j]  # [n, TAU]
-#                 y_true = test_target[j]  # scalar tensor (or [1])
-#
-#                 T = y_win.size(-1)
-#                 SysModel.T_test = T
-#
-#                 # --------------------------------------------------
-#                 # Per-window normalization (per feature row if n>1)
-#                 # --------------------------------------------------
-#                 y_mean = y_win.mean()
-#                 y_std = y_win.std()
-#                 if y_std == 0:
-#                     y_std = torch.tensor(1.0, device=self.device)
-#
-#                 y_win_norm = (y_win - y_mean) / y_std
-#
-#                 # --------------------------------------------------
-#                 # F / H selection (same logic as your codebase)
-#                 # --------------------------------------------------
-#                 if generate_f is True:
-#                     index = j // 10
-#                     SysModel.F = SysModel.F_test[index]
-#                     self.model.update_F(SysModel.F)
-#                 else:
-#                     # Use the first (and only) F matrix when not varying F
-#                     if isinstance(SysModel.F_test, list):
-#                         SysModel.F = SysModel.F_test[0]
-#                     else:
-#                         SysModel.F = SysModel.F_test
-#                     self.model.update_F(SysModel.F)
-#
-#                 if generate_h is True:
-#                     index = j // 10
-#                     SysModel.H = SysModel.H_test[index]
-#                     self.model.update_H(SysModel.H)
-#
-#                 # --------------------------------------------------
-#                 # x0: x0[0]=price normalized, x0[1]=trend scale-only (no mean shift)
-#                 # --------------------------------------------------
-#                 x0_raw = test_x0[j]  # [2] tensor
-#                 x0_norm = torch.stack([
-#                     (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                     x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                 ])
-#                 SysModel.m1x_0 = x0_norm.view(SysModel.m, 1)  # [m, 1] = [2, 1]
-#
-#                 # --------------------------------------------------
-#                 # Init sequence
-#                 # --------------------------------------------------
-#                 self.model.InitSequence(SysModel.m1x_0, T)
-#                 self.model.init_hidden()
-#
-#                 # --------------------------------------------------
-#                 # Forward pass
-#                 # ASSUMPTION: T >= 2 always
-#                 # --------------------------------------------------
-#                 x_fwd_list = [self.model(y_win_norm[:, t], None, None, None) for t in range(T)]
-#                 x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                 # --------------------------------------------------
-#                 # Backward smoothing - ALWAYS smooth
-#                 # --------------------------------------------------
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#
-#                 x_smooth = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 # --------------------------------------------------
-#                 # LAST prediction ONLY: y_{T+1} from x_T (smoothed)
-#                 # This is the ONLY prediction that matters for testing!
-#                 # y_pred_{T+1} = H * F * x_smooth[:, T-1]
-#                 # --------------------------------------------------
-#                 x_last = x_smooth[:, T - 1].view(SysModel.m, 1)  # x_T
-#
-#                 # H[0:1,:] extracts the price row; denorm with price-row stats
-#                 y_pred_norm = (SysModel.H @ (SysModel.F @ x_last))[0, 0]
-#                 y_pred = y_pred_norm * y_std + y_mean
-#
-#                 # --------------------------------------------------
-#                 # Metrics
-#                 # --------------------------------------------------
-#                 # make y_true scalar: take LAST element = z[t0+TAU] = next-day price after the window
-#                 if y_true.numel() > 1:
-#                     y_true_s = y_true.view(-1)[-1]
-#                 else:
-#                     y_true_s = y_true.view(())
-#
-#                 pred_prices[j] = y_pred
-#                 real_prices[j] = y_true_s
-#
-#                 sq_err_arr[j] = (y_pred - y_true_s) ** 2
-#                 rel_err_arr[j] = (y_pred - y_true_s) / y_true_s
-#                 rel_err_arr_abs[j] = abs((y_pred - y_true_s) / y_true_s)
-#
-#         mse_price = torch.mean(sq_err_arr)
-#         rel_err_mean = torch.mean(rel_err_arr_abs)
-#
-#         print("MSE(price):", mse_price.item())
-#         print("Mean relative error:", rel_err_mean.item())
-#
-#         return (pred_prices, real_prices, mse_price, rel_err_mean, sq_err_arr, rel_err_arr)
-#
-#     # -------------------------
-#
-#     def train_emkalmannet_F_from_price(self,SysModel,cv_input, cv_target, cv_x0,train_input, train_target, train_x0,destination_path_M,destination_path_RTS,
-#                                            num_em_iters=3,alpha=(0.05, 0.10, 0.85),lambda_F=1,generate_f=False,generate_h=False,use_smoothed=True,clip_grad=1.0,):
-#         """
-#         Train an M-step network to estimate/update F using a frozen RTSNet smoother and a price-domain loss.
-#
-#         Assumptions (consistent with your NNTrain_stocks):
-#         - Each sample is a window y_win:      train_input[i]  shape [n, T]
-#         - Each target is next-day aligned:    train_target[i] shape [n, T]
-#             i.e., train_target[i][:, t] = y(t0 + t + 1)
-#         - train_x0[i] is y(t0-1) (scalar), and x0 = [normalized_y(t0-1), 0.5]
-#         - Per-window normalization: (y - mean)/std for both input and target.
-#         - RTSNet is used ONLY to compute x_forward / x_smooth given current F.
-#         - M-net predicts ΔF; we update F_current -> F_next and compute y_pred = H * F_next * x_state.
-#         - Loss = weighted MSE over t plus regularization on ΔF, unrolled for num_em_iters with alpha weights.
-#         """
-#
-#         device = self.device
-#         dtype = train_input[0].dtype
-#         m = SysModel.m
-#         n = SysModel.n
-#
-#         self.N_E = len(train_input)
-#         self.N_CV = len(cv_input)
-#
-#         # -------------------------
-#         # Load & freeze RTSNet
-#         # IMPORTANT: Keep in .train() mode for CuDNN RNN backward compatibility
-#         self.model = torch.load(destination_path_RTS, map_location=device, weights_only=False).to(device).train()
-#         for p in self.model.parameters():
-#             p.requires_grad_(False)
-#
-#         batch_size = 10
-#         # M-step model
-#         model_mstep = self.M_model.train()
-#
-#         self.MSE_cv_dB_opt = 1e18
-#
-#         for epoch in range(self.N_steps):
-#
-#             # =========================
-#             # TRAIN
-#             # =========================
-#             model_mstep.train()
-#             train_loss_sum = 0.0
-#             for j in range(self.N_B):
-#                 self.M_optimizer.zero_grad()
-#                 batch_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#                 for _ in range(batch_size):
-#                     # sample one window
-#                     idx = random.randint(0, self.N_E - 1)
-#                     y_win = train_input[idx].to(device)       # [n, T]
-#                     y_next = train_target[idx].to(device)     # [n, T]
-#                     T = int(y_win.size(-1))  # FIXED: ensure T is an int
-#
-#                     # per-window normalization (same as NNTrain_stocks)
-#                     y_mean = y_win.mean()
-#                     y_std = y_win.std()
-#                     # FIXED: Use .item() for safe scalar comparison and ensure y_std is tensor on device
-#                     if float(y_std.item()) < 1e-6:
-#                         y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#
-#                     y_win_n = (y_win - y_mean) / y_std
-#                     y_next_n = (y_next - y_mean) / y_std
-#
-#                     # choose base F/H (usually fixed for stocks)
-#                     if generate_f:
-#                         f_index = idx // 10
-#                         F_base = SysModel.F_train[f_index].to(device)
-#                     else:
-#                         F_base = SysModel.F_train[0].to(device) if isinstance(SysModel.F_train, list) else SysModel.F_train.to(device)
-#
-#                     if generate_h:
-#                         h_index = idx // 10
-#                         H = SysModel.H_train[h_index].to(device)
-#                     else:
-#                         H = SysModel.H_train[0].to(device) if isinstance(SysModel.H_train, list) else SysModel.H.to(device)
-#
-#                     # x0: x0[0]=price normalized, x0[1]=trend scale-only
-#                     x0_raw = train_x0[idx]  # [2] tensor: [price, trend]
-#                     x0_norm = torch.stack([
-#                         (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                         x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                     ])
-#                     SysModel.m1x_0 = x0_norm.view(m, 1).to(device)  # [2, 1]
-#
-#                     # init covariance prior for RTSNet (as in your code)
-#                     if hasattr(SysModel, "m2x_0"):
-#                         prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
-#                     else:
-#                         prior_Sigma = torch.eye(m, device=device, dtype=dtype)
-#
-#                     # M-step K times (num_em_iters iterations)
-#                     # ASSUMPTION: T >= 2 always
-#                     F_current = F_base.clone().detach()
-#                     total_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                     # Increasing weights over t: t=0 gets weight 1, t=T-1 gets weight T
-#                     w = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                     w = w / (w.sum() + 1e-12)  # normalize
-#
-#                     for em_iter in range(num_em_iters):
-#
-#                         # --- E-step: smooth x using frozen RTSNet under F_current ---
-#                         self.model.update_F(F_current)
-#                         self.model.InitSequence(SysModel.m1x_0, T)
-#                         self.model.init_hidden()
-#                         self.model.prior_Sigma = prior_Sigma
-#
-#                         # Forward pass
-#                         x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                         x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                         # Backward smoothing - ALWAYS smooth
-#                         x_sm_list = [None] * T
-#                         x_sm_list[T - 1] = x_fwd[:, T - 1]
-#                         self.model.InitBackward(x_sm_list[T - 1])
-#                         x_sm_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                         for t in range(T - 3, -1, -1):
-#                             x_sm_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_sm_list[t + 2])
-#                         x_state = torch.stack(x_sm_list, dim=1)  # [m, T]
-#
-#                         # DO NOT DETACH - need gradients to flow through F to M-network!
-#                         # x_state stays with gradients so M-network can learn
-#
-#                         nu = y_win_n - (H @ x_state)  # [n, T]
-#
-#                         # Compute M-step statistics
-#                         A1 = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             A1 += x_state[:, t].view(m, 1) @ x_state[:, t-1].view(1, m)
-#
-#                         A2 = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(T-1):
-#                             A2 += x_state[:, t].view(m, 1) @ x_state[:, t].view(1, m)
-#
-#                         S_delta_x = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             delta_x = x_state[:, t] - (F_current @ x_state[:, t-1])
-#                             S_delta_x += delta_x.view(m, 1) @ delta_x.view(1, m)
-#                         S_delta_x = S_delta_x / max(T-1, 1)
-#
-#                         S_nu = torch.zeros(n, n, device=device, dtype=dtype)
-#                         for t in range(T):
-#                             S_nu += nu[:, t].view(n, 1) @ nu[:, t].view(1, n)
-#                         S_nu = S_nu / T
-#
-#                         C_delta_x_xminus = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             delta_x = x_state[:, t] - (F_current @ x_state[:, t-1])
-#                             C_delta_x_xminus += delta_x.view(m, 1) @ x_state[:, t-1].view(1, m)
-#                         C_delta_x_xminus = C_delta_x_xminus / max(T-1, 1)
-#
-#                         # Build feature vector
-#                         feat = torch.cat([
-#                             A1.reshape(-1), A2.reshape(-1),
-#                             S_delta_x.reshape(-1), S_nu.reshape(-1),
-#                             C_delta_x_xminus.reshape(-1), F_current.reshape(-1)
-#                         ], dim=0).view(1, -1)  # [1, 5*m^2 + n^2]
-#
-#                         # predict ΔF, update
-#                         dF = model_mstep(feat).view(m, m)
-#                         F_next = F_current + dF
-#
-#                         # ===== Compute y_pred loss using F_NEXT (the updated F) =====
-#                         # CRITICAL: Must use F_next so gradient flows through dF to M-network!
-#                         HF_iter = H @ F_current  # [n, m]  ← Use UPDATED F, not old F_current!
-#
-#                         # Predict all y_{t+1} with increasing weights
-#                         y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                         y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                         # Weighted MSE: sum(w[t] * mse_y_t)
-#                         mse_t_iter = (y_pred_iter - y_next_n) ** 2  # [n, T]
-#                         mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T] average over n
-#                         # loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar return_it
-#
-#                         # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                         x_last_iter = x_state[:, -1].view(m, 1)
-#                         y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                         y_true_Tp1 = y_next_n[:, -1]
-#                         loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                         # loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  return_it
-#                         loss_y_iter =   2.0 * loss_y_Tp1_iter
-#                         # Regularize ΔF
-#                         reg = lambda_F * torch.mean(dF ** 2)
-#
-#                         # alpha weighting: BOTH y_pred loss and reg for this EM iteration
-#                         weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                         total_loss = total_loss + weight * (loss_y_iter + reg)
-#
-#                         # advance F for next EM iteration
-#                         F_current = F_next
-#
-#                     # --- ONE FINAL RTS with final F for y_pred loss (HIGHEST ALPHA WEIGHT) ---
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(SysModel.m1x_0, T)
-#                     self.model.init_hidden()
-#
-#
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Smooth - ALWAYS
-#                     x_sm_list = [None] * T
-#                     x_sm_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_sm_list[T - 1])
-#                     x_sm_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_sm_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_sm_list[t + 2])
-#                     x_state_final = torch.stack(x_sm_list, dim=1)  # [m, T]
-#
-#                     # --- price prediction loss: y_hat(t+1|t) = H * F_current * x_state_final(:,t) ---
-#                     HF_final = H @ F_current  # [n, m]
-#                     # Use list comprehension to preserve gradients
-#                     y_pred_list = [(HF_final @ x_state_final[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                     # weighted MSE over t (increasing weights) - per-element then weighted
-#                     mse_t = (y_pred - y_next_n) ** 2  # [n, T]
-#                     mse_time = mse_t.mean(dim=0, keepdim=True)
-#                     loss_y = (w.view(1, T) * mse_time).sum()
-#                     # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                     x_last = x_state_final[:, -1].view(m, 1)
-#                     y_pred_Tp1 = (HF_final @ x_last).view(-1)
-#                     y_true_Tp1 = y_next_n[:, -1]
-#                     loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                     # loss_y = loss_y + 2.0 * loss_y_Tp1 return_it
-#                     loss_y =  2.0 * loss_y_Tp1
-#                     # Add y_pred loss with HIGHEST alpha weight (alpha[num_em_iters])
-#                     final_weight = alpha[-1]
-#                     total_loss = total_loss + final_weight * loss_y
-#
-#                     # Accumulate batch loss
-#                     batch_loss = batch_loss + total_loss
-#                 # FIXED: Single backward call per optimizer step with defensive try/except
-#                 loss = batch_loss / float(batch_size)
-#                 try:
-#                     loss.backward()
-#                 except Exception as e:
-#                     print(f"Warning: backward failed at epoch {epoch} with error: {e}; skipping this batch")
-#                     self.M_optimizer.zero_grad()
-#                     continue
-#                 if clip_grad is not None and clip_grad > 0:
-#                     torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=float(clip_grad))
-#                 self.M_optimizer.step()
-#
-#                 train_loss_sum += loss.detach().item()
-#
-#             # =========================
-#             # VALIDATION
-#             # =========================
-#             model_mstep.eval()
-#             cv_loss_sum = 0.0
-#
-#             with torch.no_grad():
-#                 for j in range(self.N_CV):
-#                     y_win = cv_input[j].to(device)
-#                     y_next = cv_target[j].to(device)
-#                     T = int(y_win.size(-1))  # FIXED: ensure T is an int
-#
-#                     y_mean = y_win.mean()
-#                     y_std = y_win.std()
-#                     # FIXED: Safe scalar comparison
-#                     if float(y_std.item()) < 1e-6:
-#                         y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#
-#                     y_win_n = (y_win - y_mean) / y_std
-#                     y_next_n = (y_next - y_mean) / y_std
-#
-#                     if generate_f:
-#                         f_index = j // 10
-#                         F_base = SysModel.F_valid[f_index].to(device)
-#                     else:
-#                         F_base = SysModel.F_valid[0].to(device) if isinstance(SysModel.F_valid, list) else SysModel.F_valid.to(device)
-#
-#                     if generate_h:
-#                         h_index = j // 10
-#                         H = SysModel.H_valid[h_index].to(device)
-#                     else:
-#                         H = SysModel.H_valid[0].to(device) if isinstance(SysModel.H_valid, list) else SysModel.H.to(device)
-#
-#                     x0_raw = cv_x0[j]  # [2] tensor: [price, trend]
-#                     x0_norm_cv = torch.stack([
-#                         (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                         x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                     ])
-#                     SysModel.m1x_0 = x0_norm_cv.view(m, 1).to(device)  # [2, 1]
-#
-#                     if hasattr(SysModel, "m2x_0"):
-#                         prior_Sigma = SysModel.m2x_0.clone().detach().to(device)
-#                     else:
-#                         prior_Sigma = torch.eye(m, device=device, dtype=dtype)
-#
-#                     w = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                     w = w / (w.sum() + 1e-12)
-#
-#                     F_current = F_base.clone().detach()
-#                     # FIXED: Use tensor accumulator on device
-#                     total_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                     # M-step runs num_em_iters times
-#                     for em_iter in range(num_em_iters):
-#                         self.model.update_F(F_current)
-#                         self.model.InitSequence(SysModel.m1x_0, T)
-#                         self.model.init_hidden()
-#                         self.model.prior_Sigma = prior_Sigma
-#
-#                         # Forward pass
-#                         x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                         x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                         # Backward smoothing - ALWAYS smooth
-#                         x_sm_list = [None] * T
-#                         x_sm_list[T - 1] = x_fwd[:, T - 1]
-#                         self.model.InitBackward(x_sm_list[T - 1])
-#                         x_sm_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                         for t in range(T - 3, -1, -1):
-#                             x_sm_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_sm_list[t + 2])
-#                         x_state = torch.stack(x_sm_list, dim=1)  # [m, T]
-#
-#                         nu = y_win_n - (H @ x_state)
-#
-#                         # Compute M-step statistics
-#                         A1 = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             A1 += x_state[:, t].view(m, 1) @ x_state[:, t-1].view(1, m)
-#
-#                         A2 = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(T-1):
-#                             A2 += x_state[:, t].view(m, 1) @ x_state[:, t].view(1, m)
-#
-#                         S_delta_x = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             delta_x = x_state[:, t] - (F_current @ x_state[:, t-1])
-#                             S_delta_x += delta_x.view(m, 1) @ delta_x.view(1, m)
-#                         S_delta_x = S_delta_x / max(T-1, 1)
-#
-#                         S_nu = torch.zeros(n, n, device=device, dtype=dtype)
-#                         for t in range(T):
-#                             S_nu += nu[:, t].view(n, 1) @ nu[:, t].view(1, n)
-#                         S_nu = S_nu / T
-#
-#                         C_delta_x_xminus = torch.zeros(m, m, device=device, dtype=dtype)
-#                         for t in range(1, T):
-#                             delta_x = x_state[:, t] - (F_current @ x_state[:, t-1])
-#                             C_delta_x_xminus += delta_x.view(m, 1) @ x_state[:, t-1].view(1, m)
-#                         C_delta_x_xminus = C_delta_x_xminus / max(T-1, 1)
-#
-#                         feat = torch.cat([
-#                             A1.reshape(-1), A2.reshape(-1),
-#                             S_delta_x.reshape(-1), S_nu.reshape(-1),
-#                             C_delta_x_xminus.reshape(-1), F_current.reshape(-1),
-#                         ], dim=0).view(1, -1)
-#
-#                         dF = model_mstep(feat).view(m, m)
-#                         F_next = F_current + dF
-#
-#                         # ===== Compute y_pred loss using F_NEXT (same fix as training) =====
-#                         HF_iter = H @ F_current  # Use UPDATED F!
-#                         y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                         y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                         # Weighted MSE: sum(w[t] * mse_y_t)
-#                         mse_t_iter = (y_pred_iter - y_next_n) ** 2
-#                         mse_time = mse_t_iter.mean(dim=0, keepdim=True)
-#                         loss_y_iter = (w.view(1, T) * mse_time).sum()
-#
-#                         # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                         x_last_iter = x_state[:, -1].view(m, 1)
-#                         y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                         y_true_Tp1 = y_next_n[:, -1]
-#                         loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                         # loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter return_it
-#                         loss_y_iter =2.0 * loss_y_Tp1_iter
-#                         # Regularize ΔF
-#                         reg = lambda_F * torch.mean(dF ** 2)
-#
-#                         # alpha weighting (same as training)
-#                         weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                         total_loss = total_loss + weight * (loss_y_iter + reg)
-#
-#                         F_current = F_next
-#
-#                     # ONE FINAL RTS with final F for prediction
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(SysModel.m1x_0, T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = prior_Sigma
-#
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Smooth - ALWAYS
-#                     x_sm_list = [None] * T
-#                     x_sm_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_sm_list[T - 1])
-#                     x_sm_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_sm_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_sm_list[t + 2])
-#                     x_state_final = torch.stack(x_sm_list, dim=1)  # [m, T]
-#
-#                     # Prediction with final F
-#                     HF_final = H @ F_current
-#                     # FIXED: Use list comprehension
-#                     y_pred_list = [(HF_final @ x_state_final[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                     # weighted MSE over t (increasing weights) - per-element then weighted
-#                     mse_t = (y_pred - y_next_n) ** 2  # [n, T]
-#                     mse_time = mse_t.mean(dim=0, keepdim=True)
-#                     loss_y_final = (w.view(1, T) * mse_time).sum()
-#                     x_last = x_state_final[:, -1].view(m, 1)
-#                     y_pred_Tp1 = (HF_final @ x_last).view(-1)
-#                     y_true_Tp1 = y_next_n[:, -1]
-#                     loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                     # loss_y_final = loss_y_final + 2.0 * loss_y_Tp1 return_it
-#                     loss_y_final = 2.0 * loss_y_Tp1
-#
-#                     # Add with HIGHEST alpha weight (same as training)
-#                     final_weight = alpha[-1]
-#                     total_loss = total_loss + final_weight * loss_y_final
-#
-#                     cv_loss_sum += total_loss.item()
-#
-#             train_epoch = train_loss_sum / max(1, self.N_B)
-#             cv_epoch = cv_loss_sum / max(1, self.N_CV)
-#
-#             # FIXED: Safe comparison with float
-#             if float(cv_epoch) < float(self.MSE_cv_dB_opt):
-#                 self.MSE_cv_dB_opt = float(cv_epoch)
-#                 torch.save(model_mstep, destination_path_M)
-#
-#             print(f"[F-MNet via RTSNet] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_epoch:.6f} best_cv={self.MSE_cv_dB_opt:.6f}")
-#
-#
-#     def test_mstep_net_price(self,
-#             SysModel,
-#             test_input,  # list: each [n, T]
-#             test_target,  # list: each [n, T]  (next-day aligned, like your NNTrain_stocks)
-#             test_x0,  # list: scalar y(t0-1) per window (like your stocks pipeline)
-#             destination_path_RTS,
-#             destination_path_M,
-#             num_em_iters=3,
-#             generate_f=False,
-#             generate_h=False
-#     ):
-#         """
-#         Test M-step network for STOCK PRICE prediction.
-#         - Load frozen RTSNet from destination_path_RTS.
-#         - Load trained M-step net from destination_path_M.
-#         - For each test window:
-#             * normalize window once (mean/std of input window)
-#             * build x0 = [normalized y(t0-1), 0.5]
-#             * unroll num_em_iters:
-#                 - smooth x with current F (frozen RTSNet)
-#                 - build z_in features
-#                 - predict ΔF, update F
-#             * after final F, compute y_pred(t+1|t) = H * F_final * x_state(:,t)
-#             * compute MSE vs test_target (normalized)
-#         Returns:
-#           mean_price_mse_per_iter (tensor [num_em_iters])   # how price error evolves across EM iters
-#           mean_price_mse_db_per_iter (tensor [num_em_iters])
-#           final_F_list (list of [m,m])
-#           (optional) predictions (list of dicts)
-#         """
-#
-#         device = self.device
-#         m = SysModel.m
-#         n = SysModel.n
-#         N_T = len(test_input)
-#
-#         # --- Load and freeze RTSNet ---
-#         self.model = torch.load(destination_path_RTS, weights_only=False).to(device).eval()
-#         for p in self.model.parameters():
-#             p.requires_grad_(False)
-#
-#         # --- Load M-step net ---
-#         model_mstep = torch.load(destination_path_M, weights_only=False).to(device).eval()
-#
-#         # Track mean price MSE per EM iteration
-#         price_mse_sum_per_iter = torch.zeros(num_em_iters, device=device)
-#
-#         final_F_list = []
-#         preds_out = []
-#
-#         with torch.no_grad():
-#             for j in range(N_T):
-#
-#                 y_win = test_input[j]  # [n, T]  (assumed already on device)
-#                 y_next = test_target[j]  # [n, T]  (next-day aligned)
-#                 T = y_win.size(-1)
-#
-#                 # Choose base F and H
-#                 if generate_f:
-#                     f_index = j // 10
-#                     F_current = SysModel.F_test[f_index].clone()
-#                 else:
-#                     # common in stocks: one global base F
-#                     F_current = SysModel.F_test[0].clone() if isinstance(SysModel.F_test,
-#                                                                          list) else SysModel.F_test.clone()
-#
-#                 if generate_h:
-#                     h_index = j // 10
-#                     H = SysModel.H_test[h_index].clone()
-#                     SysModel.H = H
-#                     self.model.update_H(H)
-#                 else:
-#                     H = SysModel.H.clone()
-#
-#                 # ---- Normalize ONCE per window ----
-#                 y_mean = y_win.mean()
-#                 y_std = y_win.std()
-#                 if y_std < 1e-6:
-#                     y_std = torch.tensor(1.0, device=device, dtype=y_win.dtype)
-#
-#                 y_win_n = (y_win - y_mean) / y_std
-#                 y_next_n = (y_next - y_mean) / y_std
-#
-#                 # # OLD: split normalization (price normalized, trend kept as 0.5)
-#                 # # x0_raw = test_x0[j]  # [2] tensor: [price_before_window, 0.5]
-#                 # # x0_norm = torch.zeros_like(x0_raw)
-#                 # # x0_norm[0] = (x0_raw[0] - y_mean) / y_std
-#                 # # x0_norm[1] = x0_raw[1]  # Keep 0.5 as-is
-#                 # # x0 = x0_norm.view(m, 1)
-#                 # # OLD: normalize both components
-#                 # # x0_norm = (x0_raw - y_mean) / y_std
-#                 # # x0 = x0_norm.view(m, 1)
-#
-#                 # NEW: x0[0]=price normalized, x0[1]=trend scale-only (no mean shift)
-#                 x0_raw = test_x0[j]  # [2] tensor: [price_before_window, trend0]
-#                 x0_norm = torch.stack([
-#                     (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                     x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                 ])
-#                 x0 = x0_norm.view(m, 1)  # [m, 1] = [2, 1]
-#
-#
-#                 # prior covariance (same style as your code)
-#                 P0 = SysModel.m2x_0.clone().detach()
-#
-#                 # ========= M-step K times (num_em_iters iterations) =========
-#                 # ASSUMPTION: T >= 2 always
-#                 for em_iter in range(num_em_iters):
-#
-#                     # --- E-step: RTSNet smoothing under current F ---
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(x0.clone().detach(), T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = P0.clone().detach()
-#
-#                     # Forward pass
-#                     x_forward_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_forward = torch.stack(x_forward_list, dim=1)  # [m, T]
-#
-#                     # Backward smoothing - ALWAYS smooth
-#                     x_smooth_list = [None] * T
-#                     x_smooth_list[T - 1] = x_forward[:, T - 1]
-#                     self.model.InitBackward(x_smooth_list[T - 1])
-#                     x_smooth_list[T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_smooth_list[t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth_list[t + 2])
-#                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                     # --- Build z_in features for M-step ---
-#                     x_curr = x_state  # [m, T]
-#                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
-#
-#                     A1 = (x_curr @ x_prev.T) / T
-#                     A2 = (x_prev @ x_prev.T) / T
-#
-#                     x_minus = F_current @ x_prev
-#                     delta_x = x_curr - x_minus
-#
-#                     delta_mean = delta_x.mean(dim=1, keepdim=True)
-#                     delta_centered = delta_x - delta_mean
-#                     S_delta_x = (delta_centered @ delta_centered.T) / T
-#
-#                     Hx_curr = H @ x_curr
-#                     nu = y_win_n - Hx_curr
-#
-#                     nu_mean = nu.mean(dim=1, keepdim=True)
-#                     nu_centered = nu - nu_mean
-#                     S_nu = (nu_centered @ nu_centered.T) / T
-#
-#                     C_delta_x_xminus = (delta_x @ x_minus.T) / T
-#
-#                     z_in = torch.cat([
-#                         A1.reshape(-1),
-#                         A2.reshape(-1),
-#                         S_delta_x.reshape(-1),
-#                         S_nu.reshape(-1),
-#                         C_delta_x_xminus.reshape(-1),
-#                         F_current.reshape(-1),
-#                     ], dim=0).view(1, -1)
-#
-#                     # --- M-step: predict ΔF and update ---
-#                     dF = model_mstep(z_in).view(m, m)
-#                     F_next = F_current + dF
-#
-#                     # Update F for next EM iteration
-#                     F_current = F_next
-#
-#                 # ========= ONE FINAL RTS pass with final F for prediction =========
-#                 self.model.update_F(F_current)
-#                 self.model.InitSequence(x0.clone().detach(), T)
-#                 self.model.init_hidden()
-#                 self.model.prior_Sigma = P0.clone().detach()
-#
-#                 # Forward
-#                 x_forward_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                 x_forward = torch.stack(x_forward_list, dim=1)  # [m, T]
-#
-#                 # Smooth - ALWAYS
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_forward[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_forward[:, T - 2], x_forward[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_forward[:, t], x_forward[:, t + 1], x_smooth_list[t + 2])
-#                 x_state_final = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 # --- ONLY predict y_{T+1} from x_T (the last smoothed state) ---
-#                 HF_final = H @ F_current  # [n, m]
-#                 x_last = x_state_final[:, -1].view(m, 1)  # x_T
-#                 y_pred_Tp1 = (HF_final @ x_last).view(-1)  # predict y_{T+1}
-#                 y_true_Tp1 = y_next_n[:, -1]  # y_{T+1} (last element of target)
-#
-#                 # MSE on ONLY this prediction (the only one that matters!)
-#                 mse_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#
-#                 # Store this as the final MSE for this sequence
-#
-#                 seq_price_mse_per_iter = mse_Tp1  # Only last slot matters
-#
-#                 # accumulate mean over sequences
-#                 price_mse_sum_per_iter += seq_price_mse_per_iter
-#                 final_F_list.append(F_current.detach().clone())
-#
-#
-#                 # optionally return denormalized predictions from FINAL iteration
-#                 # y_pred_Tp1 is normalized, denormalize for output
-#                 preds_out.append({
-#                     "seq_index": j,
-#                     "y_mean": y_mean.detach().cpu(),
-#                     "y_std": y_std.detach().cpu(),
-#                     # Predictions for y_{T+1} (ONLY)
-#                     "y_pred_Tp1_norm": y_pred_Tp1.detach().cpu(),
-#                     "y_true_Tp1_norm": y_true_Tp1.detach().cpu(),
-#                     "y_pred_Tp1": (y_pred_Tp1 * y_std + y_mean).detach().cpu(),
-#                     "y_true_Tp1": (y_true_Tp1 * y_std + y_mean).detach().cpu(),
-#                 })
-#
-#         mean_price_mse_per_iter = price_mse_sum_per_iter / float(N_T)
-#         mean_price_mse_db_per_iter = 10.0 * torch.log10(mean_price_mse_per_iter + 1e-12)
-#
-#         print("[M-step PRICE TEST] Mean price MSE per EM iteration:")
-#         for k in range(num_em_iters):
-#             print(f"  EM iter {k + 1}: mse={mean_price_mse_per_iter[k].item():.6e}  "
-#                   f"({mean_price_mse_db_per_iter[k].item():.2f} dB)")
-#
-#
-#         return mean_price_mse_per_iter, mean_price_mse_db_per_iter, final_F_list, preds_out
-#
-#
-# def train_joint_rtsnet_and_mnet_em2_batch5(
-#     self,
-#     SysModel,
-#     train_input, train_target, train_x0,
-#     cv_input, cv_target, cv_x0,
-#     path_rts_in,
-#     path_m_in,
-#     path_rts_out,
-#     path_m_out,
-#     batch_size=5,
-#     num_em_iters=2,
-#     lambda_F=1e-1,
-#     clip_grad=1.0,
-#     alpha=[0.05,0.1,0.85],
-#     lr_rts=1e-4,
-#     lr_m=1e-4,
-#     wd_rts=1e-5,
-#     wd_m=1e-5,
-# ):
-#     """
-#     Joint end-to-end fine-tuning of ONE RTSNet + ONE M-step net with:
-#       - EM unroll length = 2
-#       - Batch size = 5 (one backward per 5 sequences)
-#       - price prediction loss: y_hat = H * F * x_t  (sequence target) OR y_hat_last (last target)
-#
-#     Data format supported:
-#       - train_input[i]  : [n, T]
-#       - train_target[i] : [n, T]  (next-day aligned)  OR  [n] / [n,1] (last only)
-#       - train_x0[i]     : scalar y(t0-1)
-#
-#     Saves best models (based on CV subset MSE):
-#       - RTSNet -> path_rts_out
-#       - MNet   -> path_m_out
-#     """
-#
-#     device = self.device
-#     m, n = SysModel.m, SysModel.n
-#     N_E = len(train_input)
-#     N_CV = len(cv_input)
-#     dtype = train_input[0].dtype
-#
-#     # Initialize Pipeline attributes (required by validation loop)
-#     self.N_E = N_E
-#     self.N_CV = N_CV
-#
-#     # ---------- Load models ONCE ----------
-#     self.model = torch.load(path_rts_in, weights_only=False).to(device).train()
-#     model_mstep = torch.load(path_m_in, weights_only=False).to(device).train()
-#
-#     # ---------- Optimizers ----------
-#     rts_opt = torch.optim.Adam(self.model.parameters(), lr=lr_rts, weight_decay=wd_rts)
-#     m_opt   = torch.optim.Adam(model_mstep.parameters(), lr=lr_m,   weight_decay=wd_m)
-#
-#     best_cv = float("inf")
-#
-#     # EPOCH LOOP (like train_emkalmannet_F_from_price)
-#     for epoch in range(self.N_steps):
-#
-#         # ==========================
-#         # TRAIN: self.N_B mini-batch updates per epoch
-#         # ==========================
-#         self.model.train()
-#         model_mstep.train()
-#         train_loss_sum = 0.0
-#
-#         for j in range(self.N_B):  # N_B updates per epoch
-#             rts_opt.zero_grad()
-#             m_opt.zero_grad()
-#
-#             batch_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#             for b in range(batch_size):  # batch_size sequences per update
-#
-#                 idx = random.randint(0, N_E - 1)
-#
-#                 y_win = train_input[idx]      # [n, T]
-#                 y_tgt = train_target[idx]     # [n, T] or [n]
-#                 T = y_win.size(-1)
-#
-#                 # ---- normalize ONCE per window ----
-#                 y_mean = y_win.mean()
-#                 y_std  = y_win.std()
-#                 if y_std < 1e-6:
-#                     y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#
-#                 y_win_n = (y_win - y_mean) / y_std
-#
-#                 if y_tgt.dim() == 2:
-#                     y_tgt_n = (y_tgt - y_mean) / y_std
-#                     target_is_sequence = True
-#                 else:
-#                     y_tgt_n = (y_tgt.view(-1) - y_mean.view(-1)) / y_std
-#                     target_is_sequence = False
-#
-#                 # ---- base F, H (stocks: usually fixed) ----
-#                 # assume SysModel.F and SysModel.H exist on the correct device
-#                 F_base = SysModel.F.clone().detach()
-#                 H = SysModel.H
-#
-#                 # x0: normalize both components so x0 lives in same space as RTSNet states
-#                 x0_raw  = train_x0[idx]  # [2] tensor
-#                 x0_norm = torch.stack([
-#                     (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                     x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                 ])
-#                 x0 = x0_norm.view(m, 1)  # [m, 1] = [2, 1]
-#
-#                 P0 = SysModel.m2x_0.clone().detach()
-#
-#                 # ==================================
-#                 # M-step K times (num_em_iters iterations)
-#                 # ASSUMPTION: T >= 2 always
-#                 # ==================================
-#                 F_current = F_base.detach()  # Detached at initialization (from SysModel.F.clone().detach())
-#                 total_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                 # Increasing weights over t
-#                 w = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                 w = w / (w.sum() + 1e-12)
-#
-#                 for em_iter in range(num_em_iters):
-#
-#                     # ---- E-step: RTSNet smoother under current F ----
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(x0, T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = P0
-#
-#                     # Forward pass
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Backward smoothing - ALWAYS smooth
-#                     x_smooth_list = [None] * T
-#                     x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_smooth_list[T - 1])
-#                     x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                     # ---- build stats for M-net input ----
-#                     x_curr = x_state
-#                     # x0 fully normalized (trend/y_std) so same space as x_curr — correct x_{-1}
-#                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
-#
-#                     A1 = (x_curr @ x_prev.T) / T
-#                     A2 = (x_prev @ x_prev.T) / T
-#
-#                     x_minus = F_current @ x_prev
-#                     delta_x = x_curr - x_minus
-#                     delta_centered = delta_x - delta_x.mean(dim=1, keepdim=True)
-#                     S_delta_x = (delta_centered @ delta_centered.T) / T
-#
-#                     nu = y_win_n - (H @ x_curr)
-#                     nu_centered = nu - nu.mean(dim=1, keepdim=True)
-#                     S_nu = (nu_centered @ nu_centered.T) / T
-#
-#                     C_delta_x_xminus = (delta_x @ x_minus.T) / T
-#
-#                     z_in = torch.cat([
-#                         A1.reshape(-1),
-#                         A2.reshape(-1),
-#                         S_delta_x.reshape(-1),
-#                         S_nu.reshape(-1),
-#                         C_delta_x_xminus.reshape(-1),
-#                         F_current.reshape(-1),
-#                     ], dim=0).view(1, -1)
-#
-#                     # ---- M-step: ΔF and update F (gradients flow to MNet) ----
-#                     dF = model_mstep(z_in).view(m, m)
-#                     F_next = F_current + dF
-#
-#                     # Use F_current for prediction (x_state was smoothed under F_current)
-#                     HF_iter = H @ F_current  # [n, m]
-#
-#                     # Predict all y_{t+1} with increasing weights
-#                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                     # Weighted MSE over full sequence
-#                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2  # [n, T]
-#                     mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T]
-#                     loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar
-#
-#                     # y_{T+1} prediction from x_T with DOUBLE weight
-#                     x_last_iter = x_state[:, -1].view(m, 1)
-#                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                     y_true_Tp1 = y_tgt_n[:, -1]
-#                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                     loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  # full sequence + double last
-#
-#                     # Regularize ΔF
-#                     reg_iter = lambda_F * torch.mean(dF ** 2)
-#
-#                     # alpha weighting
-#                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                     total_loss = total_loss + weight * (loss_y_iter + reg_iter)
-#
-#                     # advance F (NO detach - gradient flows to both RTSNet and M-net!)
-#                     F_current = F_next
-#
-#                 # ==================================
-#                 # ONE FINAL RTS with final F for y_pred loss (HIGHEST ALPHA WEIGHT)
-#                 # ==================================
-#                 self.model.update_F(F_current)
-#                 self.model.InitSequence(x0, T)
-#                 self.model.init_hidden()
-#                 self.model.prior_Sigma = P0
-#
-#                 x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                 x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                 # Smooth - ALWAYS
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                 x_state_last = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 # NO detach - need gradients to flow through F to both nets!
-#                 # ==========================
-#                 HF = H @ F_current  # [n, m]
-#
-#                 # Predict y_{t+1} from x_t for all t
-#                 y_pred_list = [(HF @ x_state_last[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                 y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                 # Weighted MSE: sum(w[t] * mse_y_t)
-#                 mse_t = (y_pred - y_tgt_n) ** 2  # [n, T]
-#                 mse_time = mse_t.mean(dim=0, keepdim=True)  # [1,T]
-#                 loss_y = (w.view(1, T) * mse_time).sum()
-#
-#                 # EXTRA: y_{T+1} from x_T with DOUBLE weight
-#                 x_last = x_state_last[:, -1].view(m, 1)  # x_T
-#                 y_pred_Tp1 = (HF @ x_last).view(-1)
-#                 y_true_Tp1 = y_tgt_n[:, -1]
-#                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                 loss_y = loss_y + 2.0 * loss_y_Tp1  # full sequence + double last
-#                 final_weight = alpha[-1]
-#                 total_loss = total_loss + final_weight * loss_y
-#
-#                 batch_loss = batch_loss + total_loss / float(batch_size)
-#
-#             # ---- One backward for BOTH nets (end of mini-batch) ----
-#             batch_loss.backward()
-#
-#             if clip_grad and clip_grad > 0:
-#                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=float(clip_grad))
-#                 torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=float(clip_grad))
-#
-#             rts_opt.step()
-#             m_opt.step()
-#
-#             train_loss_sum += batch_loss.detach().item()
-#
-#         # ==========================
-#         # VALIDATION (end of epoch)
-#         # ==========================
-#         self.model.eval()
-#         model_mstep.eval()
-#
-#         cv_loss = 0.0
-#         with torch.no_grad():
-#             for j in range(self.N_CV):
-#                 y_win = cv_input[j]
-#                 y_tgt = cv_target[j]
-#                 T = y_win.size(-1)
-#
-#                 y_mean = y_win.mean()
-#                 y_std  = y_win.std()
-#                 if y_std < 1e-6:
-#                     y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#                 y_win_n = (y_win - y_mean) / y_std
-#
-#                 if y_tgt.dim() == 2:
-#                     y_tgt_n = (y_tgt - y_mean) / y_std
-#                     target_is_sequence = True
-#                 else:
-#                     y_tgt_n = (y_tgt.view(-1) - y_mean.view(-1)) / y_std
-#                     target_is_sequence = False
-#
-#                 F_current = SysModel.F.clone().detach()
-#                 H = SysModel.H
-#
-#                 x0_raw  = cv_x0[j]  # [2] tensor
-#                 x0_norm_cv = torch.stack([
-#                     (x0_raw[0] - y_mean) / y_std,   # price: full normalization
-#                     x0_raw[1] / y_std               # trend: scale only (same units as price)
-#                 ])
-#                 x0 = x0_norm_cv.view(m, 1)  # [m, 1] = [2, 1]
-#                 P0 = SysModel.m2x_0.clone().detach()
-#
-#                 # Compute time weights
-#                 w_cv = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                 w_cv = w_cv / (w_cv.sum() + 1e-12)
-#
-#                 total_loss_cv = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                 # M-step K times (num_em_iters iterations)
-#                 # ASSUMPTION: T >= 2 always
-#                 for em_iter in range(num_em_iters):
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(x0, T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = P0
-#
-#                     # Forward pass
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Backward smoothing - ALWAYS smooth
-#                     x_smooth_list = [None] * T
-#                     x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_smooth_list[T - 1])
-#                     x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                     x_curr = x_state
-#                     # x0 fully normalized (trend/y_std) so same space as x_curr — correct x_{-1}
-#                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
-#
-#                     A1 = (x_curr @ x_prev.T) / T
-#                     A2 = (x_prev @ x_prev.T) / T
-#
-#                     x_minus = F_current @ x_prev
-#                     delta_x = x_curr - x_minus
-#                     delta_centered = delta_x - delta_x.mean(dim=1, keepdim=True)
-#                     S_delta_x = (delta_centered @ delta_centered.T) / T
-#
-#                     nu = y_win_n - (H @ x_curr)
-#                     nu_centered = nu - nu.mean(dim=1, keepdim=True)
-#                     S_nu = (nu_centered @ nu_centered.T) / T
-#
-#                     C_delta_x_xminus = (delta_x @ x_minus.T) / T
-#
-#                     z_in = torch.cat([
-#                         A1.reshape(-1), A2.reshape(-1),
-#                         S_delta_x.reshape(-1), S_nu.reshape(-1),
-#                         C_delta_x_xminus.reshape(-1),
-#                         F_current.reshape(-1),
-#                     ], dim=0).view(1, -1)
-#
-#                     dF = model_mstep(z_in).view(m, m)
-#                     F_next = F_current + dF
-#
-#                     # Use F_current for prediction (x_state was smoothed under F_current)
-#                     HF_iter = H @ F_current
-#                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                     # Weighted MSE over full sequence
-#                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2
-#                     mse_time = mse_t_iter.mean(dim=0, keepdim=True)
-#                     loss_y_iter = (w_cv.view(1, T) * mse_time).sum()
-#
-#                     x_last_iter = x_state[:, -1].view(m, 1)
-#                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                     y_true_Tp1 = y_tgt_n[:, -1]
-#                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                     loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter  # full sequence + double last
-#
-#                     # Regularize ΔF
-#                     reg_iter = lambda_F * torch.mean(dF ** 2)
-#
-#                     # alpha weighting (same as training)
-#                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                     total_loss_cv = total_loss_cv + weight * (loss_y_iter + reg_iter)
-#
-#                     F_current = F_next
-#
-#                 # ONE FINAL RTS with final F for prediction (HIGHEST ALPHA WEIGHT)
-#                 self.model.update_F(F_current)
-#                 self.model.InitSequence(x0, T)
-#                 self.model.init_hidden()
-#                 self.model.prior_Sigma = P0
-#
-#                 x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                 x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                 # Smooth - ALWAYS
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                 x_state_last = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 HF = H @ F_current
-#
-#                 # Predict all y_{t+1}
-#                 y_pred_list = [(HF @ x_state_last[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                 y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                 # Weighted MSE: sum(w[t] * mse_y_t)
-#                 mse_t = (y_pred - y_tgt_n) ** 2
-#                 mse_time = mse_t.mean(dim=0, keepdim=True)
-#                 loss_y_final = (w_cv.view(1, T) * mse_time).sum()
-#
-#                 # EXTRA: y_{T+1} from x_T with DOUBLE weight
-#                 x_last = x_state_last[:, -1].view(m, 1)
-#                 y_pred_Tp1 = (HF @ x_last).view(-1)
-#                 y_true_Tp1 = y_tgt_n[:, -1]
-#                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                 loss_y_final = loss_y_final + 2.0 * loss_y_Tp1  # full sequence + double last
-#
-#                 # Add with HIGHEST alpha weight (same as training)
-#                 final_weight = alpha[-1]
-#                 total_loss_cv = total_loss_cv + final_weight * loss_y_final
-#
-#                 cv_loss += total_loss_cv.item()
-#
-#         # Normalize losses by their respective dataset sizes
-#         cv_loss = cv_loss / float(self.N_CV)
-#         train_epoch = train_loss_sum / float(self.N_B)
-#
-#         if cv_loss < best_cv:
-#             best_cv = cv_loss
-#             torch.save(self.model, path_rts_out)
-#             torch.save(model_mstep, path_m_out)
-#
-#         print(f"[JOINT EM={num_em_iters} B={batch_size}] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_loss:.6f} best_cv={best_cv:.6f}")
-#
-#
-#         ##########################only_f##############################################
-#
-#
-# def y_train_joint_rtsnet_and_mnet_em2_batch5(
-#         self,
-#         SysModel,
-#         train_input, train_target, train_x0,
-#         cv_input, cv_target, cv_x0,
-#         path_rts_in,
-#         path_m_in,
-#         path_rts_out,
-#         path_m_out,
-#         batch_size=5,
-#         num_em_iters=2,
-#         lambda_F=1e-1,
-#         clip_grad=1.0,
-#         alpha=[0.05, 0.1, 0.85],
-#         lr_rts=1e-4,
-#         lr_m=1e-4,
-#         wd_rts=1e-5,
-#         wd_m=1e-5,
-# ):
-#     """
-#     Joint end-to-end fine-tuning of ONE RTSNet + ONE M-step net with:
-#       - EM unroll length = 2
-#       - Batch size = 5 (one backward per 5 sequences)
-#       - price prediction loss: y_hat = H * F * x_t  (sequence target) OR y_hat_last (last target)
-#
-#     Data format supported:
-#       - train_input[i]  : [n, T]
-#       - train_target[i] : [n, T]  (next-day aligned)  OR  [n] / [n,1] (last only)
-#       - train_x0[i]     : scalar y(t0-1)
-#
-#     Saves best models (based on CV subset MSE):
-#       - RTSNet -> path_rts_out
-#       - MNet   -> path_m_out
-#     """
-#
-#     device = self.device
-#     m, n = SysModel.m, SysModel.n
-#     N_E = len(train_input)
-#     N_CV = len(cv_input)
-#     dtype = train_input[0].dtype
-#
-#     # Initialize Pipeline attributes (required by validation loop)
-#     self.N_E = N_E
-#     self.N_CV = N_CV
-#
-#     # ---------- Load models ONCE ----------
-#     self.model = torch.load(path_rts_in, weights_only=False).to(device).train()
-#     model_mstep = torch.load(path_m_in, weights_only=False).to(device).train()
-#
-#     # ---------- Optimizers ----------
-#     rts_opt = torch.optim.Adam(self.model.parameters(), lr=lr_rts, weight_decay=wd_rts)
-#     m_opt = torch.optim.Adam(model_mstep.parameters(), lr=lr_m, weight_decay=wd_m)
-#
-#     best_cv = float("inf")
-#
-#     # EPOCH LOOP (like train_emkalmannet_F_from_price)
-#     for epoch in range(self.N_steps):
-#
-#         # ==========================
-#         # TRAIN: self.N_B mini-batch updates per epoch
-#         # ==========================
-#         self.model.train()
-#         model_mstep.train()
-#         train_loss_sum = 0.0
-#
-#         for j in range(self.N_B):  # N_B updates per epoch
-#             rts_opt.zero_grad()
-#             m_opt.zero_grad()
-#
-#             batch_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#             for b in range(batch_size):  # batch_size sequences per update
-#
-#                 idx = random.randint(0, N_E - 1)
-#
-#                 y_win = train_input[idx]  # [n, T]
-#                 y_tgt = train_target[idx]  # [n, T] or [n]
-#                 T = y_win.size(-1)
-#
-#                 # ---- normalize ONCE per window ----
-#                 y_mean = y_win.mean()
-#                 y_std = y_win.std()
-#                 if y_std < 1e-6:
-#                     y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#
-#                 y_win_n = (y_win - y_mean) / y_std
-#
-#                 if y_tgt.dim() == 2:
-#                     y_tgt_n = (y_tgt - y_mean) / y_std
-#                     target_is_sequence = True
-#                 else:
-#                     y_tgt_n = (y_tgt.view(-1) - y_mean.view(-1)) / y_std
-#                     target_is_sequence = False
-#
-#                 # ---- base F, H (stocks: usually fixed) ----
-#                 # assume SysModel.F and SysModel.H exist on the correct device
-#                 F_base = SysModel.F.clone().detach()
-#                 H = SysModel.H
-#
-#                 # ---- x0 = [normalized y(t0-1), 0.5] ----
-#                 x0_raw = float(train_x0[idx])
-#                 x0_norm = (x0_raw - y_mean.item()) / y_std.item()
-#
-#                 x0 = torch.empty(m, device=device, dtype=dtype)
-#                 x0[0] = torch.tensor(x0_norm, device=device, dtype=dtype)
-#                 x0[1] = torch.tensor(0.5, device=device, dtype=dtype)
-#                 x0 = x0.view(m, 1)
-#
-#                 P0 = SysModel.m2x_0.clone().detach()
-#
-#                 # ==================================
-#                 # M-step K times (num_em_iters iterations)
-#                 # ASSUMPTION: T >= 2 always
-#                 # ==================================
-#                 F_current = F_base.detach()  # Detached at initialization (from SysModel.F.clone().detach())
-#                 total_loss = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                 # Increasing weights over t
-#                 w = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                 w = w / (w.sum() + 1e-12)
-#
-#                 for em_iter in range(num_em_iters):
-#
-#                     # ---- E-step: RTSNet smoother under current F ----
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(x0, T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = P0
-#
-#                     # Forward pass
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Backward smoothing - ALWAYS smooth
-#                     x_smooth_list = [None] * T
-#                     x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_smooth_list[T - 1])
-#                     x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                     # ---- build stats for M-net input ----
-#                     x_curr = x_state
-#                     # x0 fully normalized (trend/y_std) — correct x_{-1} for EM statistics
-#                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
-#
-#                     A1 = (x_curr @ x_prev.T) / T
-#                     A2 = (x_prev @ x_prev.T) / T
-#
-#                     x_minus = F_current @ x_prev
-#                     delta_x = x_curr - x_minus
-#                     delta_centered = delta_x - delta_x.mean(dim=1, keepdim=True)
-#                     S_delta_x = (delta_centered @ delta_centered.T) / T
-#
-#                     nu = y_win_n - (H @ x_curr)
-#                     nu_centered = nu - nu.mean(dim=1, keepdim=True)
-#                     S_nu = (nu_centered @ nu_centered.T) / T
-#
-#                     C_delta_x_xminus = (delta_x @ x_minus.T) / T
-#
-#                     z_in = torch.cat([
-#                         A1.reshape(-1),
-#                         A2.reshape(-1),
-#                         S_delta_x.reshape(-1),
-#                         S_nu.reshape(-1),
-#                         C_delta_x_xminus.reshape(-1),
-#                         F_current.reshape(-1),
-#                     ], dim=0).view(1, -1)
-#
-#                     # ---- M-step: ΔF and update F (gradients flow to MNet) ----
-#                     dF = model_mstep(z_in).view(m, m)
-#                     F_next = F_current + dF
-#
-#                     # ===== Compute y_pred loss IN THIS EM iteration (NO detach on x_state!) =====
-#                     HF_iter = H @ F_current  # [n, m]
-#
-#                     # Predict all y_{t+1} with increasing weights
-#                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                     # Weighted MSE: sum(w[t] * mse_y_t)
-#                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2  # [n, T]
-#                     mse_time = mse_t_iter.mean(dim=0, keepdim=True)  # [1, T] average over n
-#                     loss_y_iter = (w.view(1, T) * mse_time).sum()  # scalar
-#
-#                     # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                     x_last_iter = x_state[:, -1].view(m, 1)
-#                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                     y_true_Tp1 = y_tgt_n[:, -1]
-#                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                     loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
-#
-#                     # Regularize ΔF
-#                     reg_iter = lambda_F * torch.mean(dF ** 2)
-#
-#                     # alpha weighting: BOTH y_pred loss and reg for this EM iteration
-#                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                     total_loss = total_loss + weight * (loss_y_iter + 4 * reg_iter)
-#
-#                     # advance F (NO detach - gradient flows to both RTSNet and M-net!)
-#                     F_current = F_next
-#
-#                 # ==================================
-#                 # ONE FINAL RTS with final F for y_pred loss (HIGHEST ALPHA WEIGHT)
-#                 # ==================================
-#                 self.model.update_F(F_current)
-#                 self.model.InitSequence(x0, T)
-#                 self.model.init_hidden()
-#                 self.model.prior_Sigma = P0
-#
-#                 x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                 x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                 # Smooth - ALWAYS
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                 x_state_last = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 # NO detach - need gradients to flow through F to both nets!
-#                 # ==========================
-#                 HF = H @ F_current  # [n, m]
-#
-#                 # Predict y_{t+1} from x_t for all t
-#                 y_pred_list = [(HF @ x_state_last[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                 y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                 # Weighted MSE: sum(w[t] * mse_y_t)
-#                 mse_t = (y_pred - y_tgt_n) ** 2  # [n, T]
-#                 mse_time = mse_t.mean(dim=0, keepdim=True)  # [1,T]
-#                 loss_y = (w.view(1, T) * mse_time).sum()
-#
-#                 # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                 x_last = x_state_last[:, -1].view(m, 1)  # x_T
-#                 y_pred_Tp1 = (HF @ x_last).view(-1)  # predict y_{T+1}
-#                 y_true_Tp1 = y_tgt_n[:, -1]  # y_{T+1}
-#                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                 loss_y = loss_y + 2.0 * loss_y_Tp1
-#                 final_weight = alpha[-1]
-#                 total_loss = total_loss + final_weight * loss_y
-#
-#                 batch_loss = batch_loss + total_loss / float(batch_size)
-#
-#             # ---- One backward for BOTH nets (end of mini-batch) ----
-#             batch_loss.backward()
-#
-#             if clip_grad and clip_grad > 0:
-#                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=float(clip_grad))
-#                 torch.nn.utils.clip_grad_norm_(model_mstep.parameters(), max_norm=float(clip_grad))
-#
-#             rts_opt.step()
-#             m_opt.step()
-#
-#             train_loss_sum += batch_loss.detach().item()
-#
-#         # ==========================
-#         # VALIDATION (end of epoch)
-#         # ==========================
-#         self.model.eval()
-#         model_mstep.eval()
-#
-#         cv_loss = 0.0
-#         with torch.no_grad():
-#             for j in range(self.N_CV):
-#                 y_win = cv_input[j]
-#                 y_tgt = cv_target[j]
-#                 T = y_win.size(-1)
-#
-#                 y_mean = y_win.mean()
-#                 y_std = y_win.std()
-#                 if y_std < 1e-6:
-#                     y_std = torch.tensor(1.0, device=device, dtype=dtype)
-#                 y_win_n = (y_win - y_mean) / y_std
-#
-#                 if y_tgt.dim() == 2:
-#                     y_tgt_n = (y_tgt - y_mean) / y_std
-#                     target_is_sequence = True
-#                 else:
-#                     y_tgt_n = (y_tgt.view(-1) - y_mean.view(-1)) / y_std
-#                     target_is_sequence = False
-#
-#                 F_current = SysModel.F.clone().detach()
-#                 H = SysModel.H
-#
-#                 x0_raw = float(cv_x0[j])
-#                 x0_norm = (x0_raw - y_mean.item()) / y_std.item()
-#                 x0 = torch.tensor([[x0_norm], [0.5]], device=device, dtype=dtype)
-#
-#                 P0 = SysModel.m2x_0.clone().detach()
-#
-#                 # Compute time weights
-#                 w_cv = torch.arange(1, T + 1, device=device, dtype=dtype)
-#                 w_cv = w_cv / (w_cv.sum() + 1e-12)
-#
-#                 total_loss_cv = torch.tensor(0.0, device=device, dtype=dtype)
-#
-#                 # M-step K times (num_em_iters iterations)
-#                 # ASSUMPTION: T >= 2 always
-#                 for em_iter in range(num_em_iters):
-#                     self.model.update_F(F_current)
-#                     self.model.InitSequence(x0, T)
-#                     self.model.init_hidden()
-#                     self.model.prior_Sigma = P0
-#
-#                     # Forward pass
-#                     x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                     x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                     # Backward smoothing - ALWAYS smooth
-#                     x_smooth_list = [None] * T
-#                     x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                     self.model.InitBackward(x_smooth_list[T - 1])
-#                     x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                     for t in range(T - 3, -1, -1):
-#                         x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                     x_state = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                     x_curr = x_state
-#                     # x0 fully normalized (trend/y_std) — correct x_{-1} for EM statistics
-#                     x_prev = torch.cat([x0, x_curr[:, :-1]], dim=1)  # [m, T]
-#
-#                     A1 = (x_curr @ x_prev.T) / T
-#                     A2 = (x_prev @ x_prev.T) / T
-#
-#                     x_minus = F_current @ x_prev
-#                     delta_x = x_curr - x_minus
-#                     delta_centered = delta_x - delta_x.mean(dim=1, keepdim=True)
-#                     S_delta_x = (delta_centered @ delta_centered.T) / T
-#
-#                     nu = y_win_n - (H @ x_curr)
-#                     nu_centered = nu - nu.mean(dim=1, keepdim=True)
-#                     S_nu = (nu_centered @ nu_centered.T) / T
-#
-#                     C_delta_x_xminus = (delta_x @ x_minus.T) / T
-#
-#                     z_in = torch.cat([
-#                         A1.reshape(-1), A2.reshape(-1),
-#                         S_delta_x.reshape(-1), S_nu.reshape(-1),
-#                         C_delta_x_xminus.reshape(-1),
-#                         F_current.reshape(-1),
-#                     ], dim=0).view(1, -1)
-#
-#                     dF = model_mstep(z_in).view(m, m)
-#                     F_next = F_current + dF
-#
-#                     # ===== Compute y_pred loss IN THIS EM iteration (same as training) =====
-#                     HF_iter = H @ F_current
-#                     y_pred_iter_list = [(HF_iter @ x_state[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                     y_pred_iter = torch.stack(y_pred_iter_list, dim=1)  # [n, T]
-#
-#                     # Weighted MSE: sum(w[t] * mse_y_t)
-#                     mse_t_iter = (y_pred_iter - y_tgt_n) ** 2
-#                     mse_time = mse_t_iter.mean(dim=0, keepdim=True)
-#                     loss_y_iter = (w_cv.view(1, T) * mse_time).sum()
-#
-#                     x_last_iter = x_state[:, -1].view(m, 1)
-#                     y_pred_Tp1_iter = (HF_iter @ x_last_iter).view(-1)
-#                     y_true_Tp1 = y_tgt_n[:, -1]
-#                     loss_y_Tp1_iter = torch.mean((y_pred_Tp1_iter - y_true_Tp1) ** 2)
-#                     loss_y_iter = loss_y_iter + 2.0 * loss_y_Tp1_iter
-#
-#                     # Regularize ΔF
-#                     reg_iter = lambda_F * torch.mean(dF ** 2)
-#
-#                     # alpha weighting (same as training)
-#                     weight = alpha[em_iter] if em_iter < len(alpha) else alpha[-1]
-#                     total_loss_cv = total_loss_cv + weight * (loss_y_iter + 4 * reg_iter)
-#
-#                     F_current = F_next
-#
-#                 # ONE FINAL RTS with final F for prediction (HIGHEST ALPHA WEIGHT)
-#                 self.model.update_F(F_current)
-#                 self.model.InitSequence(x0, T)
-#                 self.model.init_hidden()
-#                 self.model.prior_Sigma = P0
-#
-#                 x_fwd_list = [self.model(y_win_n[:, t], None, None, None) for t in range(T)]
-#                 x_fwd = torch.stack(x_fwd_list, dim=1)  # [m, T]
-#
-#                 # Smooth - ALWAYS
-#                 x_smooth_list = [None] * T
-#                 x_smooth_list[T - 1] = x_fwd[:, T - 1]
-#                 self.model.InitBackward(x_smooth_list[T - 1])
-#                 x_smooth_list[T - 2] = self.model(None, x_fwd[:, T - 2], x_fwd[:, T - 1], None)
-#                 for t in range(T - 3, -1, -1):
-#                     x_smooth_list[t] = self.model(None, x_fwd[:, t], x_fwd[:, t + 1], x_smooth_list[t + 2])
-#                 x_state_last = torch.stack(x_smooth_list, dim=1)  # [m, T]
-#
-#                 HF = H @ F_current
-#
-#                 # Predict all y_{t+1}
-#                 y_pred_list = [(HF @ x_state_last[:, t].view(m, 1)).view(-1) for t in range(T)]
-#                 y_pred = torch.stack(y_pred_list, dim=1)  # [n, T]
-#
-#                 # Weighted MSE: sum(w[t] * mse_y_t)
-#                 mse_t = (y_pred - y_tgt_n) ** 2
-#                 mse_time = mse_t.mean(dim=0, keepdim=True)
-#                 loss_y_final = (w_cv.view(1, T) * mse_time).sum()
-#
-#                 # EXTRA: Predict y_{T+1} from x_T with DOUBLE weight
-#                 x_last = x_state_last[:, -1].view(m, 1)
-#                 y_pred_Tp1 = (HF @ x_last).view(-1)
-#                 y_true_Tp1 = y_tgt_n[:, -1]
-#                 loss_y_Tp1 = torch.mean((y_pred_Tp1 - y_true_Tp1) ** 2)
-#                 loss_y_final = loss_y_final + 2.0 * loss_y_Tp1
-#
-#                 # Add with HIGHEST alpha weight (same as training)
-#                 final_weight = alpha[-1]
-#                 total_loss_cv = total_loss_cv + final_weight * loss_y_final
-#
-#                 cv_loss += total_loss_cv.item()
-#
-#         if cv_loss < best_cv:
-#             best_cv = cv_loss
-#             torch.save(self.model, path_rts_out)
-#             torch.save(model_mstep, path_m_out)
-#         train_epoch = train_loss_sum / float(self.N_B)
-#         print(
-#             f"[JOINT EM={num_em_iters} B={batch_size}] epoch={epoch:03d} train={train_epoch:.6f} cv={cv_loss:.6f} best_cv={best_cv:.6f}")
-#
-#
-#

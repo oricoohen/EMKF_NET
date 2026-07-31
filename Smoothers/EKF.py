@@ -51,7 +51,8 @@ class ExtendedKalmanFilter:
     # Compute the Kalman Gain
     def KGain(self):
         self.KG = torch.matmul(self.m2x_prior, self.H_T)
-        self.KG = torch.matmul(self.KG, torch.inverse(self.m2y))
+        reg = 1e-6 * torch.eye(self.m2y.shape[0], device=self.m2y.device, dtype=self.m2y.dtype)
+        self.KG = torch.matmul(self.KG, torch.inverse(self.m2y + reg))
 
         # Save KalmanGain
         self.KG_array[self.i] = self.KG

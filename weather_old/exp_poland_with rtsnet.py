@@ -83,8 +83,8 @@ m = 2
 if n == 1:
     # ORIGINAL: scalar price observation
     H_fixed = torch.tensor([[1.0, 0.0]], device=device, dtype=dtype)  # [1, 2]
-    path_results_rts = "../RTSNet/poland_stock/tau_5/rtsnet_model_x0_f_I.pth"
-    path_results_m   = "../RTSNet/poland_stock/tau_5/m_network_x0_f_I_final_loss.pth"
+    path_results_rts = "../RTSNet/history/poland_stock/tau_5/rtsnet_model_x0_f_I.pth"
+    path_results_m   = "../RTSNet/history/poland_stock/tau_5/m_network_x0_f_I_final_loss.pth"
 elif n == 2:
     # NEW: [price, trend] observation — H=I so state=[price,trend] is observed directly
     H_fixed = torch.eye(m, device=device, dtype=dtype)                 # [2, 2]

@@ -21,14 +21,14 @@ import matplotlib.pyplot as plt
 
 
 cudnn.benchmark = True
-# SEED = 1
-#
-# random.seed(SEED)
-# torch.manual_seed(SEED)
-# torch.cuda.manual_seed_all(SEED)
-#
-# torch.backends.cudnn.benchmark = False
-# torch.backends.cudnn.deterministic = True
+SEED = 1
+
+random.seed(SEED)
+torch.manual_seed(SEED)
+torch.cuda.manual_seed_all(SEED)
+
+torch.backends.cudnn.benchmark = False
+torch.backends.cudnn.deterministic = True
 
 
 
@@ -91,18 +91,18 @@ args = config.general_settings()
 
 ############################################################################
 #################################################################################
-args.N_T = 10   # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 100   # Number of test examples (size of the test dataset used to evaluate performance).100
 
-args.T = 200    # Length of the time series for training and cross-validation sequences.
-args.T_test = 200 # Length of the time series for test sequences.
+args.T = 50    # Length of the time series for training and cross-validation sequences.
+args.T_test = 50 # Length of the time series for test sequences.
 
 torch.manual_seed(1)
 
 max_iter = 10
 
-cycles = 3
+cycles = 4
 
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -120,7 +120,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.3, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
@@ -265,38 +265,38 @@ x0_last = None
 p0_last = None
 print('\n=== MSE with INITIAL GUESS H  ===')
 mse_total_false = 0
-# for dataset_id in range(cycles):
-#     test_input = all_inputs_by_H[dataset_id]
-#     test_target = all_targets_by_H[dataset_id]
-#
-#     # Use the TRUE H matrix for this dataset
-#     sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
-#     sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
-#
-#
-#     if dataset_id == 0:
-#         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-#             sys_model, test_input, test_target,
-#             H_list=H_initial_estimate,
-#             generate_h=False,
-#             init_x_list=None,
-#             init_P_list=None
-#         )
-#     else:
-#         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
-#             sys_model, test_input, test_target,
-#             H_list=H_initial_estimate,
-#             generate_h=False,
-#             init_x_list=x0_last,
-#             init_P_list=p0_last
-#         )
-#     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
-#     all_initH_x.append(x_list.detach().clone())
-#     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
-#     # p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
-#     p0_last = [m2x_0.clone() for k in range(args.N_T)]
-#     mse_total_false +=_mse_avg.item()
-#     print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {_mse_db.item():.3f} dB")
+for dataset_id in range(cycles):
+    test_input = all_inputs_by_H[dataset_id]
+    test_target = all_targets_by_H[dataset_id]
+
+    # Use the TRUE H matrix for this dataset
+    sys_model = SystemModel(f, Q_false, hRotate, R_false, args.T, args.T_test, m, n, H_Rotate)  # parameters for GT
+    sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
+
+
+    if dataset_id == 0:
+        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+            sys_model, test_input, test_target,
+            H_list=H_initial_estimate,
+            generate_h=False,
+            init_x_list=None,
+            init_P_list=None
+        )
+    else:
+        [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test_ext_H(
+            sys_model, test_input, test_target,
+            H_list=H_initial_estimate,
+            generate_h=False,
+            init_x_list=x0_last,
+            init_P_list=p0_last
+        )
+    # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
+    all_initH_x.append(x_list.detach().clone())
+    x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
+    # p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
+    p0_last = [m2x_0.clone() for k in range(args.N_T)]
+    mse_total_false +=_mse_avg.item()
+    print(f"Dataset {dataset_id + 1} - INITIAL GUESS H MSE: {_mse_db.item():.3f} dB")
 
 # Calculate and print average with initial guess
 average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(mse_total_false / cycles))
@@ -380,53 +380,39 @@ print(f"{'EMKF Analytic':<28} {t_end_emkf - t_start_emkf:>10.2f} {(t_end_emkf - 
 print(f"{'='*48}")
 
 
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
+import os
 
 print("\n" + "="*80)
-print("PLOTTING GLUED TRUE X AND PREDICTED X")
+print("SAVING GLUED TRUE X AND PREDICTED X (analytic)")
 print("="*80)
 
 sample_idx = 0  # choose which test sequence to display
 
 # Glue across datasets: result shape [m, cycles*T]
-x_true_glued = torch.cat([all_true_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
-x_rts_trueH_glued = torch.cat([all_rts_trueH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
-x_emkf_glued = torch.cat([all_emkf_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
-x_initH_glued = torch.cat([all_initH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
+x_true_glued      = torch.cat([all_true_x[d][sample_idx]      for d in range(cycles)], dim=1).detach().cpu()
+x_rts_true        = torch.cat([all_rts_trueH_x[d][sample_idx] for d in range(cycles)], dim=1).detach().cpu()
+x_rts_false       = torch.cat([all_initH_x[d][sample_idx]     for d in range(cycles)], dim=1).detach().cpu()
+x_emkf_glued      = torch.cat([all_emkf_x[d][sample_idx]      for d in range(cycles)], dim=1).detach().cpu()
 
 T_len = all_true_x[0].shape[2]
-#
-# for dim in range(x_true_glued.shape[0]):
-#     plt.figure(figsize=(12, 5))
-#
-#     plt.plot(x_true_glued[dim].numpy(), label="True x", linewidth=2)
-#     plt.plot(x_rts_trueH_glued[dim].numpy(), label="RTS (TRUE H)", linewidth=2)
-#     plt.plot(x_emkf_glued[dim].numpy(), label="EMKF / learned H", linewidth=2)
-#     plt.plot(x_initH_glued[dim].numpy(), label="RTS (initial H)", linewidth=2)
-#
-#     for d in range(1, cycles):
-#         plt.axvline(d * T_len, linestyle='--')
-#
-#     plt.title(f"Glued trajectories for x[{dim}] - sample {sample_idx}")
-#     plt.xlabel("t")
-#     plt.ylabel("value")
-#     plt.legend()
-#     plt.tight_layout()
-#     plt.show()
-#
-# fig = plt.figure(figsize=(9, 7))
-# ax = fig.add_subplot(111, projection='3d')
-#
-# ax.plot(x_true_glued[0].numpy(), x_true_glued[1].numpy(), x_true_glued[2].numpy(), label="True x", linewidth=2)
-# ax.plot(x_rts_trueH_glued[0].numpy(), x_rts_trueH_glued[1].numpy(), x_rts_trueH_glued[2].numpy(), label="RTS TRUE H", linewidth=2)
-# ax.plot(x_emkf_glued[0].numpy(), x_emkf_glued[1].numpy(), x_emkf_glued[2].numpy(), label="EMKF learned H", linewidth=2)
-# ax.plot(x_initH_glued[0].numpy(), x_initH_glued[1].numpy(), x_initH_glued[2].numpy(), label="RTS initial H", linewidth=2)
-#
-# ax.set_title(f"3D glued trajectories - sample {sample_idx}")
-# ax.set_xlabel("x1")
-# ax.set_ylabel("x2")
-# ax.set_zlabel("x3")
-# ax.legend()
-# plt.tight_layout()
-# plt.show()
+
+# ============================================================
+# Save this script's x-estimates to disk for the shared plot
+# script (plot_x_all_algorithms.py). Keys use the names the
+# user asked for.
+# ============================================================
+save_dir = "x_estimates"
+os.makedirs(save_dir, exist_ok=True)
+analytic_payload = {
+    "sample_idx": sample_idx,
+    "cycles": cycles,
+    "T_len": T_len,
+    "algos": {
+        "true x":     x_true_glued,   # ground-truth state
+        "rts true":   x_rts_true,     # analytic RTS smoother, TRUE H
+        "rts false":  x_rts_false,    # analytic RTS smoother, initial/false H
+        "emkf":       x_emkf_glued,   # analytic EMKF
+    },
+}
+torch.save(analytic_payload, os.path.join(save_dir, "analytic_x.pt"))
+print(f"Saved analytic x-estimates -> {os.path.join(save_dir, 'analytic_x.pt')}")

@@ -80,11 +80,11 @@ R          = 0.05 * torch.eye(n, device=device, dtype=dtype)
 P0_default = torch.eye(m, device=device, dtype=dtype)
 
 # Save paths
-os.makedirs("../RTSNet/old_attempts/weather/temptau_10", exist_ok=True)
-path_results_rts        = "../RTSNet/old_attempts/weather_temp/tau_10/rtsnet_model.pth"
-path_results_m          = "../RTSNet/old_attempts/weather_temp/tau_10_/m_network.pth"
-path_results_rts_joint  = "../RTSNet/old_attempts/weather_temp/tau_10/rtsnet_joint.pth"
-path_results_m_joint    = "../RTSNet/old_attempts/weather_temp/tau_10/m_network_joint.pth"
+os.makedirs("../RTSNet/history/old_attempts/weather/temptau_10", exist_ok=True)
+path_results_rts        = "../RTSNet/history/old_attempts/weather_temp/tau_10/rtsnet_model.pth"
+path_results_m          = "../RTSNet/history/old_attempts/weather_temp/tau_10_/m_network.pth"
+path_results_rts_joint  = "../RTSNet/history/old_attempts/weather_temp/tau_10/rtsnet_joint.pth"
+path_results_m_joint    = "../RTSNet/history/old_attempts/weather_temp/tau_10/m_network_joint.pth"
 
 # ======================================================
 # ARGS

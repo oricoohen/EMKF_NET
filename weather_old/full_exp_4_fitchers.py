@@ -56,7 +56,7 @@ strNow = now.strftime("%H-%M-%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_rts = "../RTSNet/poland_stock/tau_20/4obs/rtsnet_model.pth"
+path_results_rts = "../RTSNet/history/poland_stock/tau_20/4obs/rtsnet_model.pth"
 path_results_m = "RTSNet/poland_stock/tau_20/4obs/m_network.pth"
 
 # ======================================================

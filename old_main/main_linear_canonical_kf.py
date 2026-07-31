@@ -36,7 +36,7 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 path_results_full = '../RTSNet/full_info/'
-path_results_wrongF = '../RTSNet/old_attempts/wrong_F/'
+path_results_wrongF = '../RTSNet/history/old_attempts/wrong_F/'
 
 ####################
 ### Design Model ###

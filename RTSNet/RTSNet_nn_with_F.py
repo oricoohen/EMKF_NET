@@ -6,7 +6,7 @@ import torch.nn.functional as func
 
 import sys
 
-from RTSNet.KalmanNet_nn import KalmanNetNN
+from RTSNet.KalmanNet_nn_with_F import KalmanNetNN
 
 class RTSNetNN(KalmanNetNN):
 

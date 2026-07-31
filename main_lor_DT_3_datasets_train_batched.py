@@ -70,9 +70,9 @@ LengthIsRandom = False
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 1000
-args.N_CV = 100
-args.N_T = 200
+args.N_E = 1500
+args.N_CV = 150
+args.N_T = 100
 args.T = 30
 args.T_test = 30
 ### training parameters
@@ -103,14 +103,14 @@ print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
 load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/best/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/best/M_step_net_joint.pt'
 destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
 destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
 destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net.pt'
 destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
 destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
-destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/40/bigru_smoother.pt'
+destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/30/bigru_smoother.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []

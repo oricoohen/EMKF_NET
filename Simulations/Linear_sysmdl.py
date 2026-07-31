@@ -55,9 +55,9 @@ def generate_random_F_matrices(num_F, delta_t=0.5, state_dim=2,F_init=None):
         # F_i = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=DEVICE)
         # F_i = torch.tensor([[0.7954, 0.1970], [0.1970, 0.8646]], device=DEVICE)
         if F_init ==None:
-            F_i = rotate_F(F, i=0, j=1, theta=1,mult=1, many=False, randomit=True)
+            F_i = rotate_F(F, i=0, j=1, theta=0.2,mult=1, many=False, randomit=True)
         else:
-            F_i = rotate_F(F[k], i=0, j=1, theta=0.3,mult=1, many=False, randomit=True)
+            F_i = rotate_F(F[k], i=0, j=1, theta=0.2,mult=1, many=False, randomit=True)
         # F_i = rotate_F(F, i=0, j=1, theta=0.6,mult=1, many=False, randomit=False)
                 # F = torch.tensor([[-0.9, 0.],
         #                    [0.05, 1.98]])
@@ -100,20 +100,26 @@ def build_rotation_matrix_3d(theta_x, theta_y, theta_z, device, dtype):
 
     return Rz @ Ry @ Rx
 
-def rotate_H(H,  theta=0.087, many=True, randomit=False):
+def rotate_H(H,  theta=0.087, many=True, randomit=False, same_angle=False):
     """
     Rotate H using full 3D rotation like RTSNet paper:
         H_rot = R @ H
+
+    same_angle=False (default): keep the original behavior (per-axis independent
+        random angles when randomit=True).
+    same_angle=True: draw ONE random angle ~ U(0, theta) and apply the SAME angle
+        to all three axes (x=y=z). Only affects the randomit=True paths.
     """
     def apply_rotation(H_single, theta):
         device = H_single.device
         dtype = H_single.dtype
 
-        if randomit:
+        if randomit and not same_angle:
             theta_x = torch.rand(1, device=device, dtype=dtype) * theta
             theta_y = torch.rand(1, device=device, dtype=dtype) * theta
             theta_z = torch.rand(1, device=device, dtype=dtype) * theta
         else:
+            # not random, OR same_angle: use the (already-resolved) scalar on all axes
             theta_x = theta
             theta_y = theta
             theta_z = theta
@@ -124,7 +130,10 @@ def rotate_H(H,  theta=0.087, many=True, randomit=False):
 
     if not many:
         if randomit:
-            theta = uniform_two_ranges(0,1)*theta
+            if same_angle:
+                theta = float(torch.rand(1).item()) * theta   # one angle in [0, theta], all axes
+            else:
+                theta = uniform_two_ranges(0,1)*theta
         theta = torch.tensor(theta, device=H.device)
         H=apply_rotation(H, theta)
         print(H)
@@ -133,14 +142,18 @@ def rotate_H(H,  theta=0.087, many=True, randomit=False):
         rotated_list = []
         for H_i in H:
             if randomit:
-                angle = uniform_two_ranges(0.0,1)*theta
+                if same_angle:
+                    angle = float(torch.rand(1).item()) * theta   # one angle in [0, theta], all axes
+                else:
+                    angle = uniform_two_ranges(0.0,1)*theta
                 angle = torch.tensor(angle, device=device)
             else:
                 angle = torch.tensor(theta, device=device)
             rotated_list.append(apply_rotation(H_i, angle))
             # delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
             # print("Deviation:", delta.item())
-        print(' a sample of the F switched ', rotated_list[2])
+        if rotated_list:
+            print(' a sample of the F switched ', rotated_list[-1])
         return torch.stack(rotated_list)
 def estimate_H_ls(y, x):
     # y: [n, T]
@@ -255,7 +268,7 @@ def estimate_Q_R_from_true_data(all_inputs_by_H,
         results["R_hat_structured"] = r2_hat * RS
 
     return results
-def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.4, H_init=None):
+def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.4, H_init=None, same_angle=False):
     """
     Generate a list of random H matrices using rotation.
     Args:
@@ -277,10 +290,10 @@ def generate_random_H_matrices(num_H, obs_dim=2, state_dim=2,theta=0.4, H_init=N
     for k in range(num_H + 1):
         if H_init is None:
             # For square matrices, rotate directly in observation space
-            H_i = rotate_H(H,  theta=theta, many=False, randomit=True)
+            H_i = rotate_H(H,  theta=theta, many=False, randomit=True, same_angle=same_angle)
             # print('ori', H_i)
         else:
-            H_i = rotate_H(H[k], theta=theta, many=False, randomit=True)
+            H_i = rotate_H(H[k], theta=theta, many=False, randomit=True, same_angle=same_angle)
         # H_i = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
         H_matrices.append(H_i)
     return H_matrices
@@ -308,7 +321,7 @@ def generate_random_H_matrices_old(num_H, obs_dim=2, state_dim=2, H_init=None):
             # For square matrices, rotate directly in observation space
             H_i = rotate_F(H, i=0, j=1, theta=1, mult=1, many=False, randomit=True)
         else:
-            H_i = rotate_F(H[k], i=0, j=1, theta=0.3,mult=1, many=False, randomit=True)
+            H_i = rotate_F(H[k], i=0, j=1, theta=1,mult=1, many=False, randomit=True)
         # H_i = torch.tensor([[1., 1], [0.25, 1]], device=DEVICE, dtype=torch.float32)
         H_matrices.append(H_i)
     return H_matrices
@@ -407,7 +420,8 @@ def rotate_F(F, i=0, j=1, theta=0.087,mult=1, many=True, randomit=False):
             rotated_list.append(apply_rotation(F_i, angle, i, j))
             # delta = (F_i- apply_rotation(F_i, angle, i, j)).norm()
             # print("Deviation:", delta.item())
-        print(' a sample of the F switched ', rotated_list[2])
+        if rotated_list:
+            print(' a sample of the F switched ', rotated_list[-1])
         return torch.stack(rotated_list)
 
 
@@ -523,7 +537,7 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        q2 = torch.tensor(0.1, device=self.device, dtype=self.F.dtype)  # Var(q)
+        q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
         r2 = torch.tensor(0.1, device=self.device, dtype=self.F.dtype)  # Var(r)
 
         lam_q = 1.0 / torch.sqrt(q2)
@@ -554,7 +568,6 @@ class SystemModel:
                 mean = torch.zeros([self.m], device=DEVICE)
                 distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
                 eq = distrib.rsample()
-                # eq = torch.normal(mean, self.q)
                 ##################################ori added
                 # lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
                 # eq = Exponential(lam_vec_q).sample()  # shape (n,)

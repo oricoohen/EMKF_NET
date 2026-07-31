@@ -2,7 +2,7 @@
 import torch
 from torch.distributions.multivariate_normal import MultivariateNormal
 import random
-from torch.distributions import MultivariateNormal, Exponential
+from torch.distributions import MultivariateNormal, Exponential, StudentT, Laplace
 from functools import partial
 
 DEVICE =torch.device("cuda")
@@ -29,7 +29,7 @@ def generate_random_F_matrices(num_F: int, delta_ = 0.5, F_init=None):
     for k in range(num_F):
         # F_i = rotate_F(base.clone(), i=0, j=1, theta=1, many=False, randomit=True)
         if F_init ==None:
-            F_i = rotate_F(F, i=0, j=1, theta=1, many=False, randomit=True)
+            F_i = rotate_F(F, i=0, j=1, theta=0.3, many=False, randomit=True)
         else:
             F_i = rotate_F(F[k], i=0, j=1, theta=0.3, many=False, randomit=True)
         # F_i = rotate_F(base.clone(), i=0, j=1, theta=0.2, many=False, randomit=False)
@@ -137,6 +137,28 @@ class SystemModel:
         else:
             self.prior_S = prior_S
 
+        #####################################
+        ### Noise model (data generation) ###
+        #####################################
+        # Default = plain Gaussian, so every existing script behaves exactly as
+        # before. Call set_noise_model(...) to switch the DATA-generation noise
+        # to a non-Gaussian law while the filters/nets keep assuming Gaussian R,Q
+        # (i.e. a deliberate model mismatch). Only affects GenerateSequence.
+        self.proc_noise_type   = 'gaussian'   # 'gaussian'|'student_t'|'contaminated'|'laplace'
+        self.meas_noise_type   = 'gaussian'
+        self.proc_noise_params = {}
+        self.meas_noise_params = {}
+
+        ###########################################
+        ### H generation (H_gen=True data path) ###
+        ###########################################
+        # Controls generate_random_H_matrices when GenerateBatch is called with
+        # H_gen=True. Defaults reproduce the original behavior exactly:
+        #   theta=0.4, per-axis independent random angles.
+        # set_H_gen(theta=0.3, same_angle=True) -> one random angle <=theta on all axes.
+        self.H_gen_theta      = 0.4
+        self.H_gen_same_angle = False
+
 
 
 
@@ -158,6 +180,91 @@ class SystemModel:
         self.Q = Q
 
         self.R = R
+
+    #########################
+    ### Noise Model Setup ###
+    #########################
+    def set_noise_model(self, meas_type=None, meas_params=None,
+                              proc_type=None, proc_params=None):
+        """
+        Switch the DATA-generation noise law (used only inside GenerateSequence).
+        The covariance is still Q_gen / R_gen; the *shape* of the distribution
+        changes. All non-Gaussian laws below are standardized so their covariance
+        equals the given Q_gen / R_gen -- so r2/q2 stay the exact variance knobs
+        and can be changed freely, only the tails/outliers become non-Gaussian.
+
+        Supported types:
+          'gaussian'     : default N(0, C)
+          'student_t'    : heavy tails, same covariance C. params: {'nu': dof>2}
+          'contaminated' : impulsive outliers (Gaussian mixture) with NOMINAL
+                           covariance C; a fraction eps of coordinates are scaled
+                           by kappa. params: {'eps': 0.1, 'kappa': 10.0}
+          'laplace'      : heavy tails, same covariance C. params: {}
+        """
+        if meas_type is not None:
+            self.meas_noise_type = meas_type
+            self.meas_noise_params = meas_params or {}
+        if proc_type is not None:
+            self.proc_noise_type = proc_type
+            self.proc_noise_params = proc_params or {}
+        print(f"[noise model] meas='{self.meas_noise_type}' {self.meas_noise_params} | "
+              f"proc='{self.proc_noise_type}' {self.proc_noise_params}")
+
+    def set_H_gen(self, theta=None, same_angle=None):
+        """
+        Configure the H_gen=True data path (generate_random_H_matrices).
+          theta      : max rotation per step (default 0.4)
+          same_angle : True -> one random angle <=theta applied to all 3 axes;
+                       False -> per-axis independent random angles (original).
+        """
+        if theta is not None:
+            self.H_gen_theta = theta
+        if same_angle is not None:
+            self.H_gen_same_angle = same_angle
+        print(f"[H gen] theta={self.H_gen_theta} same_angle={self.H_gen_same_angle}")
+
+    def _sample_additive_noise(self, cov, dim, kind, params):
+        """Return one additive-noise vector of shape [dim] with covariance ~= cov."""
+        dev = cov.device
+        dt  = cov.dtype
+        # Default / unset -> plain Gaussian.
+        if kind is None or kind == 'gaussian':
+            mean = torch.zeros(dim, device=dev, dtype=dt)
+            return MultivariateNormal(loc=mean, covariance_matrix=cov).rsample()
+
+        # For the non-Gaussian laws: draw standardized white noise z (unit
+        # covariance) then color it with L = chol(cov) so Cov(L z) = cov.
+        L = torch.linalg.cholesky(cov)
+
+        if kind == 'student_t':
+            nu = float(params.get('nu', 3.0))
+            z = StudentT(df=torch.tensor(nu, device=dev, dtype=dt)).sample((dim,)).to(dev, dt)
+            if nu > 2.0:
+                z = z * (((nu - 2.0) / nu) ** 0.5)   # standardize to unit variance
+        elif kind == 'laplace':
+            # Laplace(0, b) has variance 2 b^2; b = 1/sqrt(2) -> unit variance
+            b = float(params.get('b', 0.7071067811865476))
+            z = Laplace(torch.tensor(0.0, device=dev, dtype=dt),
+                        torch.tensor(b,   device=dev, dtype=dt)).sample((dim,))
+        elif kind == 'contaminated':
+            eps   = float(params.get('eps', 0.1))
+            kappa = float(params.get('kappa', 10.0))
+            z0    = torch.randn(dim, device=dev, dtype=dt)
+            mask  = (torch.rand(dim, device=dev) < eps)
+            scale = torch.where(mask,
+                                torch.tensor(kappa, device=dev, dtype=dt),
+                                torch.tensor(1.0,   device=dev, dtype=dt))
+            z = z0 * scale
+        elif kind == 'exponential':
+            # KalmanNet/RTSNet-lineage non-Gaussian test. Exp(1) has mean 1,
+            # var 1; center it to zero-mean unit-variance (skewed, heavy right tail).
+            rate = torch.ones(dim, device=dev, dtype=dt)
+            z = Exponential(rate).sample() - 1.0
+        else:
+            raise ValueError(f"unknown noise kind '{kind}'")
+
+        return (L @ z.unsqueeze(-1)).squeeze(-1)
+
     # --- helpers to switch F used by f (if desired) ---
 
     def update_f(self, F):
@@ -203,17 +310,17 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        # q2 = torch.tensor(0.01,device=self.F.device,dtype=self.F.dtype)
-        # r2 = torch.tensor(1., device=self.F.device, dtype=self.F.dtype)
-        #
-        # lam_q = torch.rsqrt(q2)
-        # lam_r = torch.rsqrt(r2)
-        #
-        # lam_vec_q = lam_q.expand(self.m)
-        # lam_vec_r = lam_r.expand(self.n)
-        #
-        # q_dist = Exponential(lam_vec_q)
-        # r_dist = Exponential(lam_vec_r)
+        q2 = torch.tensor(0.01,device=DEVICE)
+        r2 = torch.tensor(1., device=DEVICE)
+
+        lam_q = torch.rsqrt(q2)
+        lam_r = torch.rsqrt(r2)
+
+        lam_vec_q = lam_q.expand(self.m)
+        lam_vec_r = lam_r.expand(self.n)
+
+        q_dist = Exponential(lam_vec_q)
+        r_dist = Exponential(lam_vec_r)
         # Generate Sequence Iteratively
         for t in range(0, T):
 
@@ -230,12 +337,19 @@ class SystemModel:
             else:            
                 xt = self.f(self.x_prev)
                 mean = torch.zeros([self.m], device=dev, dtype=dt)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                eq = distrib.rsample()
+                if self.proc_noise_type == 'gaussian':
+                    distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                    eq = distrib.rsample()
+                else:
+                    eq = self._sample_additive_noise(Q_gen, self.m,
+                                                     self.proc_noise_type, self.proc_noise_params)
                 eq = torch.reshape(eq[:], xt.size())
                 ############################3
                 # eq = (q_dist.sample() - 1.0 / lam_vec_q).reshape_as(xt)
                 # eq = (q_dist.sample()).reshape_as(xt)
+                ###############################
+                # lam_vec_q = torch.full((self.m,), lam_q.item(), device=DEVICE)
+                # eq = Exponential(lam_vec_q).sample().reshape_as(xt)
                 ##############################
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
@@ -251,12 +365,19 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:  
                 mean = torch.zeros([self.n] ,device=dev, dtype=dt)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                er = distrib.rsample()
-                er = torch.reshape(er[:], yt.size())       
+                if self.meas_noise_type == 'gaussian':
+                    distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                    er = distrib.rsample()
+                else:
+                    er = self._sample_additive_noise(R_gen, self.n,
+                                                     self.meas_noise_type, self.meas_noise_params)
+                er = torch.reshape(er[:], yt.size())
                 #############################3
                 # er = (r_dist.sample() - 1.0 / lam_vec_r).reshape_as(yt)
                 # er = (r_dist.sample()).reshape_as(yt)
+                #################################
+                # lam_vec_r = torch.full((self.n,), lam_r.item(), device =DEVICE)
+                # er = Exponential(lam_vec_r).sample()  # shape (n,)
                 ##############################
                 # Additive Observation Noise
                 yt = torch.add(yt,er)
@@ -305,7 +426,9 @@ class SystemModel:
 
         if H_gen == True:
             from Simulations.Linear_sysmdl import generate_random_H_matrices
-            H_matrices = generate_random_H_matrices(size // 10 + 1, obs_dim=self.n, state_dim=self.m, H_init=H_init)
+            H_matrices = generate_random_H_matrices(size // 10 + 1, obs_dim=self.n, state_dim=self.m,
+                                                    H_init=H_init, theta=self.H_gen_theta,
+                                                    same_angle=self.H_gen_same_angle)
             print('ori it is all ok you are the bext"')
         else:
             # For non-linear h, H_matrices will be None or can be a placeholder
@@ -313,9 +436,12 @@ class SystemModel:
 
         for i in range(0, size):
             index_F = i // 10 #final exp
-            # self.F = F_matrices[index_F]
-            # self.F_T = F_matrices[index_F].T
-            # self.update_f(F_matrices[index_F])
+            # Only override F when an actual F list is provided (linear-F experiments).
+            # For Lorenz (F_gen=False) keep the non-linear f defined on the SystemModel.
+            if F_gen is not False and F_gen is not None:
+                self.F = F_matrices[index_F]
+                self.F_T = F_matrices[index_F].T
+                self.update_f(F_matrices[index_F])   # apply the per-group F from F_gen (like Linear_sysmdl)
             self.H = H_matrices[index_F]
             self.H_T = H_matrices[index_F].T
             self.update_h(H_matrices[index_F])
