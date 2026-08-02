@@ -113,7 +113,7 @@ args.N_CV = 150
 args.N_T = 100
 args.T = 30
 args.T_test = 30
-args.n_steps = 500
+args.n_steps = 400
 args.n_batch = 15
 args.lr = 1e-4        # was 1e-3: RTSNet recursion diverged (NaN) with the aggressive step
 args.wd = 1e-3
@@ -153,16 +153,24 @@ destination_path_rtsnet_partial_joint = f'{_base}/RTSNet_partial_joint.pt'
 destination_path_bigru               = f'{_base}/bigru_smoother.pt'
 
 # ---- WARM START ------------------------------------------------------------- #
-# Start the RTSNets / M-net from the already-trained GAUSSIAN 3-dataset models
-# instead of from scratch. A trained net's recursion is already in a stable
-# region, which prevents the from-scratch NaN blow-up (and fine-tunes faster).
+# Warm-start chain (each net starts from an already-stable net, not from scratch):
+#   TRUE  RTSNet  <- Gaussian RTSNet_full        (only if STEP 1a is run)
+#   FALSE RTSNet  <- the TRUE RTSNet we train     (destination_path_rtsnet_full)
+#   joint (EMKalmanNet) RTSNet <- the FALSE RTSNet we train
+#                       M-net   <- Gaussian M-net (or fresh if not found)
 # WARM_START = False -> original from-scratch behavior.
 WARM_START = True
-_gauss = 'RTSNet/lorenz_rotated_1/3datasets/30'
-warm_rtsnet_full    = f'{_gauss}/RTSNet_full.pt'          # TRUE  RTSNet init
-warm_rtsnet_partial = f'{_gauss}/RTSNet_partial.pt'       # FALSE RTSNet init
-warm_rtsnet_joint   = f'{_gauss}/RTSNet_partial_joint.pt' # joint RTSNet init
-warm_mnet_joint     = f'{_gauss}/M_step_net_joint.pt'     # M-net init
+_gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30'   # (moved) Gaussian refs
+warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
+warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)
+
+def _warm(path):
+    """Return path for warm start if it exists, else None (-> train from scratch)."""
+    if WARM_START and path and os.path.exists(path):
+        return path
+    if WARM_START and path:
+        print(f"[warm start] '{path}' not found -> training this net from scratch.")
+    return None
 
 # ---- dedicated place where the generated TRAINING data bundle is stored ----
 r2_val = int(r2[0].item())
@@ -328,16 +336,16 @@ def _fresh_rtsnet(ssm):
 # BASELINE - BiGRU smoother (model-free, MSE-trained).                          #
 # ============================================================================ #
 print("\n[BASELINE] Training BiGRU smoother...")
-# train_bigru_smoother(
-#     train_input=all_train_inputs,
-#     train_target=all_train_targets,
-#     cv_input=all_cv_inputs,
-#     cv_target=all_cv_targets,
-#     n=n, m=m,
-#     save_path=destination_path_bigru,
-#     device=device,
-#     epochs=300, batch_size=32, lr=1e-3, hidden_size=128, num_layers=2,
-# )
+train_bigru_smoother(
+    train_input=all_train_inputs,
+    train_target=all_train_targets,
+    cv_input=all_cv_inputs,
+    cv_target=all_cv_targets,
+    n=n, m=m,
+    save_path=destination_path_bigru,
+    device=device,
+    epochs=300, batch_size=32, lr=1e-3, hidden_size=128, num_layers=2,
+)
 
 # ============================================================================ #
 # STEP 1a - TRUE RTSNet (per-sequence TRUE H, oracle).                          #
@@ -349,7 +357,7 @@ RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
     all_cv_inputs, all_cv_targets,
     all_train_inputs, all_train_targets,
     destination_path_RTS=destination_path_rtsnet_full,
-    load_path_RTS=(warm_rtsnet_full if WARM_START else None),   # warm start vs scratch
+    load_path_RTS=_warm(warm_rtsnet_full),   # warm-start from the Gaussian TRUE RTSNet
     H_init=None,             # per-sequence TRUE H
     datasets=cycles)
 
@@ -363,14 +371,17 @@ RTSNet_Pipeline.train_RTS_net_3_datasets_batched(
     all_cv_inputs, all_cv_targets,
     all_train_inputs, all_train_targets,
     destination_path_RTS=destination_path_rtsnet_partial,
-    load_path_RTS=(warm_rtsnet_partial if WARM_START else None),   # warm start vs scratch
+    load_path_RTS=_warm(destination_path_rtsnet_full),   # warm-start from the TRUE RTSNet we trained
     H_init=H_init_common,    # SAME wrong H for every sequence
     datasets=cycles)
 
-# From-scratch only: save an initial (untrained) M-net so STEP 2 has one to load.
-# Warm start loads the trained Gaussian M-net instead.
-if not WARM_START:
+# Ensure STEP 2 has an M-net to load: use the Gaussian M-net if it exists,
+# otherwise save the fresh (untrained) M-net and load that.
+if _warm(warm_mnet_joint) is not None:
+    mnet_to_load = warm_mnet_joint
+else:
     torch.save(RTSNet_Pipeline.M_model_H, destination_path_M_joint)
+    mnet_to_load = destination_path_M_joint
 
 # ============================================================================ #
 # STEP 2 - joint RTSNet + M-net (EMKalmanNet). Warm-starts from FALSE RTSNet.   #
@@ -384,8 +395,8 @@ RTSNet_Pipeline.train_H_mstep_net_3_datasets_joint_batched(
     train_target=all_train_targets,
     destination_path_M=destination_path_M_joint,
     destination_path_RTS=destination_path_rtsnet_partial_joint,
-    load_path_RTS=(warm_rtsnet_joint if WARM_START else destination_path_rtsnet_partial),
-    load_mnet=(warm_mnet_joint if WARM_START else destination_path_M_joint),
+    load_path_RTS=destination_path_rtsnet_partial,   # warm-start from the FALSE RTSNet we trained
+    load_mnet=mnet_to_load,
     num_em_iters=num_em_iters,
     alpha=(0.5, 1., 0.85),
     lambda_H=1e-3,

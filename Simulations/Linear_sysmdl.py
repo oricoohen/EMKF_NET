@@ -655,19 +655,20 @@ class SystemModel:
 
         for i in range(0, size):
             index_F =i//10
-            self.F = F_matrices[index_F]
-            self.F_T = F_matrices[index_F].T
-            self.H = H_matrices[index_F]
-            self.H_T = H_matrices[index_F].T
+            # Ensure F/H live on the model device (F_gen, H_gen or x0_list may be on CPU)
+            self.F = F_matrices[index_F].to(self.device)
+            self.F_T = self.F.T
+            self.H = H_matrices[index_F].to(self.device)
+            self.H_T = self.H.T
             if x0_list is not None:
                 x0_i = x0_list[i]
                 # ensure column shape [m,1]
                 if x0_i.dim() == 1:
                     x0_i = x0_i.unsqueeze(-1)
 
-                initConditions = x0_i
+                initConditions = x0_i.to(self.device)
             else:
-                initConditions = self.m1x_0
+                initConditions = self.m1x_0.to(self.device)
 
 
             # Generate Sequence

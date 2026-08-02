@@ -64,7 +64,7 @@ print("Current Time =", strTime)
 # ============================================================================ #
 # Pick ONE noise law. Params from NOISE_PRESETS below. MUST match the training script.
 #   'gaussian' | 'contaminated' | 'student_t' | 'laplace' | 'exponential'
-NOISE_TYPE = 'contaminated'
+NOISE_TYPE = 'laplace'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
@@ -82,7 +82,7 @@ args.N_T = 100
 args.T = 30
 args.T_test = 30
 
-GENERATE_DATA = False
+GENERATE_DATA = True
 num_iters = 2       # EM iterations (EMKalmanNet and classical EMKF)
 cycles = 5          # test over more H drift than trained (generalization)
 max_iter = 3
