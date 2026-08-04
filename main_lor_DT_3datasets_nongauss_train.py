@@ -127,7 +127,7 @@ torch.manual_seed(1)
 cycles = 5
 num_em_iters = 2
 # noise q and r  (variance knobs -- unchanged semantics)
-r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([0.01], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -146,11 +146,11 @@ print("=" * 80)
 
 # ---- distinct non-Gaussian save paths (nothing existing is touched) ----
 _base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/5datasets/30'
-destination_path_rtsnet_full         = f'{_base}/10RTSNet_full.pt'
-destination_path_rtsnet_partial      = f'{_base}/10RTSNet_partial.pt'
-destination_path_M_joint             = f'{_base}/10M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = f'{_base}/10RTSNet_partial_joint.pt'
-destination_path_bigru               = f'{_base}/10bigru_smoother.pt'
+destination_path_rtsnet_full         = f'{_base}/001RTSNet_full.pt'
+destination_path_rtsnet_partial      = f'{_base}/001RTSNet_partial.pt'
+destination_path_M_joint             = f'{_base}/001M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = f'{_base}/001RTSNet_partial_joint.pt'
+destination_path_bigru               = f'{_base}/001bigru_smoother.pt'
 
 # ---- WARM START ------------------------------------------------------------- #
 # Warm-start chain (each net starts from an already-stable net, not from scratch):
