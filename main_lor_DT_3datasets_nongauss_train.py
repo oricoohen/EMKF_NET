@@ -160,11 +160,12 @@ destination_path_bigru               = f'{_base}/001bigru_smoother.pt'
 #                       M-net   <- Gaussian M-net (or fresh if not found)
 # WARM_START = False -> original from-scratch behavior.
 WARM_START = True
-_gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/30'   # (moved) Gaussian refs
-# warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
-# warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)
-warm_rtsnet_full = f'{_base}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
-warm_mnet_joint  = f'{_base}/M_step_net_joint.pt'  # M-net init (STEP 2)
+_gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final'   # r=1 Gaussian refs
+warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a) <- r=1
+warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)        <- r=1
+# (previous r=10 refs under _base:)
+# warm_rtsnet_full = f'{_base}/RTSNet_full.pt'
+# warm_mnet_joint  = f'{_base}/M_step_net_joint.pt'
 def _warm(path):
     """Return path for warm start if it exists, else None (-> train from scratch)."""
     if WARM_START and path and os.path.exists(path):
