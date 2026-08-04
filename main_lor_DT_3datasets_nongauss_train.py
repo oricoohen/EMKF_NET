@@ -71,7 +71,7 @@ print("Current Time =", strTime)
 #   'student_t'    : heavy tails, SAME covariance as Gaussian. nu=dof (smaller=heavier)
 #   'laplace'      : mild heavy tails, same covariance
 #   'exponential'  : skewed (KalmanNet-lineage), same covariance
-NOISE_TYPE = 'laplace'
+NOISE_TYPE = 'gaussian'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
@@ -127,7 +127,7 @@ torch.manual_seed(1)
 cycles = 5
 num_em_iters = 2
 # noise q and r  (variance knobs -- unchanged semantics)
-r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -145,12 +145,12 @@ print(f"GENERATING {cycles} DATASETS (DIFFERENT H, FIXED F) WITH "
 print("=" * 80)
 
 # ---- distinct non-Gaussian save paths (nothing existing is touched) ----
-_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/3datasets/30'
-destination_path_rtsnet_full         = f'{_base}/RTSNet_full.pt'
-destination_path_rtsnet_partial      = f'{_base}/RTSNet_partial.pt'
-destination_path_M_joint             = f'{_base}/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = f'{_base}/RTSNet_partial_joint.pt'
-destination_path_bigru               = f'{_base}/bigru_smoother.pt'
+_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/5datasets/30'
+destination_path_rtsnet_full         = f'{_base}/10RTSNet_full.pt'
+destination_path_rtsnet_partial      = f'{_base}/10RTSNet_partial.pt'
+destination_path_M_joint             = f'{_base}/10M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = f'{_base}/10RTSNet_partial_joint.pt'
+destination_path_bigru               = f'{_base}/10bigru_smoother.pt'
 
 # ---- WARM START ------------------------------------------------------------- #
 # Warm-start chain (each net starts from an already-stable net, not from scratch):
@@ -160,10 +160,11 @@ destination_path_bigru               = f'{_base}/bigru_smoother.pt'
 #                       M-net   <- Gaussian M-net (or fresh if not found)
 # WARM_START = False -> original from-scratch behavior.
 WARM_START = True
-_gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30'   # (moved) Gaussian refs
-warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
-warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)
-
+_gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/30'   # (moved) Gaussian refs
+# warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
+# warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)
+warm_rtsnet_full = f'{_base}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a)
+warm_mnet_joint  = f'{_base}/M_step_net_joint.pt'  # M-net init (STEP 2)
 def _warm(path):
     """Return path for warm start if it exists, else None (-> train from scratch)."""
     if WARM_START and path and os.path.exists(path):
