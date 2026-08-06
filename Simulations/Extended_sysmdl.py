@@ -148,6 +148,14 @@ class SystemModel:
         self.meas_noise_type   = 'gaussian'
         self.proc_noise_params = {}
         self.meas_noise_params = {}
+        # normalize=True (default) -> every non-Gaussian law is standardized to
+        # zero-mean, unit-variance before being colored by chol(cov), so r2/q2 stay
+        # the exact variance knobs (this is what all existing scripts rely on).
+        # normalize=False -> use the raw draws as they are (NO debiasing, NO
+        # variance rescale); pick params so the variance is naturally ~1
+        # (e.g. Exp(1): mean 1, var 1 -> skewed AND biased). Opt-in per script.
+        self.proc_noise_normalize = True
+        self.meas_noise_normalize = True
 
         ###########################################
         ### H generation (H_gen=True data path) ###
@@ -185,7 +193,9 @@ class SystemModel:
     ### Noise Model Setup ###
     #########################
     def set_noise_model(self, meas_type=None, meas_params=None,
-                              proc_type=None, proc_params=None):
+                              proc_type=None, proc_params=None,
+                              meas_normalize=None, proc_normalize=None,
+                              normalize=None):
         """
         Switch the DATA-generation noise law (used only inside GenerateSequence).
         The covariance is still Q_gen / R_gen; the *shape* of the distribution
@@ -200,6 +210,15 @@ class SystemModel:
                            covariance C; a fraction eps of coordinates are scaled
                            by kappa. params: {'eps': 0.1, 'kappa': 10.0}
           'laplace'      : heavy tails, same covariance C. params: {}
+
+        normalize (default True, preserves all existing scripts):
+          True  -> standardize each non-Gaussian law to zero-mean, unit-variance
+                   before coloring, so r2/q2 remain exact variance knobs.
+          False -> use the raw draws as they are (NO debiasing, NO variance
+                   rescale); params are expected to make the variance ~1 already
+                   (e.g. 'exponential' uses Exp(1): mean 1, var 1 -> biased & skewed).
+          `normalize=` sets both meas and proc at once; `meas_normalize` /
+          `proc_normalize` override per-stream.
         """
         if meas_type is not None:
             self.meas_noise_type = meas_type
@@ -207,8 +226,17 @@ class SystemModel:
         if proc_type is not None:
             self.proc_noise_type = proc_type
             self.proc_noise_params = proc_params or {}
-        print(f"[noise model] meas='{self.meas_noise_type}' {self.meas_noise_params} | "
-              f"proc='{self.proc_noise_type}' {self.proc_noise_params}")
+        if normalize is not None:
+            self.meas_noise_normalize = normalize
+            self.proc_noise_normalize = normalize
+        if meas_normalize is not None:
+            self.meas_noise_normalize = meas_normalize
+        if proc_normalize is not None:
+            self.proc_noise_normalize = proc_normalize
+        print(f"[noise model] meas='{self.meas_noise_type}' {self.meas_noise_params} "
+              f"(normalize={self.meas_noise_normalize}) | "
+              f"proc='{self.proc_noise_type}' {self.proc_noise_params} "
+              f"(normalize={self.proc_noise_normalize})")
 
     def set_H_gen(self, theta=None, same_angle=None):
         """
@@ -223,26 +251,37 @@ class SystemModel:
             self.H_gen_same_angle = same_angle
         print(f"[H gen] theta={self.H_gen_theta} same_angle={self.H_gen_same_angle}")
 
-    def _sample_additive_noise(self, cov, dim, kind, params):
-        """Return one additive-noise vector of shape [dim] with covariance ~= cov."""
+    def _sample_additive_noise(self, cov, dim, kind, params, normalize=True):
+        """Return one additive-noise vector of shape [dim] with covariance ~= cov.
+
+        normalize=True  -> the white noise z is standardized to zero-mean,
+                           unit-variance, so Cov(L z) == cov exactly.
+        normalize=False -> z is used raw (no debiasing, no variance rescale);
+                           params are expected to give var ~1 already
+                           (e.g. exponential -> Exp(1): mean 1, var 1, biased).
+        """
         dev = cov.device
         dt  = cov.dtype
-        # Default / unset -> plain Gaussian.
+        # Default / unset -> plain Gaussian (already zero-mean unit-variance;
+        # normalize has no effect here).
         if kind is None or kind == 'gaussian':
             mean = torch.zeros(dim, device=dev, dtype=dt)
             return MultivariateNormal(loc=mean, covariance_matrix=cov).rsample()
 
-        # For the non-Gaussian laws: draw standardized white noise z (unit
-        # covariance) then color it with L = chol(cov) so Cov(L z) = cov.
+        # For the non-Gaussian laws: draw white noise z then color it with
+        # L = chol(cov). When normalize=True, z is standardized first so
+        # Cov(L z) = cov; when False, z is raw (var ~1 via params, may be biased).
         L = torch.linalg.cholesky(cov)
 
         if kind == 'student_t':
             nu = float(params.get('nu', 3.0))
             z = StudentT(df=torch.tensor(nu, device=dev, dtype=dt)).sample((dim,)).to(dev, dt)
-            if nu > 2.0:
+            if normalize and nu > 2.0:
                 z = z * (((nu - 2.0) / nu) ** 0.5)   # standardize to unit variance
         elif kind == 'laplace':
-            # Laplace(0, b) has variance 2 b^2; b = 1/sqrt(2) -> unit variance
+            # Laplace(0, b) has variance 2 b^2; b = 1/sqrt(2) -> unit variance.
+            # It is symmetric (zero-mean) either way, so raw vs normalized differ
+            # only by the variance scale set through b.
             b = float(params.get('b', 0.7071067811865476))
             z = Laplace(torch.tensor(0.0, device=dev, dtype=dt),
                         torch.tensor(b,   device=dev, dtype=dt)).sample((dim,))
@@ -256,10 +295,13 @@ class SystemModel:
                                 torch.tensor(1.0,   device=dev, dtype=dt))
             z = z0 * scale
         elif kind == 'exponential':
-            # KalmanNet/RTSNet-lineage non-Gaussian test. Exp(1) has mean 1,
-            # var 1; center it to zero-mean unit-variance (skewed, heavy right tail).
+            # KalmanNet/RTSNet-lineage non-Gaussian test. Exp(1) has mean 1, var 1.
+            # normalize=True -> center to zero-mean unit-variance (skewed only).
+            # normalize=False -> keep it raw (mean 1, var 1): skewed AND biased.
             rate = torch.ones(dim, device=dev, dtype=dt)
-            z = Exponential(rate).sample() - 1.0
+            z = Exponential(rate).sample()
+            if normalize:
+                z = z - 1.0
         else:
             raise ValueError(f"unknown noise kind '{kind}'")
 
@@ -342,7 +384,8 @@ class SystemModel:
                     eq = distrib.rsample()
                 else:
                     eq = self._sample_additive_noise(Q_gen, self.m,
-                                                     self.proc_noise_type, self.proc_noise_params)
+                                                     self.proc_noise_type, self.proc_noise_params,
+                                                     normalize=self.proc_noise_normalize)
                 eq = torch.reshape(eq[:], xt.size())
                 ############################3
                 # eq = (q_dist.sample() - 1.0 / lam_vec_q).reshape_as(xt)
@@ -370,7 +413,8 @@ class SystemModel:
                     er = distrib.rsample()
                 else:
                     er = self._sample_additive_noise(R_gen, self.n,
-                                                     self.meas_noise_type, self.meas_noise_params)
+                                                     self.meas_noise_type, self.meas_noise_params,
+                                                     normalize=self.meas_noise_normalize)
                 er = torch.reshape(er[:], yt.size())
                 #############################3
                 # er = (r_dist.sample() - 1.0 / lam_vec_r).reshape_as(yt)
