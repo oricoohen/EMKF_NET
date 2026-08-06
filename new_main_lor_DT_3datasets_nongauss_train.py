@@ -71,7 +71,7 @@ print("Current Time =", strTime)
 #   'student_t'    : heavy tails, SAME covariance as Gaussian. nu=dof (smaller=heavier)
 #   'laplace'      : mild heavy tails, same covariance
 #   'exponential'  : skewed (KalmanNet-lineage), same covariance
-NOISE_TYPE = 'exponential'
+NOISE_TYPE = 'student_t'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
