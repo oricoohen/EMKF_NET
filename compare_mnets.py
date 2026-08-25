@@ -37,8 +37,8 @@ DTYPE  = torch.float32
 GENERATE_DATA = True   # set True to re-generate datasets
 
 MNET_FOLDER   = 'RTSNet/AI_M_step/exp_1/r_10/EMKF/False/'
-RTS_TRUE_PATH = 'RTSNet/AI_M_step/exp_1/r_10/True_F/best-rts_true.pt'
-RTS_FALSE_PATH= 'RTSNet/AI_M_step/exp_1/r_10/False_F/best-rts_false.pt'
+RTS_TRUE_PATH = 'RTSNet/synthetic/AI_M_step/exp_1/r_10/True_F/best-rts_true.pt'
+RTS_FALSE_PATH= 'RTSNet/synthetic/AI_M_step/exp_1/r_10/False_F/best-rts_false.pt'
 
 NUM_EM_ITERS  = 3
 

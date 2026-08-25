@@ -8,7 +8,7 @@ from datetime import datetime
 
 
 from Simulations.Extended_sysmdl import SystemModel, rotate_F#, make_rotated_h_nonlinear   # your class posted above
-from Simulations.Lorenz_Atractor.parameters import ( m1x_0 as m1_0, m2x_0 as m2_0,    # keep your names consistent
+from Simulations.Lorenz_Atractor.parameters_OLD import ( m1x_0 as m1_0, m2x_0 as m2_0,    # keep your names consistent
     m, n, F, make_f, h_nonlinear, Q_structure, R_structure
 )
 
@@ -20,16 +20,53 @@ import Simulations.config as config
 from RTSNet.RTSNet_nn import RTSNetNN
 
 
-from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
+# Batched pipeline (fast): adds train_F_mstep_net_3_datasets_joint_batched -- the
+# warm-started, batched F twin of the H nongauss trainer
+# (train_H_mstep_net_3_datasets_joint_batched). It subclasses Pipeline_ERTS, so
+# every other method used below (NNTest_no_p, setTrainingParams, ...) is unchanged.
+from Pipelines.Pipeline_ERTS_batched import Pipeline_ERTS_batched as Pipeline
+
+from Baselines.BiGRU_smoother import train_bigru_smoother
 
 import shutil
+import os
 print("Pipeline Start")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Keep the non-linear h during data generation. GenerateBatch calls
+# SystemModel.update_h(H) per group, which by default rebinds self.h to a LINEAR
+# H@x and would corrupt the range-bearing observations. Patch it to only record
+# H/H_T and leave self.h = h_nonlinear intact (same fix as the maintained
+# data_generate_exp_for_paper/F_exp/exp3/exp_3_train.py).
+# ──────────────────────────────────────────────────────────────────────────────
+def _update_h_keep_nonlinear(self, H):
+    self.H = H
+    self.H_T = H.T
+SystemModel.update_h = _update_h_keep_nonlinear
 
 # === ADD: global device/dtype ===
 DEVICE = torch.device("cuda")
 DTYPE = torch.float32
 torch.cuda.empty_cache()
 torch.backends.cudnn.benchmark = True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Batched twin of parameters_OLD.h_nonlinear:  x [B,2] -> y [B,2].
+# The batched RTSNet runs all N_B sequences through h at once, but the sequential
+# h_nonlinear does x.view(2,1) and only works for a single sample. The joint
+# batched trainer needs a batch-aware h, so we pass this in via h_batched=...
+# (same math: y = H@x + 0.3*[r, theta], H = [[1,1],[0.25,1]]).
+# ──────────────────────────────────────────────────────────────────────────────
+def h_nonlinear_batched(x, alpha=0.3):
+    x1 = x[:, 0]
+    x2 = x[:, 1]
+    eps = 1e-6
+    r = torch.sqrt(x1 * x1 + x2 * x2 + eps)          # [B]
+    theta = torch.atan2(x2, x1 + eps)                # [B]
+    H = torch.tensor([[1., 1.], [0.25, 1.]], device=x.device, dtype=x.dtype)
+    lin = x @ H.T                                    # [B,2]
+    return lin + alpha * torch.stack([r, theta], dim=1)  # [B,2]
 
 ################
 ### Get Time ###
@@ -41,8 +78,11 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_True = '../../../RTSNet/synthetic/AI_M_step/exp_2/r_001/True_F/'
-path_results_False = '../../../RTSNet/synthetic/AI_M_step/exp_2/r_001/False_F/'
+# Pre-trained RTSNet checkpoints for THIS experiment (exp_3, r2=1). These exist in
+# the repo; the old '../../../.../exp_2/r_001/...' paths were stale (wrong exp/r and
+# three dirs above the project root -> FileNotFoundError on warm-start load).
+path_results_True = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/True_F/'
+path_results_False = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/False_F/'
 
 ####################
 ### Design Model ###
@@ -53,7 +93,7 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 400   # Number of training examples
+args.N_E = 1000   # Number of training examples
 args.N_CV = 100  # Number of CV examples
 args.N_T = 50    # Number of test examples
 
@@ -61,7 +101,7 @@ args.T = 30      # Length of the time series
 args.T_test = 30
 
 ### training parameters
-args.n_steps = 175
+args.n_steps = 400
 args.n_batch = 10
 args.lr = 1e-4
 args.wd = 1e-3
@@ -73,7 +113,7 @@ cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 
 # True model parameters
 q2 = 0.01
-r2 = 0.01
+r2 = 0.001
 
 print('q2 is:', q2)
 print('r2 is:', r2)
@@ -101,17 +141,41 @@ all_F_matrices_test = []
 x0_last = None
 F_init = None  # Initialize for first dataset (DataGen expects this parameter)
 
+# True (linear) F for each dataset: rotate the base F by a RANDOM angle in
+# [-1, 1] rad (rotate_F theta=1, randomit=True), one random draw per sequence-
+# group, chained cumulatively across the 3 datasets -- identical to the exp_1and2
+# training so the models see real F diversity. rotate_F(many=True) from
+# Extended_sysmdl returns a LIST of [2,2] tensors (one per sequence).
+F_nominal = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
+theta_max = 1  # random F drift up to 1 rad per group (matches exp_1and2)
+F_by_dataset = []
+_prev_F = [F_nominal.clone() for _ in range(args.N_E)]
+for _k in range(cycles):
+    _prev_F = rotate_F(_prev_F, i=0, j=1, theta=theta_max, many=True, randomit=True)
+    F_by_dataset.append([f.clone() for f in _prev_F])
+
+# Single nominal F per dataset, used only as the placeholder SystemModel F and by
+# the later RTSNet/M-step and test sections that expect ONE matrix (previously
+# referenced but never defined -> NameError). The TRUE per-sequence F fed to the
+# data generator is F_by_dataset above.
+F_matrices_for_datasets = [F_nominal.clone() for _ in range(cycles)]
+
 # Generate datasets
 for dataset_id in range(cycles):
     print(f"\n{'='*80}")
     print(f"Generating Dataset {dataset_id}")
     print(f"{'='*80}")
 
-    # Create system model with this F
-    F_current = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
+    # Create system model (placeholder F; DataGen applies the true per-group F below)
+    F_current = F_matrices_for_datasets[dataset_id]
     f_current = make_f(F_current)  # F is linear, just wrapped as function f(x)=F@x
     sys_model = SystemModel(f_current, Q, h_nonlinear, R, args.T, args.T_test, m, n)
     sys_model.InitSequence(m1_0, m2_0)
+
+    # H list = identity per sequence so the non-linear h is used for observations.
+    # Passing an explicit F_gen list (F_by_dataset) + H_gen list also skips the
+    # broken generate_random_F_matrices(F_init=None) default path.
+    H_gen_list = [torch.eye(n, device=DEVICE, dtype=DTYPE) for _ in range(args.N_E)]
 
     print(f"F matrix for dataset {dataset_id}:")
     print(F_current)
@@ -135,7 +199,8 @@ for dataset_id in range(cycles):
             randomInit_test=InitIsRandom_test,
             randomLength=LengthIsRandom,
             Test=False,
-            x0_list=x0_last, F_init=F_init)  # Use x0_last for continuity in test set
+            F_gen=F_by_dataset[dataset_id], H_gen=H_gen_list,
+            x0_list=x0_last)  # Use x0_last for continuity in test set
 
     # Load the generated data
     [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
@@ -190,6 +255,39 @@ assert all_cv_inputs[0].shape[0] == args.N_CV, f"CV should have {args.N_CV} sequ
 assert all_test_inputs[0].shape[0] == args.N_T, f"Test should have {args.N_T} sequences"
 print("✓ Data structure verified!")
 
+#########################################################################################################
+# TRAIN BiGRU SMOOTHER BASELINE ON THE SAME 3 DATASETS (FIRST MODEL TO TRAIN)
+#########################################################################################################
+
+print("\n" + "="*80)
+print("TRAINING BiGRU SMOOTHER BASELINE ON 3 DATASETS")
+print("="*80)
+# Black-box baseline: a bidirectional-GRU smoother that maps observations
+# y:[N,n,T] -> state estimate x_hat:[N,m,T] directly, with no model knowledge.
+# Trained on exactly the same pooled 3-dataset train/cv data as the M-step net,
+# so exp3_test.py can compare AI-EMKF against it.
+destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
+bigru_save_path = destination_folder + 'new_bigru_lin_3ds.pt'
+n_obs = all_train_inputs[0].shape[1]     # observation dim (n)
+m_state = all_train_targets[0].shape[1]  # state dim (m)
+
+# train_bigru_smoother(
+#     train_input=all_train_inputs,     # list of 3 x [N_E, n, 30] (concatenated inside)
+#     train_target=all_train_targets,   # list of 3 x [N_E, m, 30]
+#     cv_input=all_cv_inputs,           # list of 3 x [N_CV, n, 30]
+#     cv_target=all_cv_targets,         # list of 3 x [N_CV, m, 30]
+#     n=n_obs,
+#     m=m_state,
+#     save_path=bigru_save_path,
+#     device=DEVICE,
+#     epochs=300,
+#     batch_size=8,
+#     lr=1e-3,
+#     hidden_size=16,
+#     num_layers=2,
+# )
+print(f"BiGRU baseline saved to: {bigru_save_path}")
+
 print("\n" + "="*80)
 print("SETTING UP SYSTEM MODEL AND PIPELINE")
 print("="*80)
@@ -216,8 +314,17 @@ print("✓ System model configured with 3-dataset F structure")
 path_results_True_rts = path_results_True + 'best-rts_true.pt'
 path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
 destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
-destination_path_M = destination_folder + 'M_net_trained_3_datasets_no_mult.pt'
-destination_path_M_laod = destination_folder + 'try_20_on_last_f_3_iter_mixed_f.pt'
+destination_path_M = destination_folder + 'new_M_net_trained_3_datasets_no_mult.pt'
+destination_path_M_laod = destination_folder + 'final_net.pt'
+# JOINT (batched) outputs -- ONE F-M-net + ONE RTSNet trained together. Distinct
+# names so the warm-start sources (path_results_wrong_rts / destination_path_M_laod)
+# are never overwritten.
+os.makedirs(destination_folder, exist_ok=True)
+destination_path_M_joint   = destination_folder + 'new_joint_mnet_3ds_batched.pt'
+destination_path_RTS_joint = destination_folder + 'new_joint_rtsnet_3ds_batched.pt'
+# Warm-start the F-M-net only if a checkpoint exists; else start from the pipeline
+# default DeltaF_MStepNet (load_mnet=None).
+load_mnet = destination_path_M_laod if (destination_path_M_laod and os.path.exists(destination_path_M_laod)) else None
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -252,24 +359,51 @@ print(f"  F regularization (lambda_F): 1e-3")
 
 print("\nStarting training...")
 
-# Call the training function - CORRECTED: Pass train and cv data, not test data
-RTSNet_Pipeline.train_mstep_net_3_datasets(
+# Call the BATCHED JOINT training function -- the warm-started F twin of the
+# nongauss H trainer. ONE RTSNet + ONE F-M-net trained together, N_B sequences in
+# parallel via torch.bmm. Same experiment/statistics as train_mstep_net_3_datasets
+# (F estimation, non-linear h), just batched + warm started + jointly optimized.
+#   load_path_RTS : warm-start RTSNet (the wrong-F RTSNet exp3 already produces)
+#   load_mnet     : warm-start F-M-net (None -> fresh DeltaF_MStepNet)
+#   h_batched     : batch-aware h_nonlinear (sequential SysModel.h is not batchable)
+RTSNet_Pipeline.setTrainingParams(args)   # refresh optimizer / default M_model
+RTSNet_Pipeline.train_F_mstep_net_3_datasets_joint_batched(
     SysModel=sys_model,
     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
-    destination_path_M=destination_path_M,
-    destination_path_RTS=path_results_wrong_rts,
+    destination_path_M=destination_path_M_joint,     # trained F-M-net output
+    destination_path_RTS=destination_path_RTS_joint, # jointly trained RTSNet output
+    load_path_RTS=path_results_wrong_rts,            # warm-start RTSNet (wrong F)
+    load_mnet=load_mnet,                             # warm-start F-M-net (or None)
     num_em_iters=3,
-    alpha=(0.05, 0.1, 0.85),          # Weights for EM iterations
+    alpha=(0.4, 1, 0.85),          # Weights for EM iterations
     lambda_F=1e-3,                    # Regularization on ΔF
     generate_f=True,                  # Use grouped F (f_index = n_e // 10)
     non_linear_h=True,                # Non-linear observation model (h_nonlinear)
-    load=destination_path_M_laod,
+    h_batched=h_nonlinear_batched,    # batch-aware twin of the non-linear h
     datasets=3                        # Number of datasets
 )
 
+
+
+# TSNet_Pipeline.train_mstep_net_3_datasets(
+#     SysModel=sys_model,
+#     cv_input=all_cv_inputs,           # List of 3 CV datasets [N_CV, n, 30]
+#     cv_target=all_cv_targets,         # List of 3 CV targets [N_CV, m, 30]
+#     train_input=all_train_inputs,     # List of 3 train datasets [N_E, n, 30]
+#     train_target=all_train_targets,   # List of 3 train targets [N_E, m, 30]
+#     destination_path_M=destination_path_M,
+#     destination_path_RTS=path_results_wrong_rts,
+#     num_em_iters=3,
+#     alpha=(0.05, 0.1, 0.85),          # Weights for EM iterations
+#     lambda_F=1e-3,                    # Regularization on ΔF
+#     generate_f=True,                  # Use grouped F (f_index = n_e // 10)
+#     non_linear_h=True,                # Non-linear observation model (h_nonlinear)
+#     load=destination_path_M_laod,
+#     datasets=3                        # Number of datasets
+# )
 print("\n" + "="*80)
 print("TRAINING COMPLETE")
 print("="*80)

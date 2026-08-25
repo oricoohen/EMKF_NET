@@ -17,6 +17,23 @@ import random
 from torch.distributions import MultivariateNormal, Exponential
 DEVICE =torch.device("cuda")
 device = DEVICE
+
+# ---------------------------------------------------------------------------
+# Noise distribution switch: selects which paper experiment the generated data
+# belongs to. Read by SystemModel.GenerateSequence.
+#
+#   'gauss'       -> exp 1: zero-mean Gaussian, covariance exactly Q_gen / R_gen.
+#   'exponential' -> exp 2: i.i.d. Exponential per component, rate chosen so each
+#                    component's VARIANCE matches the diagonal of Q_gen / R_gen.
+#                    Note this noise is NOT zero-mean -- an Exponential(lam) has
+#                    mean 1/lam = sqrt(var). That is deliberate (heavy-tailed,
+#                    biased noise); see _sample_noise to switch to the centred form.
+#
+# Set it from an experiment script BEFORE generating any data:
+#     import Simulations.Linear_sysmdl as lsm
+#     lsm.NOISE_DIST = 'exponential'
+# ---------------------------------------------------------------------------
+NOISE_DIST = 'gauss'
 def uniform_two_ranges(a: float, b: float):
     """
     Draws a single sample that is uniform either in  [a , b]
@@ -528,6 +545,34 @@ class SystemModel:
     #########################
     ### Generate Sequence ###
     #########################
+    def _sample_noise(self, cov, dim, dtype):
+        """
+        Draw one additive-noise vector of length `dim`, per the module-level
+        NOISE_DIST switch (see the top of this file).
+
+        'gauss'       -- zero-mean MultivariateNormal with covariance `cov`.
+        'exponential' -- i.i.d. Exponential per component with rate
+                         lam_i = 1/sqrt(cov_ii), so Var(e_i) = cov_ii and the
+                         noise strength still follows the q2 / r2 you set in the
+                         experiment script. This draw is NOT zero-mean:
+                         E[e_i] = 1/lam_i = sqrt(cov_ii). Uncomment the centring
+                         line below if you want the zero-mean variant.
+        """
+        if NOISE_DIST == 'gauss':
+            mean = torch.zeros([dim], device=self.device, dtype=dtype)
+            return MultivariateNormal(loc=mean, covariance_matrix=cov).rsample()
+
+        if NOISE_DIST == 'exponential':
+            var = torch.diagonal(cov).to(device=self.device, dtype=dtype)
+            lam = 1.0 / torch.sqrt(var)
+            e = Exponential(lam).sample()
+            # e = e - 1.0 / lam   # <- uncomment for zero-mean exponential noise
+            return e
+
+        raise ValueError(
+            f"NOISE_DIST must be 'gauss' (exp 1) or 'exponential' (exp 2), got {NOISE_DIST!r}"
+        )
+
     def GenerateSequence(self, Q_gen, R_gen, T, U=None):
         # Pre allocate an array for current state
         self.x = torch.empty(size=[self.m, T], device=self.device, dtype=self.F.dtype)
@@ -537,11 +582,6 @@ class SystemModel:
         self.x_prev = self.m1x_0
         xt = self.x_prev
 
-        q2 = torch.tensor(0.01, device=self.device, dtype=self.F.dtype)  # Var(q)
-        r2 = torch.tensor(0.1, device=self.device, dtype=self.F.dtype)  # Var(r)
-
-        lam_q = 1.0 / torch.sqrt(q2)
-        lam_r = 1.0 / torch.sqrt(r2)
         # Generate Sequence Iteratively
         for t in range(0, T):
 
@@ -565,14 +605,8 @@ class SystemModel:
                 xt = torch.add(xt,eq)
             else:
                 xt = self.f(self.x_prev)
-                mean = torch.zeros([self.m], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                # eq = distrib.rsample()
-                ##################################ori added
-                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                eq = Exponential(lam_vec_q).sample()  # shape (n,)
-                # eq = z - (1.0 / lam_vec_q)
-                ###################################
+                # Gaussian (exp 1) or Exponential (exp 2) -- see NOISE_DIST.
+                eq = self._sample_noise(Q_gen, self.m, xt.dtype)
                 eq = torch.reshape(eq[:], xt.size())
                 # Additive Process Noise
                 xt = torch.add(xt,eq)
@@ -590,14 +624,8 @@ class SystemModel:
                 yt = torch.add(yt,er)
             else:
                 yt = self.H.matmul(xt)
-                mean = torch.zeros([self.n], device=DEVICE)
-                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                # er = distrib.rsample()
-                ####################################ori added
-                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                er = Exponential(lam_vec_r).sample()  # shape (n,)
-                # er = z -(1.0/lam_vec_r)
-                ######################################
+                # Gaussian (exp 1) or Exponential (exp 2) -- see NOISE_DIST.
+                er = self._sample_noise(R_gen, self.n, yt.dtype)
                 er = torch.reshape(er[:], yt.size())
                 # Additive Observation Noise
                 yt = torch.add(yt,er)

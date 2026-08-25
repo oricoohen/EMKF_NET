@@ -41,8 +41,8 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-path_results_True = '../../RTSNet/changed_H_v_0/exp_2/r_01/True_H/'
-path_results_False = '../../RTSNet/changed_H_v_0/exp_2/r_01/False_H/'
+path_results_True = '../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/True_H/'
+path_results_False = '../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/False_H/'
 
 ####################
 ### Design Model ###

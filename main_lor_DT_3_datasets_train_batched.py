@@ -102,15 +102,15 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
-destination_path_bigru = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/bigru_smoother2.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/5datasets/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
+destination_path_bigru = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/10datasets/bigru_smoother2.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []

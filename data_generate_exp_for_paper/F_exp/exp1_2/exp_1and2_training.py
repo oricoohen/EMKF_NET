@@ -1,11 +1,16 @@
 """
 Training script for the linear-h / varying-F paper experiment (exp 1 & 2).
 
-Trains, on 3 sequential datasets:
-  1) the regular M-step net  -> train_mstep_net_3_datasets
-  2) the joint (1 mnet + 1 RTSNet) net -> joint_train_mnet_rtsnet_3_datasets
-  3) a BiGRU smoother baseline (Baselines/BiGRU_smoother.py), on exactly the same
-     pooled train/cv data, so exp_1and2_testing.py can compare AI-EMKF against it.
+Trains, on 3 sequential datasets, everything exp_1and2_testing.py needs:
+  0) a BiGRU smoother baseline (Baselines/BiGRU_smoother.py), on the pooled train/cv data
+  1) the two RTSNets -- True_F (given the true F) and False_F (given the nominal F,
+     warm-started from True_F). Stage 1 must run before stages 2-3, which load False_F.
+  2) the regular M-step net  -> train_mstep_net_3_datasets
+  3) the joint (1 mnet + 1 RTSNet) net -> joint_train_mnet_rtsnet_3_datasets
+
+Every artifact lands in EXP_DIR, so a run is self-contained: the RTSNets always
+match this run's r2 and noise distribution rather than being inherited from
+another bucket. Existing best-rts_*.pt in EXP_DIR are overwritten.
 
 The true F of each dataset is the base F rotated by a RANDOM angle in
 [-THETA_TRAIN, THETA_TRAIN] rad (rotate_F randomit=True), chained cumulatively
@@ -33,6 +38,18 @@ import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F, det
+
+# ============================================================
+# EXPERIMENT SWITCH -- which paper experiment this run produces
+#   'gauss'       = exp 1 (Gaussian process/observation noise)
+#   'exponential' = exp 2 (Exponential, heavy-tailed, non-zero-mean noise)
+# Must be set BEFORE any DataGen call. Noise strength still comes from
+# q2 / r2 below; this only changes the DISTRIBUTION.
+# ============================================================
+import Simulations.Linear_sysmdl as _lsm
+_lsm.NOISE_DIST = 'gauss'
+print(f"NOISE_DIST = {_lsm.NOISE_DIST}  (exp 1 = gauss, exp 2 = exponential)")
+
 from emkf.main_emkf_func_AI import EMKF_F
 
 from Simulations.utils import DataLoader, DataGen, estimate_QR
@@ -43,7 +60,17 @@ from Simulations.Linear_canonical.parameters import F, H, Q_structure, R_structu
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 
-from RTSNet.RTSNet_nn import RTSNetNN
+# F-embedding RTSNet (FC8 + FC_F_bw), matching exp_1and2_testing.py. The plain
+# RTSNet.RTSNet_nn.RTSNetNN is now the FC9 / H-embedding architecture, which reads
+# self.H and therefore crashes on this linear-F experiment.
+from RTSNet.RTSNet_nn_with_F import RTSNetNN
+
+# The saved RTSNet checkpoints (best-rts_true/false.pt) are F-embedding models but
+# were pickled under the name RTSNet.RTSNet_nn.RTSNetNN. Redirect that pickled class
+# name to the F-embedding RTSNetNN so torch.load reconstructs them against the
+# matching architecture. Same patch the test and exp_3 scripts use.
+import RTSNet.RTSNet_nn as _rts_nn_mod
+_rts_nn_mod.RTSNetNN = RTSNetNN
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 from Baselines.BiGRU_smoother import train_bigru_smoother
@@ -74,13 +101,22 @@ print("Current Time =", strTime)
 ### two MUST point at the same folder, otherwise the test loads checkpoints
 ### this script never wrote.
 ##############################################################################
-EXP_DIR = REPO_ROOT / 'RTSNet' / 'AI_M_step' / 'exp_1' / 'r_10'
+MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'AI_M_step'
+# NOTE: 'r_10' selects the SNR bucket. Sweep it together with r2 below --
+#       r2 = 10 -> 'r_10',  1 -> 'r_1',  0.1 -> 'r_01',  0.01 -> 'r_001',  0.001 -> 'r_0001'.
+#       The folder tag and r2 must always be changed as a pair, and the trainer
+#       and the test script must both use the SAME bucket.
+EXP_DIR = MODELS_ROOT / 'exp_1' / 'r_10'
 
-# Pre-trained RTSNet references. NOTE: these live under r_1 while the data below
-# is generated at r2 = 10 -- kept as-is from the original script.
-RTS_REF_DIR = REPO_ROOT / 'RTSNet' / 'AI_M_step' / 'exp_1' / 'r_1'
-path_results_True_rts  = str(RTS_REF_DIR / 'True_F'  / 'best-rts_true.pt')
-path_results_wrong_rts = str(RTS_REF_DIR / 'False_F' / 'best-rts_false.pt')
+# RTSNet checkpoints for THIS experiment/SNR bucket.
+#   True_F  -- RTSNet that is handed the true F  (upper-bound reference)
+#   False_F -- RTSNet stuck with the nominal F   (the one the M-step net corrects)
+# Stage 1 below always retrains these, so they always match this run's r2 and
+# noise distribution. NOTE: that OVERWRITES any existing best-rts_*.pt here.
+os.makedirs(EXP_DIR / 'True_F', exist_ok=True)
+os.makedirs(EXP_DIR / 'False_F', exist_ok=True)
+path_results_True_rts  = str(EXP_DIR / 'True_F'  / 'best-rts_true.pt')
+path_results_wrong_rts = str(EXP_DIR / 'False_F' / 'best-rts_false.pt')
 
 # Outputs of this script.
 os.makedirs(EXP_DIR, exist_ok=True)
@@ -258,7 +294,7 @@ assert len(all_train_inputs) == 3, "Should have 3 datasets"
 assert all_train_inputs[0].shape[0] == args.N_E, f"Train should have {args.N_E} sequences"
 assert all_cv_inputs[0].shape[0] == args.N_CV, f"CV should have {args.N_CV} sequences"
 assert all_test_inputs[0].shape[0] == args.N_T, f"Test should have {args.N_T} sequences"
-print("✓ Data structure verified!")
+print("[OK] Data structure verified!")
 
 print("\n" + "="*80)
 print("SETTING UP SYSTEM MODEL AND PIPELINE")
@@ -279,7 +315,7 @@ sys_model.F_train_TRUE = all_F_matrices_train
 sys_model.F_valid_TRUE = all_F_matrices_cv
 sys_model.F_test_TRUE = all_F_matrices_test
 
-print("✓ System model configured with 3-dataset F structure")
+print("[OK] System model configured with 3-dataset F structure")
 
 #########################################################################################################
 # TRAIN BiGRU SMOOTHER BASELINE ON THE SAME 3 DATASETS
@@ -321,10 +357,93 @@ RTSNet_Pipeline.setssModel(sys_model)
 RTSNet_Pipeline.setModel(RTSNet_model, args)
 RTSNet_Pipeline.setTrainingParams(args)
 
-print("✓ Pipeline configured")
+print("[OK] Pipeline configured")
 
 #########################################################################################################
-# TRAIN M-STEP NETWORK ON 3 DATASETS
+# STAGE 1: TRAIN THE TWO RTSNets (must happen BEFORE the M-step net, which loads them)
+#########################################################################################################
+# Ported from more/AI_emkf_training_linear_h_with_F.py, adapted to the 3-dataset
+# setup. Two RTSNets are trained on the SAME pooled data, differing only in which
+# F they are given:
+#
+#   True_F  : F_train/valid = the TRUE per-sequence F  -> upper-bound reference
+#   False_F : F_train/valid = the nominal [[.83,.2],[.2,.83]] for every sequence,
+#             while F_*_TRUE stays the true F (that is what the loss is against).
+#             Warm-started from the True_F net, exactly as the original did.
+#
+# The M-step net's job is to close the gap between these two, so False_F is the
+# net it is bolted onto (path_results_wrong_rts) further down.
+print("\n" + "="*80)
+print("STAGE 1: TRAINING RTSNets (True_F and False_F)")
+print("="*80)
+
+# NNTrain takes flat tensors, not the per-dataset lists, so pool the 3 datasets
+# along the batch dim. Each pooled sequence keeps its own true F.
+pooled_train_input  = torch.cat(all_train_inputs,  dim=0)   # [3*N_E, n, T]
+pooled_train_target = torch.cat(all_train_targets, dim=0)   # [3*N_E, m, T]
+pooled_cv_input     = torch.cat(all_cv_inputs,     dim=0)   # [3*N_CV, n, T]
+pooled_cv_target    = torch.cat(all_cv_targets,    dim=0)   # [3*N_CV, m, T]
+# DataGen sizes EVERY returned F list to N_E (it gets one F_gen list of that length
+# for all three splits), so the cv list carries N_E entries for only N_CV sequences.
+# Slice each split down to the number of sequences it actually has, or the pooled
+# F list runs out of step with the pooled data.
+pooled_F_train = [Fm for ds in all_F_matrices_train for Fm in ds[:args.N_E]]
+pooled_F_valid = [Fm for ds in all_F_matrices_cv    for Fm in ds[:args.N_CV]]
+# NNTrain indexes F_train[n_e // 10] (one F per block of 10 sequences), so these
+# lists only need to be long enough to cover that index, not 1-per-sequence.
+assert len(pooled_F_train) >= pooled_train_input.shape[0] // 10, 'F_train too short'
+assert len(pooled_F_valid) >= pooled_cv_input.shape[0]    // 10, 'F_valid too short'
+print(f"  pooled train: {tuple(pooled_train_input.shape)}, cv: {tuple(pooled_cv_input.shape)}")
+
+# ── 1a) TRUE-F RTSNet ──────────────────────────────────────────────────────────
+print("\n===== RTSNet with TRUE F =====")
+sys_model_true = SystemModel(base_F, Q, H, R, args.T, args.T_test)
+sys_model_true.InitSequence(m1_0, m2_0)
+sys_model_true.F_train = pooled_F_train
+sys_model_true.F_valid = pooled_F_valid
+sys_model_true.F_train_TRUE = pooled_F_train
+sys_model_true.F_valid_TRUE = pooled_F_valid
+
+rts_true = RTSNetNN()
+rts_true.NNBuild(sys_model_true, args)
+pipe_true = Pipeline(strTime, "RTSNet", "RTSNet")
+pipe_true.setssModel(sys_model_true)
+pipe_true.setModel(rts_true, args)
+pipe_true.setTrainingParams(args)
+pipe_true.NNTrain(sys_model_true,
+                  pooled_cv_input, pooled_cv_target,
+                  pooled_train_input, pooled_train_target,
+                  path_results=path_results_True_rts,
+                  generate_f=True)
+print("True-F RTSNet saved to:", path_results_True_rts)
+
+# ── 1b) WRONG-F RTSNet (warm-started from the true-F one) ──────────────────────
+print("\n===== RTSNet with WRONG (nominal) F =====")
+sys_model_wrong = SystemModel(base_F, Q, H, R, args.T, args.T_test)
+sys_model_wrong.InitSequence(m1_0, m2_0)
+# Loss is still measured against the TRUE F ...
+sys_model_wrong.F_train_TRUE = pooled_F_train
+sys_model_wrong.F_valid_TRUE = pooled_F_valid
+# ... but the net only ever SEES the nominal F.
+sys_model_wrong.F_train = [base_F.clone() for _ in pooled_F_train]
+sys_model_wrong.F_valid = [base_F.clone() for _ in pooled_F_valid]
+
+rts_wrong = RTSNetNN()
+rts_wrong.NNBuild(sys_model_wrong, args)
+pipe_wrong = Pipeline(strTime, "RTSNet", "RTSNet")
+pipe_wrong.setssModel(sys_model_wrong)
+pipe_wrong.setModel(rts_wrong, args)
+pipe_wrong.setTrainingParams(args)
+pipe_wrong.NNTrain(sys_model_wrong,
+                   pooled_cv_input, pooled_cv_target,
+                   pooled_train_input, pooled_train_target,
+                   path_results=path_results_wrong_rts,
+                   load_model_path=path_results_True_rts,   # warm start
+                   generate_f=True)
+print("Wrong-F RTSNet saved to:", path_results_wrong_rts)
+
+#########################################################################################################
+# STAGE 2: TRAIN M-STEP NETWORK ON 3 DATASETS
 #########################################################################################################
 
 print("\n" + "="*80)
@@ -379,6 +498,8 @@ print("Joint RTS saved to:", destination_path_RTS_joint)
 
 print("\n" + "=" * 80)
 print("TRAINING COMPLETE -- artifacts written to:", EXP_DIR)
+print(f"  RTSNet true  : {path_results_True_rts}")
+print(f"  RTSNet false : {path_results_wrong_rts}")
 print(f"  regular mnet : {destination_path_M}")
 print(f"  joint mnet   : {destination_path_M_joint}")
 print(f"  joint RTSNet : {destination_path_RTS_joint}")

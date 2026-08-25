@@ -102,10 +102,10 @@ print(f"q2 = {q2.item()}, r2 = {r2.item()} (used by every algorithm)")
 # ============================================================
 # Model paths (T = 30 trained networks)
 # ============================================================
-path_rtsnet_partial        = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial.pt'
-path_rtsnet_partial_joint  = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial_joint.pt'
-path_M_joint               = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/M_step_net_joint.pt'
-bigru_path                 = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/old/bigru_smoother.pt'
+path_rtsnet_partial        = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial.pt'
+path_rtsnet_partial_joint  = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial_joint.pt'
+path_M_joint               = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/10datasets/M_step_net_joint.pt'
+bigru_path                 = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/10datasets/old/bigru_smoother.pt'
 
 # ============================================================
 # Build the 5 rotated H matrices (F fixed)

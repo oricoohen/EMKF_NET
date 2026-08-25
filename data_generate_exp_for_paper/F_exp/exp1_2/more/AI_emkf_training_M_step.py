@@ -38,9 +38,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = '../../../../RTSNet/AI_M_step/exp_1/r_1/True_F/'  ######################################################################################################################################################################
+path_results_True = '../../../../RTSNet/synthetic/AI_M_step/exp_1/r_1/True_F/'  ######################################################################################################################################################################
 gauss = False
-path_results_False = '../../../../RTSNet/AI_M_step/exp_1/r_1/False_F/'  ######################################################################################################################################################################
+path_results_False = '../../../../RTSNet/synthetic/AI_M_step/exp_1/r_1/False_F/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -252,7 +252,7 @@ path_results_True_rts = path_results_True+'best-rts_true.pt'
 path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 #####TRAIN GOOD F#####
 print('rtssnet and psmooth with trueeeeeeee F')
-# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
+RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts)
 
 ### Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=path_results_True_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)
@@ -261,7 +261,7 @@ RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target,load_model_path=p
 #RTSNet_Pipeline.setTrainingParams(args_big)
 print('rtssnet and psmooth with WRONGGGGGGG F')
 #######TRAIN BAD F########
-# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
+RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target, path_results = path_results_wrong_rts,load_model_path= path_results_True_rts,generate_f=True)
 
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target,load_model_path=path_results_wrong_rts, generate_f=True,init_x_list=None, init_P_list=None,non_linear_h=False)

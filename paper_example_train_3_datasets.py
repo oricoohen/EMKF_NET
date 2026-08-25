@@ -153,7 +153,7 @@ print("="*80)
 
 # Path to pre-trained RTSNet (frozen during M-step training)
 path_results_rts = '../RTSNet/AI_M_step/exp_1/r_1/False_F/best-rts_false.pt'
-destination_path_M = 'RTSNet/AI_M_step/exp_1/r_1/EMKF/False/M_net_3_datasets.pt'
+destination_path_M = 'RTSNet/synthetic/AI_M_step/exp_1/r_1/EMKF/False/M_net_3_datasets.pt'
 
 # Create RTSNet model
 RTSNet_model = RTSNetNN()

@@ -91,23 +91,23 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-path_load_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_full.pt'
-path_results_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/RTSNet_full.pt'
-path_results_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_partial.pt'
-destination_path_rtsnet = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/RTSNet_partial.pt'
-destination_path_mnet = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/M_step_net.pt'
+path_load_rtsnet_full = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_full.pt'
+path_results_rtsnet_full = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/RTSNet_full.pt'
+path_results_rtsnet_partial = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_partial.pt'
+destination_path_rtsnet = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/RTSNet_partial.pt'
+destination_path_mnet = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/M_step_net.pt'
 # load_path_joint_mnet30 =  'RTSNet/lorenz_rotated/partial/m_net/Mstep_net_new_2iters_30,pt'
-load_path_joint_mnet30 = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/old/1iter_mnet_30.pt'
-destination_path_rtsnet_true = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/rtsnet_30_true.pt'
+load_path_joint_mnet30 = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/old/1iter_mnet_30.pt'
+destination_path_rtsnet_true = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/rtsnet_30_true.pt'
 
-destination_path_rtsnet_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/joint/rtsnet_mnet_30.pt'
-destination_path_mnet_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/joint/2iter_mnet_mnet_30.pt'
-destination_path_rtsnet_joint_h = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/joint/rtsnet_mnet_30h0.8.pt'
-destination_path_mnet_joint_h = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/joint/2iter_mnet_mnet_30_h0.8.pt'
-destination_path_joint_mnet_diff_start= 'RTSNet/lorenz_gauss/lorenz_rotated_10/1dataset/M_step_net_joint.pt'
-destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_partial_joint.pt'
-destination_path_jmnet_rts = 'RTSNet/lorenz_gauss/lorenz_rotated_10/5datasets/old/Mstep_net_RTS_regular_2iters.pt'
-load_path_M_rts_rts = 'RTSNet/lorenz_gauss/lorenz_rotated_10/1dataset/partial/m_net/Mstep_net_new_2iters_30_RTS_ANALITIC.pt'
+destination_path_rtsnet_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/joint/rtsnet_mnet_30.pt'
+destination_path_mnet_joint = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/joint/2iter_mnet_mnet_30.pt'
+destination_path_rtsnet_joint_h = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/joint/rtsnet_mnet_30h0.8.pt'
+destination_path_mnet_joint_h = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/joint/2iter_mnet_mnet_30_h0.8.pt'
+destination_path_joint_mnet_diff_start= 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/1dataset/M_step_net_joint.pt'
+destination_path_joint_rtsnet_diff_start= 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/1dataset/RTSNet_partial_joint.pt'
+destination_path_jmnet_rts = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/5datasets/old/Mstep_net_RTS_regular_2iters.pt'
+load_path_M_rts_rts = 'RTSNet/lorenz/lorenz_gauss/lorenz_rotated_10/1dataset/partial/m_net/Mstep_net_new_2iters_30_RTS_ANALITIC.pt'
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
 all_train_targets = []
