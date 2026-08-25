@@ -227,7 +227,7 @@ if switch == 'full':
         print("Number of trainable parameters for RTSNet:",
               sum(p.numel() for p in RTSNet_model.parameters() if p.requires_grad))
         RTSNet_Pipeline.setTrainingParams(args)
-        path_results_rtsnet1 = 'RTSNet/lorenz/full/rtsnet'
+        path_results_rtsnet1 = 'RTSNet/lorenz_gauss/lorenz/full/rtsnet'
        # if (chop):
         #     [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch,
         #      MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain_new(sys_model, cv_input, cv_target, train_input, train_target,
@@ -304,7 +304,7 @@ if switch == 'full':
         RTSNet_Pipeline.setModel(RTSNet_model,args)
         RTSNet_Pipeline.setTrainingParams(args)
         #######################################
-        path_results2 = 'RTSNet/lorenz/full/rtsnet_pass2'
+        path_results2 = 'RTSNet/lorenz_gauss/lorenz/full/rtsnet_pass2'
         # [MSE_cv_linear_epoch, MSE_cv_dB_epoch, MSE_train_linear_epoch, MSE_train_dB_epoch] = RTSNet_Pipeline.NNTrain(sys_model_pass2, cv_input_pass2, cv_target_pass2, train_input_pass2, train_target_pass2, path_results2)
         # RTSNet_Pipeline.save()
         print("RTSNet pass 2 pipeline end!")
@@ -328,7 +328,7 @@ elif switch == 'partial':
     #########################
     ## RTSNet - 1 partial ###
     #########################
-    path_results_rtsnet21 = 'RTSNet/lorenz/partial/rtsnet'
+    path_results_rtsnet21 = 'RTSNet/lorenz_gauss/lorenz/partial/rtsnet'
     if load_trained_pass1:
         print("Load RTSNet pass 1")
     else:
@@ -356,7 +356,7 @@ elif switch == 'partial':
         torch.save(RTSNet_Pipeline.model, path_results_rtsnet21)
     ##################################################################################
     if two_pass:
-        path_results_rtsnet22 = 'RTSNet/lorenz/partial/rtsnet_2'
+        path_results_rtsnet22 = 'RTSNet/lorenz_gauss/lorenz/partial/rtsnet_2'
         #########################
         ## RTSNet - 2 partial ###
         #########################

@@ -70,8 +70,8 @@ LengthIsRandom = False
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 1500
-args.N_CV = 150
+args.N_E = 400
+args.N_CV = 100
 args.N_T = 100
 args.T = 30
 args.T_test = 30
@@ -83,10 +83,10 @@ args.wd = 1e-3
 
 torch.manual_seed(1)
 
-cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
+cycles = 10  # Number of datasets (each represents 30 timesteps with different F)
 num_em_iters = 2
 # noise q and r
-r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([10], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -102,15 +102,15 @@ sys_model.InitSequence(m1x_0, m2x_0)  # x0 and P0
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-load_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial.pt'
-load_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/best/RTSNet_partial_joint.pt'
-load_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/best/M_step_net_joint.pt'
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
-destination_path_bigru = 'RTSNet/lorenz_rotated_1/3datasets/30/bigru_smoother.pt'
+load_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/RTSNet_partial.pt'
+load_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/RTSNet_partial_joint.pt'
+load_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/best/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net.pt'
+destination_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
+destination_path_bigru = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/bigru_smoother2.pt'
 
 # Storage for all datasets - CORRECTED: Now storing train, cv, AND test data
 all_train_inputs = []
@@ -219,7 +219,7 @@ print(f"  Timesteps per sequence: {all_train_inputs[0].shape[2]}")
 print(f"  Total effective sequence length: {cycles * args.T} timesteps")
 
 # Verify structure
-assert len(all_train_inputs) == 3, "Should have 3 datasets"
+# assert len(all_train_inputs) == 3, "Should have 3 datasets"
 assert all_train_inputs[0].shape[0] == args.N_E, f"Train should have {args.N_E} sequences"
 assert all_cv_inputs[0].shape[0] == args.N_CV, f"CV should have {args.N_CV} sequences"
 assert all_test_inputs[0].shape[0] == args.N_T, f"Test should have {args.N_T} sequences"
@@ -313,22 +313,22 @@ def _fresh_rtsnet(ssm):
 # Concatenates all datasets; already fully batched (standard minibatch GRU).    #
 # ============================================================================ #
 print("\n[BASELINE] Training BiGRU smoother...")
-# train_bigru_smoother(
-#     train_input=all_train_inputs,   # list of 3 tensors [N_E, n, T] — auto-concatenated
-#     train_target=all_train_targets,
-#     cv_input=all_cv_inputs,
-#     cv_target=all_cv_targets,
-#     n=n,
-#     m=m,
-#     save_path=destination_path_bigru,
-#     device=device,
-#     epochs=300,
-#     batch_size=32,
-#     lr=1e-3,
-#     hidden_size=128,
-#     num_layers=2,
-# )
-
+train_bigru_smoother(
+    train_input=all_train_inputs,   # list of 3 tensors [N_E, n, T] — auto-concatenated
+    train_target=all_train_targets,
+    cv_input=all_cv_inputs,
+    cv_target=all_cv_targets,
+    n=n,
+    m=m,
+    save_path=destination_path_bigru,
+    device=device,
+    epochs=300,
+    batch_size=32,
+    lr=1e-3,
+    hidden_size=128,
+    num_layers=2,
+)
+jkmi
 
 # ============================================================================ #
 # STEP 1a - TRUE RTSNet: trained with the TRUE per-sequence H (oracle smoother). #

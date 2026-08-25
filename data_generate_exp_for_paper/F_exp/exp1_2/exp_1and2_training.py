@@ -1,17 +1,33 @@
 """
-r_1 version of M_network_training_3datasets_CORRECTED.py (r2 = 1.0).
+Training script for the linear-h / varying-F paper experiment (exp 1 & 2).
 
-3-dataset process based on the CORRECTED trainer, but the true F for each dataset is
-built by rotating the base F by a RANDOM angle in [-0.3, 0.3] rad (rotate_F theta=0.3,
-randomit=True), chained cumulatively across datasets. x0 is chained across datasets.
-Paths point at exp_1/r_1 so this matches the test
-M_network_AI_emkf_testing_linear_h_paper.py (which uses r2 = 1).
+Trains, on 3 sequential datasets:
+  1) the regular M-step net  -> train_mstep_net_3_datasets
+  2) the joint (1 mnet + 1 RTSNet) net -> joint_train_mnet_rtsnet_3_datasets
+  3) a BiGRU smoother baseline (Baselines/BiGRU_smoother.py), on exactly the same
+     pooled train/cv data, so exp_1and2_testing.py can compare AI-EMKF against it.
 
-Adds a BiGRU smoother baseline (Baselines/BiGRU_smoother.py), trained on exactly the
-same pooled 3-dataset train/cv data as the M-step net, and saved so the test script
-can load it and compare AI-EMKF against it.
+The true F of each dataset is the base F rotated by a RANDOM angle in
+[-THETA_TRAIN, THETA_TRAIN] rad (rotate_F randomit=True), chained cumulatively
+across the 3 datasets; x0 is chained across datasets too. The test script uses a
+FIXED 0.2 rad drift -- training on wider random drifts is deliberate, so the mnet
+generalizes instead of overfitting one fixed step.
+
+Sensor h is linear: h(x) = H @ x with H = [[1,1],[0.25,1]].
+Noise: q2 = 0.01, r2 = 10.
+
+Run from anywhere:  python exp_1and2_training.py
 """
 import os
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path and anchor every path to it, so this script runs
+# correctly from its own folder as well as from the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -32,7 +48,6 @@ from RTSNet.RTSNet_nn import RTSNetNN
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 from Baselines.BiGRU_smoother import train_bigru_smoother
 
-import shutil
 print("Pipeline Start")
 
 # === ADD: global device/dtype ===
@@ -51,9 +66,32 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-# root-relative paths (run from repo root, like the test file) -> exp_1/r_1
-path_results_True = 'RTSNet/AI_M_step/exp_1/r_1/True_F/'
-path_results_False = 'RTSNet/AI_M_step/exp_1/r_1/False_F/'
+##############################################################################
+### Paths -- all anchored to REPO_ROOT, so the CWD does not matter.
+###
+### EXP_DIR is the ONE knob that says which experiment/SNR bucket this run
+### reads and writes. exp_1and2_testing.py has the identical constant and the
+### two MUST point at the same folder, otherwise the test loads checkpoints
+### this script never wrote.
+##############################################################################
+EXP_DIR = REPO_ROOT / 'RTSNet' / 'AI_M_step' / 'exp_1' / 'r_10'
+
+# Pre-trained RTSNet references. NOTE: these live under r_1 while the data below
+# is generated at r2 = 10 -- kept as-is from the original script.
+RTS_REF_DIR = REPO_ROOT / 'RTSNet' / 'AI_M_step' / 'exp_1' / 'r_1'
+path_results_True_rts  = str(RTS_REF_DIR / 'True_F'  / 'best-rts_true.pt')
+path_results_wrong_rts = str(RTS_REF_DIR / 'False_F' / 'best-rts_false.pt')
+
+# Outputs of this script.
+os.makedirs(EXP_DIR, exist_ok=True)
+destination_path_M         = str(EXP_DIR / 'mnet_lin_3ds.pt')           # regular mnet
+destination_path_M_joint   = str(EXP_DIR / 'joint_mnet_1m1r_lin.pt')    # joint mnet
+destination_path_RTS_joint = str(EXP_DIR / 'joint_rtsnet_1m1r_lin.pt')  # joint RTSNet
+bigru_save_path            = str(EXP_DIR / 'new_bigru_lin_3ds.pt')      # BiGRU baseline
+
+# Where the generated 3-dataset data is cached.
+DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp_3_datasets_r1'
+os.makedirs(DATA_DIR, exist_ok=True)
 
 ####################
 ### Design Model ###
@@ -64,7 +102,7 @@ InitIsRandom_test = False
 LengthIsRandom = False
 
 args = config.general_settings()
-args.N_E = 1000  # Number of training examples (match exp_3)
+args.N_E = 400  # Number of training examples (match exp_3)
 args.N_CV = 100  # Number of CV examples
 args.N_T = 50    # Number of test examples
 
@@ -84,7 +122,7 @@ cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 
 # True model parameters
 q2 = 0.01
-r2 = 1   # r_1 experiment (matches M_network_AI_emkf_testing_linear_h_paper.py)
+r2 = 10  # observation-noise variance for this run (see EXP_DIR above)
 
 print('q2 is:', q2)
 print('r2 is:', r2)
@@ -119,11 +157,16 @@ x0_last = None
 H_gen_list = [H.clone() for _ in range(args.N_E)]
 
 # Build the true F for each dataset by rotating the base F by a RANDOM angle in
-# [-0.3, 0.3] rad (rotate_F theta=0.3, randomit=True), one draw per sequence-group,
+# [-THETA_TRAIN, THETA_TRAIN] rad (rotate_F randomit=True), one draw per sequence,
 # chained cumulatively across the 3 datasets. This REPLACES DataGen's default
-# random-F path (generate_random_F_matrices), whose first dataset rotated by theta
-# up to 1.0 -- far too wide. Now every step is a random theta <= 0.3.
-theta_max = 1   # match exp_3's theta_rot (varied F drift up to 1 rad per group)
+# random-F path (generate_random_F_matrices), so the drift magnitude is explicit
+# and reproducible here rather than buried in the generator.
+#
+# The test script (exp_1and2_testing.py) evaluates on a FIXED 0.2 rad drift. The
+# wider random drift here is deliberate: it makes the mnet generalize over a range
+# of drifts instead of memorizing one fixed step.
+THETA_TRAIN = 1.0   # matches exp_3's theta_rot (F drift up to 1 rad per dataset)
+theta_max = THETA_TRAIN
 base_F = torch.tensor([[0.83, 0.2], [0.2, 0.83]], device=DEVICE, dtype=DTYPE)
 F_by_dataset = []
 _prev_F = [base_F.clone() for _ in range(args.N_E)]
@@ -147,17 +190,15 @@ for dataset_id in range(cycles):
     print(f"F matrix for dataset {dataset_id}:")
     print(F_current)
 
-    # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp_3_datasets_r1/'
-    os.makedirs(dataFolderName, exist_ok=True)
-    dataFileName = f'dataset_{dataset_id}_data.pt'
-    dataFileName_F = f'dataset_{dataset_id}_F.pt'
+    # Create file names (DATA_DIR is absolute -- see the path block at the top)
+    dataFilePath = str(DATA_DIR / f'dataset_{dataset_id}_data.pt')
+    dataFilePath_F = str(DATA_DIR / f'dataset_{dataset_id}_F.pt')
 
     # Generate data for this dataset (Test=False -> train/cv/test all produced)
     print(f"\nGenerating data for dataset {dataset_id}...")
     DataGen(args, sys_model,
-            dataFolderName + dataFileName,
-            dataFolderName + dataFileName_F,
+            dataFilePath,
+            dataFilePath_F,
             delta=1,
             randomInit_train=InitIsRandom_train,
             randomInit_cv=InitIsRandom_cv,
@@ -169,8 +210,8 @@ for dataset_id in range(cycles):
             x0_list=x0_last)    # x0 chained across datasets for continuity
 
     # Load the generated data
-    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName, weights_only=True, map_location=DEVICE)
-    [F_train_mat, F_val_mat, F_test_mat_list] = torch.load(dataFolderName + dataFileName_F, map_location=DEVICE)
+    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFilePath, weights_only=True, map_location=DEVICE)
+    [F_train_mat, F_val_mat, F_test_mat_list] = torch.load(dataFilePath_F, map_location=DEVICE)
 
     # Prepare x0_last for next dataset (for continuity in the sequences)
     X_0_train = train_target[:, :, -1].clone()
@@ -240,16 +281,6 @@ sys_model.F_test_TRUE = all_F_matrices_test
 
 print("✓ System model configured with 3-dataset F structure")
 
-# Paths for models (exp_1/r_1)
-path_results_True_rts = path_results_True + 'best-rts_true.pt'
-path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
-destination_folder = 'RTSNet/AI_M_step/exp_2/r_1/'
-os.makedirs(destination_folder, exist_ok=True)
-# NEW names -> nothing existing is overwritten (linear-H experiment, mirrors exp_3)
-destination_path_M         = destination_folder + 'mnet_lin_3ds.pt'          # regular mnet
-destination_path_M_joint   = destination_folder + 'joint_mnet_1m1r_lin.pt'   # joint mnet
-destination_path_RTS_joint = destination_folder + 'joint_rtsnet_1m1r_lin.pt' # joint RTSNet
-
 #########################################################################################################
 # TRAIN BiGRU SMOOTHER BASELINE ON THE SAME 3 DATASETS
 #########################################################################################################
@@ -260,8 +291,8 @@ print("="*80)
 # Black-box baseline: a bidirectional-GRU smoother that maps observations
 # y:[N,n,T] -> state estimate x_hat:[N,m,T] directly, with no model knowledge.
 # Trained on exactly the same pooled 3-dataset train/cv data as the M-step net,
-# so M_network_AI_emkf_testing_linear_h_paper.py can compare AI-EMKF against it.
-bigru_save_path = destination_folder + 'bigru_lin_3ds.pt'
+# so exp_1and2_testing.py can compare AI-EMKF against it. Saved to bigru_save_path
+# (defined in the path block at the top).
 n_obs = all_train_inputs[0].shape[1]     # observation dim (n)
 m_state = all_train_targets[0].shape[1]  # state dim (m)
 
@@ -275,14 +306,12 @@ train_bigru_smoother(
     save_path=bigru_save_path,
     device=DEVICE,
     epochs=300,
-    batch_size=32,
+    batch_size=16,
     lr=1e-3,
-    hidden_size=128,
+    hidden_size=16,
     num_layers=2,
 )
-ddsdfsdfs
-sdf
-
+print(f"BiGRU baseline saved to: {bigru_save_path}")
 
 # Create RTSNet
 RTSNet_model = RTSNetNN()
@@ -348,5 +377,10 @@ RTSNet_Pipeline.joint_train_mnet_rtsnet_3_datasets(
 print("Joint mnet saved to:", destination_path_M_joint)
 print("Joint RTS saved to:", destination_path_RTS_joint)
 
-
-print(f"BiGRU baseline saved to: {bigru_save_path}")
+print("\n" + "=" * 80)
+print("TRAINING COMPLETE -- artifacts written to:", EXP_DIR)
+print(f"  regular mnet : {destination_path_M}")
+print(f"  joint mnet   : {destination_path_M_joint}")
+print(f"  joint RTSNet : {destination_path_RTS_joint}")
+print(f"  BiGRU        : {bigru_save_path}")
+print("=" * 80)

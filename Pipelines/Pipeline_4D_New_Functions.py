@@ -1021,7 +1021,7 @@ def test_mstep_net_price(self,
                 nu_centered = nu - nu_mean
                 S_nu = (nu_centered @ nu_centered.T) / T
 
-                C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                 z_in = torch.cat([
                     A1.reshape(-1),

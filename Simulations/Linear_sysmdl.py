@@ -566,11 +566,11 @@ class SystemModel:
             else:
                 xt = self.f(self.x_prev)
                 mean = torch.zeros([self.m], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
-                eq = distrib.rsample()
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=Q_gen)
+                # eq = distrib.rsample()
                 ##################################ori added
-                # lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
-                # eq = Exponential(lam_vec_q).sample()  # shape (n,)
+                lam_vec_q = torch.full((self.m,), lam_q.item(), dtype=xt.dtype, device=xt.device)
+                eq = Exponential(lam_vec_q).sample()  # shape (n,)
                 # eq = z - (1.0 / lam_vec_q)
                 ###################################
                 eq = torch.reshape(eq[:], xt.size())
@@ -591,11 +591,11 @@ class SystemModel:
             else:
                 yt = self.H.matmul(xt)
                 mean = torch.zeros([self.n], device=DEVICE)
-                distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
-                er = distrib.rsample()
+                # distrib = MultivariateNormal(loc=mean, covariance_matrix=R_gen)
+                # er = distrib.rsample()
                 ####################################ori added
-                # lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
-                # er = Exponential(lam_vec_r).sample()  # shape (n,)
+                lam_vec_r = torch.full((self.n,), lam_r.item(), dtype=yt.dtype, device=yt.device)
+                er = Exponential(lam_vec_r).sample()  # shape (n,)
                 # er = z -(1.0/lam_vec_r)
                 ######################################
                 er = torch.reshape(er[:], yt.size())

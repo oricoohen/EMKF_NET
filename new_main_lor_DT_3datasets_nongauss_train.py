@@ -71,7 +71,7 @@ print("Current Time =", strTime)
 #   'student_t'    : heavy tails, SAME covariance as Gaussian. nu=dof (smaller=heavier)
 #   'laplace'      : mild heavy tails, same covariance
 #   'exponential'  : skewed (KalmanNet-lineage), same covariance
-NOISE_TYPE = 'exponential'
+NOISE_TYPE = 'gaussian'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
@@ -144,6 +144,24 @@ R = r2[0] * R_structure
 print('q2 is:', q2)
 print('r2 is:', r2)
 
+# ============================================================================ #
+#  CORRELATE_NOISE -- non-diagonal (correlated) measurement-noise covariance     #
+#  Standalone flag, INDEPENDENT of NORMALIZE_NOISE. When True, R becomes the      #
+#  equicorrelated matrix R = r2 * C, C = (1-rho) I + rho J (unit diagonal, every  #
+#  channel PAIR correlated by rho -- "common-mode" noise). Used CONSISTENTLY by   #
+#  the generator AND all nets (no mismatch). MUST MATCH THE TEST SCRIPT.          #
+#  Intended for GAUSSIAN noise: MultivariateNormal(cov=R) applies the correlation #
+#  directly, regardless of NORMALIZE_NOISE.                                       #
+# ============================================================================ #
+CORRELATE_NOISE = True
+R_CORR_RHO = 0.6
+if CORRELATE_NOISE:
+    C_corr = ((1.0 - R_CORR_RHO) * torch.eye(n, device=device)
+              + R_CORR_RHO * torch.ones(n, n, device=device))
+    R = r2[0] * C_corr
+    print(f"[CORRELATE_NOISE] equicorrelated R, rho={R_CORR_RHO} "
+          f"(generator AND all nets share this true R)")
+
 sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)
 sys_model.InitSequence(m1x_0, m2x_0)
 
@@ -153,7 +171,9 @@ print(f"GENERATING {cycles} DATASETS (DIFFERENT H, FIXED F) WITH "
 print("=" * 80)
 
 # ---- distinct non-Gaussian save paths (nothing existing is touched) ----
-_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/5datasets/30'
+# correlated-R runs get their own subtree so plain-{NOISE_TYPE} nets are untouched
+_corr_tag = f'_corr{str(R_CORR_RHO).replace(".", "p")}' if CORRELATE_NOISE else ''
+_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}{_corr_tag}/5datasets/30'
 destination_path_rtsnet_full         = f'{_base}/NEW_RTSNet_full.pt'
 destination_path_rtsnet_partial      = f'{_base}/NEW_RTSNet_partial.pt'
 destination_path_M_joint             = f'{_base}/NEW_M_step_net_joint.pt'
@@ -171,6 +191,7 @@ WARM_START = True
 _gauss = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final'   # r=1 Gaussian refs
 warm_rtsnet_full = f'{_gauss}/RTSNet_full.pt'       # TRUE RTSNet init (STEP 1a) <- r=1
 warm_mnet_joint  = f'{_gauss}/M_step_net_joint.pt'  # M-net init (STEP 2)        <- r=1
+# warm_rtsnet_partial = f'{_gauss}/RTSNet_partial.pt'
 # (previous r=10 refs under _base:)
 # warm_rtsnet_full = f'{_base}/RTSNet_full.pt'
 # warm_mnet_joint  = f'{_base}/M_step_net_joint.pt'

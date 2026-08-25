@@ -4456,7 +4456,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
                     # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([A1.reshape(-1),A2.reshape(-1),S_delta_x.reshape(-1),S_nu.reshape(-1),C_delta_x_xminus.reshape(-1),
                         F_current.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
@@ -4578,7 +4578,7 @@ class Pipeline_ERTS:
                         nu_centered_cv = nu_cv - nu_mean_cv
                         S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                         z_cv = torch.cat([
                             A1_cv.reshape(-1),
@@ -4747,7 +4747,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
                     # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
                                       C_delta_x_xminus.reshape(-1),
@@ -4877,7 +4877,7 @@ class Pipeline_ERTS:
                         nu_centered_cv = nu_cv - nu_mean_cv
                         S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                         z_cv = torch.cat([
                             A1_cv.reshape(-1),
@@ -5089,7 +5089,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
                     # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
                                       C_delta_x_xminus.reshape(-1),
@@ -5239,7 +5239,7 @@ class Pipeline_ERTS:
                         nu_centered_cv = nu_cv - nu_mean_cv
                         S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                         z_cv = torch.cat([
                             A1_cv.reshape(-1),
@@ -5437,7 +5437,7 @@ class Pipeline_ERTS:
                         nu_mean = nu.mean(dim=1, keepdim=True)
                         nu_centered = nu - nu_mean
                         S_nu = (nu_centered @ nu_centered.T) / T
-                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                         z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1),
                                           S_nu.reshape(-1), C_delta_x_xminus.reshape(-1),
@@ -5532,7 +5532,7 @@ class Pipeline_ERTS:
                             nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
                             nu_centered_cv = nu_cv - nu_mean_cv
                             S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
-                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
                             z_cv = torch.cat([A1_cv.reshape(-1), A2_cv.reshape(-1), S_delta_x_cv.reshape(-1),
                                               S_nu_cv.reshape(-1), C_delta_x_xminus_cv.reshape(-1),
                                               F_current_cv.reshape(-1)], dim=0).reshape(1, -1)
@@ -5685,7 +5685,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
 
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([
                         A1.reshape(-1),
@@ -5923,7 +5923,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
 
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([
                         A1.reshape(-1),
@@ -6132,7 +6132,7 @@ class Pipeline_ERTS:
                 nu_centered = nu - nu_mean
                 S_nu = (nu_centered @ nu_centered.T) / T
                 # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                 z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
                                   C_delta_x_xminus.reshape(-1),
@@ -6279,7 +6279,7 @@ class Pipeline_ERTS:
                     nu_centered_cv = nu_cv - nu_mean_cv
                     S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                    C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                    C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                     z_cv = torch.cat([
                         A1_cv.reshape(-1),
@@ -6474,7 +6474,7 @@ class Pipeline_ERTS:
                 nu_centered = nu - nu_mean
                 S_nu = (nu_centered @ nu_centered.T) / T
 
-                C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                 # # ===== NORMALIZATION: Remove dependence on ||x|| magnitude ===== #
                 # A1_normalized, A2_normalized, S_delta_x_normalized, S_nu_normalized, C_delta_normalized, A2_scale, S_nu_scale = \
@@ -6799,7 +6799,7 @@ class Pipeline_ERTS:
                         delta_x = x_curr - x_minus  # [m, T]
 
                         # Cross term C_{Δx, x⁻} = 1/T Σ Δx_t x⁻_t^T
-                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                         # y_hat and innovation covariance S_nu
                         if non_linear_h:
@@ -6969,7 +6969,7 @@ class Pipeline_ERTS:
                             delta_x_cv = x_curr - x_minus_cv  # [m, T_cv]
 
                             # Cross term C_{Δx, x⁻} for CV
-                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                             if non_linear_h:
                                 y_hat_cv_list = []
@@ -7190,7 +7190,7 @@ class Pipeline_ERTS:
                     delta_x = x_curr - x_minus  # [m, T]
 
                     # C_{Δx, x⁻} = 1/T Σ Δx_t x⁻_t^T
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
                     delta_mean = delta_x.mean(dim=1, keepdim=True)
                     delta_centered = delta_x - delta_mean
                     S_delta_x = (delta_centered @ delta_centered.T) / T
@@ -7438,7 +7438,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
                     # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
 
                     if em_iter == num_em_iters - 1:
@@ -7608,7 +7608,7 @@ class Pipeline_ERTS:
                         nu_centered_cv = nu_cv - nu_mean_cv
                         S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                         z_cv = torch.cat([
                             A1_cv.reshape(-1),
@@ -7817,7 +7817,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
                     # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     if em_iter == 0:
                         F_for_update = F_current  # no detach, so F1 depends on ΔF0
@@ -7986,7 +7986,7 @@ class Pipeline_ERTS:
                         nu_centered_cv = nu_cv - nu_mean_cv
                         S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                        C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                        C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                         z_cv = torch.cat([
                             A1_cv.reshape(-1),
@@ -8174,7 +8174,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
 
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     z_in = torch.cat([
                         A1.reshape(-1),
@@ -8384,7 +8384,7 @@ class Pipeline_ERTS:
                 nu_centered = nu - nu_mean
                 S_nu = (nu_centered @ nu_centered.T) / T
                 # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                 z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1), S_nu.reshape(-1),
                                   C_delta_x_xminus.reshape(-1),
@@ -8533,7 +8533,7 @@ class Pipeline_ERTS:
                     nu_centered_cv = nu_cv - nu_mean_cv
                     S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                    C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                    C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                     z_cv = torch.cat([
                         A1_cv.reshape(-1),
@@ -8705,7 +8705,7 @@ class Pipeline_ERTS:
                         nu_centered = nu - nu_mean
                         S_nu = (nu_centered @ nu_centered.T) / T
                         # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                         epsI = 1e-4 * torch.eye(m, device=A2.device, dtype=A2.dtype)
                         A2_reg = A2 + epsI
@@ -8843,7 +8843,7 @@ class Pipeline_ERTS:
                             nu_centered_cv = nu_cv - nu_mean_cv
                             S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
                             epsI = 1e-4 * torch.eye(m, device=A2_cv.device, dtype=A2.dtype)
                             A2_reg_cv = A2_cv + epsI
                             F_em_cv = A1_cv @ torch.linalg.inv(A2_reg_cv)  # [m, m]
@@ -9041,7 +9041,7 @@ class Pipeline_ERTS:
                     nu_centered = nu - nu_mean
                     S_nu = (nu_centered @ nu_centered.T) / T
 
-                    C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                    C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                     epsI = 1e-4 * torch.eye(m, device=A2.device, dtype=A2.dtype)
                     A2_reg = A2 + epsI
@@ -9276,7 +9276,7 @@ class Pipeline_ERTS:
                         nu_centered = nu - nu_mean
                         S_nu = (nu_centered @ nu_centered.T) / T
                         # C_{Δx,x⁻} = 1/T Σ Δx_t x⁻_t^T   (no centering in your formula)
-                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        C_delta_x_xminus = (delta_x @ x_prev.T) / T
 
                         z_in = torch.cat([A1.reshape(-1),A2.reshape(-1),S_delta_x.reshape(-1),S_nu.reshape(-1),C_delta_x_xminus.reshape(-1),
                             F_current.reshape(-1)], dim=0).reshape(1, -1)  # [1, feature_dim]
@@ -9415,7 +9415,7 @@ class Pipeline_ERTS:
                             nu_centered_cv = nu_cv - nu_mean_cv
                             S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
 
-                            C_delta_x_xminus_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            C_delta_x_xminus_cv = (delta_x_cv @ x_prev.T) / T_cv
 
                             z_cv = torch.cat([
                                 A1_cv.reshape(-1),
@@ -9560,7 +9560,7 @@ class Pipeline_ERTS:
                         nu_mean = nu.mean(dim=1, keepdim=True)
                         nu_centered = nu - nu_mean
                         S_nu = (nu_centered @ nu_centered.T) / T
-                        C_delta_x_xminus = (delta_x @ x_minus.T) / T
+                        C_delta_x_xminus = (delta_x @ x_prev.T) / T
                         z_in = torch.cat([A1.reshape(-1), A2.reshape(-1), S_delta_x.reshape(-1),
                                           S_nu.reshape(-1), C_delta_x_xminus.reshape(-1),
                                           F_current.reshape(-1)], dim=0).reshape(1, -1)
@@ -9634,7 +9634,7 @@ class Pipeline_ERTS:
                             nu_mean_cv = nu_cv.mean(dim=1, keepdim=True)
                             nu_centered_cv = nu_cv - nu_mean_cv
                             S_nu_cv = (nu_centered_cv @ nu_centered_cv.T) / T_cv
-                            C_cv = (delta_x_cv @ x_minus_cv.T) / T_cv
+                            C_cv = (delta_x_cv @ x_prev.T) / T_cv
                             z_cv = torch.cat([A1_cv.reshape(-1), A2_cv.reshape(-1), S_delta_x_cv.reshape(-1),
                                               S_nu_cv.reshape(-1), C_cv.reshape(-1),
                                               F_current_cv.reshape(-1)], dim=0).reshape(1, -1)

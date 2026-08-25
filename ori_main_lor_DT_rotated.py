@@ -68,11 +68,11 @@ chop = False  # whether to chop data sequences into shorter sequences
 # path_results = 'RTSNet/'
 DatafolderName = 'Simulations/Lorenz_Atractor/data/T100_Hrot1' + '/'
 switch = 'partial'  # 'full' or 'partial' or 'estH' or rotated_true or rotated_partial
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial.pt'
-destination_path_M_reg = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net.pt'
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_01/1dataset/RTSNet_partial_joint.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_01/1dataset/M_step_net_joint.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_01/1dataset/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_01/1dataset/RTSNet_partial.pt'
+destination_path_M_reg = 'RTSNet/lorenz_gauss/lorenz_rotated_01/1dataset/M_step_net.pt'
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_01/1dataset/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_01/1dataset/M_step_net_joint.pt'
 import os
 
 paths = [

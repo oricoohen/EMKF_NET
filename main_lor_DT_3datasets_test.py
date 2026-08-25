@@ -103,10 +103,10 @@ print('r2 is:', r2)
 print("\n" + "="*80)
 print("GENERATING 3 DATASETS WITH DIFFERENT H MATRICES (F IS FIXED)")
 print("="*80)
-destination_path_rtsnet_full = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_full.pt'
-destination_path_rtsnet_partial = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial.pt'
+destination_path_rtsnet_full = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final/RTSNet_full.pt'
+destination_path_rtsnet_partial = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final/RTSNet_partial.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
-destination_path_M = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net.pt'
+destination_path_M = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/M_step_net.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.6.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/M_step_net_joint0.3.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_joint0.3.pt'
@@ -114,10 +114,10 @@ destination_path_M = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net.pt'
 # destination_path_rtsnet_partial_joint1 = 'RTSNet/lorenz_rotated_1/3datasets/RTSNet_partial_jointb.pt'
 # destination_path_M_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/M_step_net_jointb.pt'
 # destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_10/3datasets/final/RTSNet_partial_jointb.pt'
-destination_path_M_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
-destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_rotated_1/3datasets/30/RTSNet_partial_joint.pt'
+destination_path_M_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final/M_step_net_joint.pt'  ####0.3=-0.17, old_joint = -1
+destination_path_rtsnet_partial_joint = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final/RTSNet_partial_joint.pt'
 # Generate diverse H matrices for datasets (F is FIXED)
-bigru_path = 'RTSNet/lorenz_rotated_1/3datasets/20/bigru_smoother.pt'
+bigru_path = 'RTSNet/lorenz_gauss/lorenz_rotated_1/5datasets/final/bigru_smoother.pt'
 H_matrices_for_datasets_d = []
 
 initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
@@ -126,7 +126,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 for i in range(cycles+1):
     H_matrices_for_datasets_d.append([(h).clone() for h in H_test_list])
     # Rotate H for next dataset
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.3, many=True, randomit=False)
     # H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=the[i], many=True, randomit=False)
 
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
@@ -462,12 +462,18 @@ average_initial_guess_mse_db = 10 * torch.log10(torch.tensor(init_mse_lin_sum / 
 print(f"Average MSE with INITIAL GUESS H: {average_initial_guess_mse_db:.3f} dB")
 
 #############################################################################
-# print('\n=== SUMMARY COMPARISON ===')
-print(f"TRUE H (perfect):        {average_true_H_mse_db:.3f} dB")
-print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
-print(f"EMKF FINAL (learned):    {emkf_final_mse_db:.3f} dB")
-print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
-print(f"Gap to perfect (TRUE H): {(emkf_final_mse_db - average_true_H_mse_db):.3f} dB")
+print('\n' + '=' * 52)
+print('=== SUMMARY: average MSE over all datasets [dB] ===')
+print('=' * 52)
+print(f"{'RTSNet TRUE H (upper bound)':<32} {average_true_H_mse_db:8.3f} dB")
+print(f"{'EMKalmanNet / AI EMKF (ours)':<32} {emkf_final_mse_db:8.3f} dB")
+print(f"{'RTSNet INIT/FALSE H (no adapt)':<32} {average_initial_guess_mse_db:8.3f} dB")
+print(f"{'BiGRU (model-free)':<32} {avg_bigru_mse_db:8.3f} dB")
+print('-' * 52)
+print(f"EMKF improvement over initial:   {(average_initial_guess_mse_db - emkf_final_mse_db):8.3f} dB")
+print(f"Gap to perfect (TRUE H):         {(emkf_final_mse_db - average_true_H_mse_db):8.3f} dB")
+print(f"EMKalmanNet gain vs BiGRU:       {(avg_bigru_mse_db - emkf_final_mse_db):8.3f} dB")
+print('=' * 52)
 
 _N_seqs = cycles * args.N_T
 print(f"\n========== Latency Summary ==========")

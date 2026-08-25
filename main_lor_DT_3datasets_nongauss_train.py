@@ -71,7 +71,7 @@ print("Current Time =", strTime)
 #   'student_t'    : heavy tails, SAME covariance as Gaussian. nu=dof (smaller=heavier)
 #   'laplace'      : mild heavy tails, same covariance
 #   'exponential'  : skewed (KalmanNet-lineage), same covariance
-NOISE_TYPE = 'gaussian'
+NOISE_TYPE = 'exponential'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
@@ -109,7 +109,7 @@ LengthIsRandom = False
 ###################
 args = config.general_settings()
 args.N_E = 1000
-args.N_CV = 150
+args.N_CV = 100
 args.N_T = 100
 args.T = 30
 args.T_test = 30
@@ -127,7 +127,7 @@ torch.manual_seed(1)
 cycles = 5
 num_em_iters = 2
 # noise q and r  (variance knobs -- unchanged semantics)
-r2 = torch.tensor([0.001], device=device)  # [100, 10, 1, 0.1, 0.01]
+r2 = torch.tensor([1], device=device)  # [100, 10, 1, 0.1, 0.01]
 vdB = -20  # ratio v=q2/r2
 v = 10 ** (vdB / 10)
 q2 = torch.mul(v, r2)
@@ -146,11 +146,11 @@ print("=" * 80)
 
 # ---- distinct non-Gaussian save paths (nothing existing is touched) ----
 _base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/5datasets/30'
-destination_path_rtsnet_full         = f'{_base}/0001RTSNet_full.pt'
-destination_path_rtsnet_partial      = f'{_base}/0001RTSNet_partial.pt'
-destination_path_M_joint             = f'{_base}/0001M_step_net_joint.pt'
-destination_path_rtsnet_partial_joint = f'{_base}/0001RTSNet_partial_joint.pt'
-destination_path_bigru               = f'{_base}/0001bigru_smoother.pt'
+destination_path_rtsnet_full         = f'{_base}/RTSNet_full.pt'
+destination_path_rtsnet_partial      = f'{_base}/RTSNet_partial.pt'
+destination_path_M_joint             = f'{_base}/M_step_net_joint.pt'
+destination_path_rtsnet_partial_joint = f'{_base}/RTSNet_partial_joint.pt'
+destination_path_bigru               = f'{_base}/bigru_smoother.pt'
 
 # ---- WARM START ------------------------------------------------------------- #
 # Warm-start chain (each net starts from an already-stable net, not from scratch):
@@ -346,9 +346,9 @@ train_bigru_smoother(
     n=n, m=m,
     save_path=destination_path_bigru,
     device=device,
-    epochs=300, batch_size=32, lr=1e-3, hidden_size=128, num_layers=2,
+    epochs=300, batch_size=16, lr=1e-3, hidden_size=128, num_layers=2,
 )
-
+jcgcfgjgyjhg
 # ============================================================================ #
 # STEP 1a - TRUE RTSNet (per-sequence TRUE H, oracle).                          #
 # ============================================================================ #

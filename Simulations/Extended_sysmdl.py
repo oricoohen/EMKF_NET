@@ -255,23 +255,29 @@ class SystemModel:
         """Return one additive-noise vector of shape [dim] with covariance ~= cov.
 
         normalize=True  -> the white noise z is standardized to zero-mean,
-                           unit-variance, so Cov(L z) == cov exactly.
-        normalize=False -> z is used raw (no debiasing, no variance rescale);
-                           params are expected to give var ~1 already
-                           (e.g. exponential -> Exp(1): mean 1, var 1, biased).
+                           unit-variance, then colored by L = chol(cov) so
+                           Cov(L z) == cov exactly.
+        normalize=False -> z is used raw (no debiasing, no variance rescale) AND
+                           the L coloring is SKIPPED entirely -> the returned
+                           noise is just z, with variance Var(z) set purely by
+                           the law's params, INDEPENDENT of cov/r2 (e.g.
+                           exponential -> Exp(1): mean 1, var 1, biased).
         """
         dev = cov.device
         dt  = cov.dtype
-        # Default / unset -> plain Gaussian (already zero-mean unit-variance;
-        # normalize has no effect here).
+        # Default / unset -> plain Gaussian. With normalize=False we skip cov and
+        # return standard normal (var 1); with normalize=True we use full cov.
         if kind is None or kind == 'gaussian':
+            if not normalize:
+                return torch.randn(dim, device=dev, dtype=dt)
             mean = torch.zeros(dim, device=dev, dtype=dt)
             return MultivariateNormal(loc=mean, covariance_matrix=cov).rsample()
 
-        # For the non-Gaussian laws: draw white noise z then color it with
-        # L = chol(cov). When normalize=True, z is standardized first so
-        # Cov(L z) = cov; when False, z is raw (var ~1 via params, may be biased).
-        L = torch.linalg.cholesky(cov)
+        # For the non-Gaussian laws: draw white noise z. When normalize=True we
+        # standardize z and color it with L = chol(cov) so Cov(L z) = cov. When
+        # normalize=False we return z RAW with NO L coloring (see below), so its
+        # variance is Var(z) alone and does not scale with cov/r2.
+        L = torch.linalg.cholesky(cov) if normalize else None
 
         if kind == 'student_t':
             nu = float(params.get('nu', 3.0))
@@ -302,10 +308,16 @@ class SystemModel:
             z = Exponential(rate).sample()
             if normalize:
                 z = z - 1.0
+            else:
+                z = z - 0.5
         else:
             raise ValueError(f"unknown noise kind '{kind}'")
 
+        # normalize=False -> skip L: raw z, var = Var(z), independent of cov/r2.
+        if not normalize:
+            return z
         return (L @ z.unsqueeze(-1)).squeeze(-1)
+
 
     # --- helpers to switch F used by f (if desired) ---
 

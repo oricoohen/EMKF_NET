@@ -102,10 +102,10 @@ print(f"q2 = {q2.item()}, r2 = {r2.item()} (used by every algorithm)")
 # ============================================================
 # Model paths (T = 30 trained networks)
 # ============================================================
-path_rtsnet_partial        = 'RTSNet/lorenz_rotated_10/10datasets/RTSNet_partial.pt'
-path_rtsnet_partial_joint  = 'RTSNet/lorenz_rotated_10/10datasets/RTSNet_partial_joint.pt'
-path_M_joint               = 'RTSNet/lorenz_rotated_10/10datasets/M_step_net_joint.pt'
-bigru_path                 = 'RTSNet/lorenz_rotated_10/10datasets/benchmarks/bigru_smoother.pt'
+path_rtsnet_partial        = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial.pt'
+path_rtsnet_partial_joint  = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/RTSNet_partial_joint.pt'
+path_M_joint               = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/M_step_net_joint.pt'
+bigru_path                 = 'RTSNet/lorenz_gauss/lorenz_rotated_10/10datasets/old/bigru_smoother.pt'
 
 # ============================================================
 # Build the 5 rotated H matrices (F fixed)
@@ -312,14 +312,18 @@ _sync(); timings["emkalmanet"] = time.perf_counter() - _t_start
 # 7. bgru — BiGRU smoother
 # ------------------------------------------------------------
 print("\n=== [bgru] BiGRU smoother ===")
-_sync(); _t_start = time.perf_counter()
+# seq_by_seq=True: one sequence per forward, so the runtime is comparable with
+# the other algorithms (all of which loop sequence by sequence). return_time=True
+# measures the forward passes only -- the per-call torch.load of the checkpoint
+# is NOT counted as inference time.
+timings["bgru"] = 0.0
 for d in range(cycles):
-    _mse, _mse_db, x_bigru = test_bigru_smoother(
+    _mse, _mse_db, x_bigru, _t_d = test_bigru_smoother(
         test_input=all_inputs_by_H[d], test_target=all_targets_by_H[d],
-        load_path=bigru_path, device=DEVICE)
+        load_path=bigru_path, device=DEVICE, return_time=True)
     all_bgru.append(x_bigru.detach().clone())
+    timings["bgru"] += _t_d
     print(f"  dataset {d + 1}: {_mse_db:.3f} dB")
-_sync(); timings["bgru"] = time.perf_counter() - _t_start
 
 # ============================================================
 # MSE summary for every algorithm (vs. the true state), printed at the end
@@ -351,22 +355,30 @@ mse_algos = {
     "bgru":         all_bgru,
 }
 
-n_seqs = cycles * args.N_T   # total sequences processed by each algorithm
+# Each algorithm processes cycles*N_T segments of args.T_test steps each, so
+# dividing the total by n_seqs gives the cost of ONE args.T_test-step segment.
+n_seqs = cycles * args.N_T   # total segments processed by each algorithm
 
-print("\n" + "=" * 64)
-print(f"MSE / TIMING SUMMARY  (r2={r2_val}, {cycles} datasets, N_T={args.N_T})")
-print("=" * 64)
-print(f"{'algorithm':<14}{'MSE (linear)':>16}{'MSE (dB)':>12}{'ms/seq':>12}")
-print("-" * 64)
+print("\n" + "=" * 76)
+print(f"MSE / TIMING SUMMARY  (r2={r2_val}, {cycles} datasets, N_T={args.N_T}, T={args.T_test})")
+print("=" * 76)
+print(f"{'algorithm':<14}{'MSE (linear)':>16}{'MSE (dB)':>12}"
+      f"{'total (s)':>12}{f'ms/{args.T_test}steps':>14}")
+print("-" * 76)
 mse_lin_total = 0.0
 for name, store in mse_algos.items():
     lin = algo_mse_linear(store)
     mse_lin_total += lin
-    ms_per_seq = timings.get(name, float('nan')) / n_seqs * 1000.0
-    print(f"{name:<14}{lin:>16.6f}{10.0 * math.log10(lin + 1e-12):>12.3f}{ms_per_seq:>12.3f}")
-print("-" * 64)
+    tot = timings.get(name, float('nan'))
+    ms_per_seq = tot / n_seqs * 1000.0
+    print(f"{name:<14}{lin:>16.6f}{10.0 * math.log10(lin + 1e-12):>12.3f}"
+          f"{tot:>12.2f}{ms_per_seq:>14.3f}")
+print("-" * 76)
 print(f"{'SUM':<14}{mse_lin_total:>16.6f}{10.0 * math.log10(mse_lin_total + 1e-12):>12.3f}")
-print("=" * 64)
+print("=" * 76)
+print(f"note: ms/{args.T_test}steps = time to smooth ONE {args.T_test}-step sequence "
+      f"(total / {cycles}*{args.N_T}).")
+print("      every algorithm, bgru included, is timed sequence-by-sequence.")
 
 # ============================================================
 # Glue ONE sample's trajectory across datasets -> [dim, cycles*T]

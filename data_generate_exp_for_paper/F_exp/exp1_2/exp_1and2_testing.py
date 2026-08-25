@@ -70,9 +70,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-path_results_True = 'RTSNet/AI_M_step/exp_1/r_1/True_F/'  ###############################################################################################################################################
+path_results_True = '../../../RTSNet/AI_M_step/exp_1/r_1/True_F/'  ###############################################################################################################################################
 gauss = False
-path_results_False = 'RTSNet/AI_M_step/exp_1/r_1/False_F/'  ###############################################################################################################################################
+path_results_False = '../../../RTSNet/AI_M_step/exp_1/r_1/False_F/'  ###############################################################################################################################################
 
 
 ####################
@@ -97,7 +97,7 @@ cycles = 3
 
 # True model
 q2 = 0.01
-r2 = 1
+r2 = 0.001
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -216,7 +216,7 @@ for dataset_id in range(1, cycles+1):
 # train/cv data, then evaluated here on the same 3 test sets as AI-EMKF.
 print('\n=== Baseline: BiGRU smoother (black-box) ===')
 # BiGRU baseline saved by M_network_training_3datasets_CORRECTED_r1.py
-bigru_path = 'RTSNet/AI_M_step/exp_2/r_1/bigru_lin_3ds.pt'
+bigru_path = 'RTSNet/AI_M_step/exp_2/r_0001/new_bigru_lin_3ds.pt'
 bigru_mse_lin_sum = 0.0
 for dataset_id in range(cycles):
     print(f"\n--- Testing Dataset {dataset_id + 1} with BiGRU ---")
@@ -297,7 +297,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/AI_M_step/exp_1/r_10/'   # match the training save folder
+destination_folder = 'RTSNet/AI_M_step/exp_1/r_001/'   # match the training save folder
 destination_path_M = destination_folder + 'mnet_lin_3ds.pt'            # regular mnet (linear H)
 # joint (1 mnet + 1 RTSNet) checkpoints from joint_train_mnet_rtsnet_3_datasets
 destination_path_M_joint   = destination_folder + 'joint_mnet_1m1r_lin.pt'

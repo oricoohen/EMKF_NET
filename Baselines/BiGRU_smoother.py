@@ -1,3 +1,5 @@
+import time
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -145,12 +147,30 @@ def test_bigru_smoother(
     test_input,
     test_target,
     load_path,
-    device
+    device,
+    seq_by_seq=True,
+    return_time=False
 ):
     """
     test_input can be:
       - tensor [N, n, T]
       - or list of datasets, each [N, n, T]
+
+    seq_by_seq : DEFAULT True -- run ONE sequence per forward pass instead of
+        feeding the whole [N, n, T] batch at once. This is the default so that
+        EVERY script that evaluates the BiGRU measures it the same way, and on
+        the same footing as EMKF / ERTS / RTSNet, which all loop sequence by
+        sequence (see S_Test_ext_H, EMKF_H_analitic_f_nonlinear, NNTest,
+        test_H_mstep_net). The batched path amortizes one kernel-launch
+        sequence over all N sequences and therefore looks ~N x faster for
+        implementation reasons only. The estimates are mathematically identical
+        either way (a GRU forward is independent across the batch dimension);
+        only the wall-time changes. Pass seq_by_seq=False if you explicitly
+        want batched throughput.
+    return_time : if True, append the measured inference wall-time (seconds,
+        forward passes only -- torch.load and the MSE reduction are excluded)
+        to the returned tuple. Default False keeps the historical 3-tuple, so
+        existing callers are unaffected.
     """
 
     if isinstance(test_input, list):
@@ -163,8 +183,28 @@ def test_bigru_smoother(
     model = torch.load(load_path, weights_only=False).to(device)
     model.eval()
 
+    _is_cuda = torch.device(device).type == 'cuda'
+
+    def _sync():
+        if _is_cuda:
+            torch.cuda.synchronize()
+
     with torch.no_grad():
-        x_hat = model(test_input)
+        # Always warm up: the first forward pays cuDNN autotune / lazy CUDA
+        # init, which is the main reason repeated runs report different times.
+        model(test_input[:1])
+        _sync()
+        _t0 = time.perf_counter()
+
+        if seq_by_seq:
+            # one sequence per forward -> per-sequence latency
+            x_hat = torch.cat([model(test_input[i:i + 1])
+                               for i in range(test_input.shape[0])], dim=0)
+        else:
+            x_hat = model(test_input)
+
+        _sync()
+        elapsed = time.perf_counter() - _t0
 
         print("test_input shape =", test_input.shape)
         print("test_target shape =", test_target.shape)
@@ -187,6 +227,10 @@ def test_bigru_smoother(
         # print("x_hat min/max =", x_hat.min().item(), x_hat.max().item())
         # print("target min/max =", test_target.min().item(), test_target.max().item())
 
-    print(f"[BiGRU TEST] MSE = {mse_all.item():.6e}, dB = {10 * torch.log10(mse_all).item():.3f}")
+    print(f"[BiGRU TEST] MSE = {mse_all.item():.6e}, dB = {10 * torch.log10(mse_all).item():.3f}"
+          + (f", inference = {elapsed * 1e3:.2f} ms "
+             f"({'seq-by-seq' if seq_by_seq else 'batched'})" if return_time else ""))
 
+    if return_time:
+        return mse_all, mse_db, x_hat, elapsed
     return mse_all, mse_db, x_hat

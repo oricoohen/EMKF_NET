@@ -16,9 +16,12 @@ from torch.distributions import Exponential
 # # # For PyTorch
 torch.manual_seed(1)
 
+# Match the device of the imported params (m1_0, m2_0, Q_structure, R_structure are on cuda)
+device = m1_0.device
+
 
 args = config.general_settings()
-args.N_T = 50  # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 10  # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T_test = 30 # Length of the time series for test sequences.
 state = 1
@@ -42,10 +45,10 @@ R = r2 * R_structure
 #               [1.023, 1.9329]])
 
 F = torch.tensor([[0.83, 0.2],
-              [0.2, 0.83]])
-F_rot = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]])  # State transition matrix
+              [0.2, 0.83]], device=device)
+F_rot = torch.tensor([[0.63, 0.0021], [0.0021, 1.0299]], device=device)  # State transition matrix
 F_initial_guest_1 = F
-H = torch.tensor([[1., 1.], [0.25, 1.]])
+H = torch.tensor([[1., 1.], [0.25, 1.]], device=device)
 
 
 SystemModel.F_gen = False
@@ -76,6 +79,9 @@ all_targets_by_F = []
 all_F_matrices = []
 
 x0_list = None
+# Fixed 2x2 observation matrix per sequence (one H per test sequence, all identical).
+# Passed as H_gen so DataGen uses this instead of the random 3x3 Lorenz H generator.
+H_test_list = [H.clone() for _ in range(args.N_T)]
 # Generate 5 datasets
 for dataset_id in range(1, cycle+1):
     print(f"\n=== Generating Dataset {dataset_id} ===")
@@ -99,9 +105,10 @@ for dataset_id in range(1, cycle+1):
 
     DataGen(args, sys_model, dataFolderName + dataFileName, dataFolderName + dataFileName_F,
         delta=1, randomInit_train=False, randomInit_cv=False, randomInit_test=False,
-        randomLength=False, Test=True, F_gen=F_matrices_for_datasets[dataset_id - 1],x0_list=x0_list)
+        randomLength=False, Test=True, F_gen=F_matrices_for_datasets[dataset_id - 1],
+        H_gen=H_test_list, x0_list=x0_list)
     # Load the generated data
-    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName, weights_only=True, map_location="cpu")
+    [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(dataFolderName + dataFileName, weights_only=True, map_location=device)
     [F_train_mat, F_val_mat, F_test_mat_list] = torch.load(dataFolderName + dataFileName_F)
 
     # test_target: [N_T, m, T]
@@ -123,7 +130,7 @@ for dataset_id in range(1, cycle+1):
 # P_smooth has shape [N_T, n, n, T] and is the covariance we want to evaluate
 # test_target has shape [N_T, n, T] and is our "x_true"
 
-F_initial_gues_1 = torch.tensor([[0.83, 0.2],[0.2, 0.83]])
+F_initial_gues_1 = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=device)
 # F_initial_gues_1 = torch.tensor([[0.63, 0.0021],[0.0021, 1.0299]])#delete
 F_current_estimate = [F_initial_gues_1 .clone() for _ in range(args.N_T)]
 F_initial_estimate = [F_initial_gues_1 .clone() for _ in range(args.N_T)]
@@ -159,10 +166,12 @@ for dataset_id in range(cycle):
 
     if dataset_id == 0:
         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test(sys_model, test_input, test_target,
-                                                        F=true_F_for_this_dataset,generate_f=False)
+                                                        F=true_F_for_this_dataset,generate_f=False,
+                                                        H=H_test_list, generate_h=False)
     else:
         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test(sys_model, test_input, test_target,
-                                        F=true_F_for_this_dataset,generate_f=False, init_x_list=x0_last, init_P_list=p0_last)
+                                        F=true_F_for_this_dataset,generate_f=False,
+                                        H=H_test_list, generate_h=False, init_x_list=x0_last, init_P_list=p0_last)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
     p0_last = [p_list[k, :, :, -1].clone() for k in range(args.N_T)]
@@ -188,10 +197,12 @@ for dataset_id in range(cycle):
 
     if dataset_id == 0:
         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test(sys_model, test_input, test_target,
-                                                        F=F_initial_estimate,generate_f=False)
+                                                        F=F_initial_estimate,generate_f=False,
+                                                        H=H_test_list, generate_h=False)
     else:
         [_mse_arr, _mse_avg, _mse_db, x_list, p_list, _] = S_Test(sys_model, test_input, test_target,
-                                        F=F_initial_estimate,generate_f=False, init_x_list=x0_last, init_P_list=p0_last)
+                                        F=F_initial_estimate,generate_f=False,
+                                        H=H_test_list, generate_h=False, init_x_list=x0_last, init_P_list=p0_last)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     x0_last = [x_list[k, :, -1].unsqueeze(-1).clone() for k in range(args.N_T)]
     p0_last = [p_list[k, :, :, -1].clone()             for k in range(args.N_T)]
@@ -227,13 +238,14 @@ for dataset_id in range(cycle):
 
     if dataset_id == 0:
         F_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last = EMKF_F_analitic(sys_model, F_current_estimate,
-            H, Q, R, test_input, m1_0, m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025)
+            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025)
     else:
         F_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last = EMKF_F_analitic(sys_model, F_current_estimate,
-            H, Q, R, test_input, m1_0, m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025,
+            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025,
                                                                                 init_x_list=x0_last, init_P_list=p0_last)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
-    x0_last = [x_last[k].clone() for k in range(args.N_T)]
+    # keep initials 1-D: compute_A1/A2 require [m]; the KF/S_Test squeeze internally so [m] is fine
+    x0_last = [x_last[k].reshape(-1).clone() for k in range(args.N_T)]
     p0_last = [p_last[k].clone() for k in range(args.N_T)]
     #F_matrices has N_T(amount of seq) list inside where each list has max it + initial guess F matrices one for each T
     # Update F estimate for next iteration (use the result from EMKF)

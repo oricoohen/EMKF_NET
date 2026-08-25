@@ -64,7 +64,7 @@ print("Current Time =", strTime)
 # ============================================================================ #
 # Pick ONE noise law. Params from NOISE_PRESETS below. MUST match the training script.
 #   'gaussian' | 'contaminated' | 'student_t' | 'laplace' | 'exponential'
-NOISE_TYPE = 'laplace'
+NOISE_TYPE = 'gaussian'
 NOISE_PRESETS = {
     'gaussian':     {},
     'contaminated': {'eps': 0.05, 'kappa': 3.0},   # ~1.4x var (easy); 0.05/5->2.2x; 0.1/10->11x (harsh)
@@ -84,7 +84,7 @@ args.T_test = 30
 
 GENERATE_DATA = True
 num_iters = 2       # EM iterations (EMKalmanNet and classical EMKF)
-cycles = 5          # test over more H drift than trained (generalization)
+cycles = 5         # test over more H drift than trained (generalization)
 max_iter = 3
 r2 = torch.tensor([1], device=device)
 vdB = -20
@@ -95,7 +95,7 @@ R = r2[0] * R_structure
 print('q2 is:', q2, ' r2 is:', r2)
 
 # ---- load paths (match the nongauss training script) ----
-_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/3datasets/30'
+_base = f'RTSNet/lorenz_nongauss_{NOISE_TYPE}/5datasets/30'
 destination_path_rtsnet_full          = f'{_base}/RTSNet_full.pt'
 destination_path_rtsnet_partial       = f'{_base}/RTSNet_partial.pt'
 destination_path_M_joint              = f'{_base}/M_step_net_joint.pt'
@@ -110,7 +110,7 @@ H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(args.N_T)]
 H_matrices_for_datasets_d = []
 for i in range(cycles + 1):
     H_matrices_for_datasets_d.append([hh.clone() for hh in H_test_list])
-    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
+    H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.3, many=True, randomit=False)
 H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
 all_inputs_by_H, all_targets_by_H, all_H_matrices = [], [], []
@@ -161,17 +161,17 @@ for dataset_id in range(1, cycles + 1):
 # ---- keep the H-lists sized to the ACTUAL loaded test set --------------------
 # (guards the common case GENERATE_DATA=False + args.N_T changed: the on-disk
 #  data may have a different number of sequences than args.N_T.)
-N_actual = all_inputs_by_H[0].shape[0]
-if N_actual != len(initial_guess_H):
-    print(f"[fix] Loaded test set has {N_actual} sequences but H-lists were built for "
-          f"{len(initial_guess_H)} (args.N_T={args.N_T}). Resizing H-lists to {N_actual}.")
-    initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(N_actual)]
-    H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(N_actual)]
-    H_matrices_for_datasets_d = []
-    for i in range(cycles + 1):
-        H_matrices_for_datasets_d.append([hh.clone() for hh in H_test_list])
-        H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.2, many=True, randomit=False)
-    H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
+# N_actual = all_inputs_by_H[0].shape[0]
+# if N_actual != len(initial_guess_H):
+#     print(f"[fix] Loaded test set has {N_actual} sequences but H-lists were built for "
+#           f"{len(initial_guess_H)} (args.N_T={args.N_T}). Resizing H-lists to {N_actual}.")
+#     initial_guess_H = [H_Rotate.clone().to(DEVICE) for _ in range(N_actual)]
+#     H_test_list = [H_Rotate.clone().to(DEVICE) for _ in range(N_actual)]
+#     H_matrices_for_datasets_d = []
+#     for i in range(cycles + 1):
+#         H_matrices_for_datasets_d.append([hh.clone() for hh in H_test_list])
+#         H_test_list = rotate_H(H_matrices_for_datasets_d[i], theta=0.25, many=True, randomit=False)
+#     H_matrices_for_datasets = H_matrices_for_datasets_d[1:]
 
 sys_model = SystemModel(f, Q, hRotate, R, args.T, args.T_test, m, n, H_Rotate)
 sys_model.InitSequence(m1x_0, m2x_0)
@@ -192,6 +192,7 @@ for d in range(cycles):
     print(f"Dataset {d + 1} - BiGRU MSE: {mse_bigru_db:.3f} dB")
 t_bigru = time.perf_counter() - t0
 bigru_mse_db = 10 * torch.log10(torch.tensor(bigru_mse_lin_sum / cycles, device=DEVICE))
+print(bigru_mse_db)
 
 # ############################################################################ #
 # ANALYTIC BASELINES (evaluated BEFORE the neural methods):                     #
@@ -251,6 +252,7 @@ print("\n=== Classical analytic EMKF (Gaussian-assuming) ===")
 cls_mse_lin_sum = 0.0
 all_emkf_cls_x = []
 x0_cls_last = None
+P0_cls_last = None
 current_H_cls = None
 t0 = time.perf_counter()
 for d in range(cycles):
@@ -262,9 +264,10 @@ for d in range(cycles):
     if d == 0:
         init_x, init_P = None, None
     else:
-        P0 = sys_model_cls.m2x_0.clone()          # [m,m] prior covariance
+        # carry the previous dataset's final posterior covariance P_T as this
+        # dataset's prior P_0 (instead of resetting to the fixed prior m2x_0)
         init_x = x0_cls_last
-        init_P = [P0.clone() for _ in range(len(x0_cls_last))]
+        init_P = P0_cls_last
 
     (H_est_seq, likelihoods, iters_list, final_mean_mse,
      last_x_list, last_P_list, full_x_list) = EMKF_H_analitic_f_nonlinear(
@@ -274,6 +277,7 @@ for d in range(cycles):
     cls_mse_lin_sum += float(final_mean_mse)
     current_H_cls = [H_est_seq[j][-1].clone() for j in range(len(H_est_seq))]
     x0_cls_last = [last_x_list[j].clone() for j in range(len(last_x_list))]
+    P0_cls_last = [last_P_list[j].clone() for j in range(len(last_P_list))]
     all_emkf_cls_x.append(torch.stack(full_x_list, dim=0).detach().clone())  # [N,m,T]
     print(f"Dataset {d + 1} - classical EMKF MSE: "
           f"{10 * torch.log10(torch.tensor(float(final_mean_mse)) + 1e-12):.3f} dB")
