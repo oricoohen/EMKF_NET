@@ -1,4 +1,30 @@
-####the old one without the f
+"""
+Test script for the linear-h / varying-F paper experiment (exp 1 & 2).
+
+Evaluates, on 3 sequential test datasets whose true F drifts by a FIXED 0.2 rad
+per dataset (F and x carried over between datasets), five methods:
+
+  1) TRUE F          -- RTSNet given the true F (upper bound)
+  2) INITIAL GUESS F -- RTSNet stuck with the nominal F (lower bound, no EMKF)
+  3) BiGRU           -- black-box smoother baseline, no model knowledge
+  4) AI-EMKF regular -- frozen RTSNet + learned M-step net
+  5) AI-EMKF joint   -- jointly trained RTSNet + M-step net
+
+All learned models come from exp_1and2_training.py; EXP_DIR below must match the
+EXP_DIR in that script.
+
+Run from anywhere:  python exp_1and2_testing.py
+"""
+import os
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path and anchor every path to it, so this script runs
+# correctly from its own folder as well as from the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -52,9 +78,8 @@ elif MNET_VERSION == 'H':
 
 from Pipelines.Pipeline_ERTS import Pipeline_ERTS as Pipeline
 
-import shutil
 print("Pipeline Start")
-import os
+
 # === ADD: global device/dtype ===
 DEVICE = torch.device("cuda")
 DTYPE  = torch.float32
