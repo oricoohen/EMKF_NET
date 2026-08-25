@@ -1,7 +1,20 @@
 """
-Corrected version of M_network_training_for_nirr.py
-This properly sets up data for train_mstep_net_3_datasets function
+Training script for the non-linear-h / varying-F paper experiment (exp 3).
+
+Sets up 3 sequential datasets and trains everything exp3_test.py needs.
+
+Run from anywhere:  python exp3_train.py
 """
+import os
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path and anchor every path to it, so this script runs
+# correctly from its own folder as well as from the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 import torch
 import torch.nn as nn
 from datetime import datetime
@@ -17,7 +30,11 @@ from Simulations.utils import DataLoader, DataGen
 import Simulations.config as config
 
 
-from RTSNet.RTSNet_nn import RTSNetNN
+# F-embedding RTSNet, matching exp3_test.py. The plain RTSNet.RTSNet_nn.RTSNetNN
+# is the FC9 / H-embedding architecture, which reads self.H and crashes here.
+from RTSNet.RTSNet_nn_with_F import RTSNetNN
+import RTSNet.RTSNet_nn as _rts_nn_mod
+_rts_nn_mod.RTSNetNN = RTSNetNN
 
 
 # Batched pipeline (fast): adds train_F_mstep_net_3_datasets_joint_batched -- the
@@ -78,11 +95,22 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-# Pre-trained RTSNet checkpoints for THIS experiment (exp_3, r2=1). These exist in
-# the repo; the old '../../../.../exp_2/r_001/...' paths were stale (wrong exp/r and
-# three dirs above the project root -> FileNotFoundError on warm-start load).
-path_results_True = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/True_F/'
-path_results_False = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/False_F/'
+##############################################################################
+### Paths -- all anchored to REPO_ROOT, so the CWD does not matter.
+##############################################################################
+MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'AI_M_step'
+# NOTE: 'r_0001' selects the SNR bucket. Sweep it together with r2 below --
+#       r2 = 10 -> 'r_10',  1 -> 'r_1',  0.1 -> 'r_01',  0.01 -> 'r_001',  0.001 -> 'r_0001'.
+#       Trainer and test script must use the SAME bucket.
+EXP_DIR = MODELS_ROOT / 'exp_3' / 'r_0001'
+
+os.makedirs(EXP_DIR / 'True_F', exist_ok=True)
+os.makedirs(EXP_DIR / 'False_F', exist_ok=True)
+path_results_True_rts  = str(EXP_DIR / 'True_F'  / 'best-rts_true.pt')
+path_results_wrong_rts = str(EXP_DIR / 'False_F' / 'best-rts_false.pt')
+
+DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp_3_datasets'
+os.makedirs(DATA_DIR, exist_ok=True)
 
 ####################
 ### Design Model ###
@@ -181,7 +209,7 @@ for dataset_id in range(cycles):
     print(F_current)
 
     # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp_3_datasets/'
+    dataFolderName = str(DATA_DIR) + os.sep
     dataFileName = f'dataset_{dataset_id}_data.pt'
     dataFileName_F = f'dataset_{dataset_id}_F.pt'
 
@@ -253,7 +281,7 @@ assert len(all_train_inputs) == 3, "Should have 3 datasets"
 assert all_train_inputs[0].shape[0] == args.N_E, f"Train should have {args.N_E} sequences"
 assert all_cv_inputs[0].shape[0] == args.N_CV, f"CV should have {args.N_CV} sequences"
 assert all_test_inputs[0].shape[0] == args.N_T, f"Test should have {args.N_T} sequences"
-print("✓ Data structure verified!")
+print("[OK] Data structure verified!")
 
 #########################################################################################################
 # TRAIN BiGRU SMOOTHER BASELINE ON THE SAME 3 DATASETS (FIRST MODEL TO TRAIN)
@@ -266,7 +294,8 @@ print("="*80)
 # y:[N,n,T] -> state estimate x_hat:[N,m,T] directly, with no model knowledge.
 # Trained on exactly the same pooled 3-dataset train/cv data as the M-step net,
 # so exp3_test.py can compare AI-EMKF against it.
-destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
+destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
+os.makedirs(destination_folder, exist_ok=True)
 bigru_save_path = destination_folder + 'new_bigru_lin_3ds.pt'
 n_obs = all_train_inputs[0].shape[1]     # observation dim (n)
 m_state = all_train_targets[0].shape[1]  # state dim (m)
@@ -308,12 +337,11 @@ sys_model.F_train_TRUE = all_F_matrices_train
 sys_model.F_valid_TRUE = all_F_matrices_cv
 sys_model.F_test_TRUE = all_F_matrices_test
 
-print("✓ System model configured with 3-dataset F structure")
+print("[OK] System model configured with 3-dataset F structure")
 
-# Paths for models
-path_results_True_rts = path_results_True + 'best-rts_true.pt'
-path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
-destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
+# Model output paths (path_results_*_rts are defined in the path block at the top)
+destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
+os.makedirs(destination_folder, exist_ok=True)
 destination_path_M = destination_folder + 'new_M_net_trained_3_datasets_no_mult.pt'
 destination_path_M_laod = destination_folder + 'final_net.pt'
 # JOINT (batched) outputs -- ONE F-M-net + ONE RTSNet trained together. Distinct
@@ -333,7 +361,7 @@ RTSNet_Pipeline.setssModel(sys_model)
 RTSNet_Pipeline.setModel(RTSNet_model, args)
 RTSNet_Pipeline.setTrainingParams(args)
 
-print("✓ Pipeline configured")
+print("[OK] Pipeline configured")
 
 #########################################################################################################
 # TRAIN M-STEP NETWORK ON 3 DATASETS

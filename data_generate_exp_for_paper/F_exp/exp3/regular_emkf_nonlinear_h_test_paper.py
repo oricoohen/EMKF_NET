@@ -1,13 +1,66 @@
+"""
+Analytic (non-learned) baselines for the non-linear-h experiment (exp 3).
+
+Run from anywhere:  python regular_emkf_nonlinear_h_test_paper.py
+"""
+import os
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path and anchor every path to it, so this script runs
+# correctly from its own folder as well as from the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'AI_M_step'
+# NOTE: 'r_0001' selects the SNR bucket -- sweep with r2 below.
+#       r2 = 10 -> 'r_10', 1 -> 'r_1', 0.1 -> 'r_01', 0.01 -> 'r_001', 0.001 -> 'r_0001'.
+#       Must match EXP_DIR in exp3_train.py.
+EXP_DIR = MODELS_ROOT / 'exp_3' / 'r_0001'
+
+# exp3 keeps its OWN data folder; it used to share exp1_1/regular with exp1_2
+# and the two scripts overwrote each other's cached test data.
+DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp_3_datasets'
+os.makedirs(DATA_DIR, exist_ok=True)
+
 import torch
 from datetime import datetime
 
-from Smoothers.Extended_RTS_Smoother_test import  S_Test_ext
+# S_Test_ext was refactored to (args, SysModel, ...) and no longer accepts a
+# per-sequence F list or x/P carryover; the original function survives as
+# S_Test_ext_old, which is what every call below is written against.
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_old as S_Test_ext
 
 
 from Simulations.Extended_sysmdl import SystemModel, rotate_F, make_rotated_h_nonlinear
 from Simulations.utils import DataGen
+
+# Keep the non-linear h during data generation. GenerateBatch calls
+# SystemModel.update_h(H) per group, which by default rebinds self.h to a LINEAR
+# H@x (and a 3x3 H) and would corrupt the range-bearing observations. Patch it to
+# only record H/H_T and leave self.h = h_nonlinear intact -- same fix exp3_train.py
+# and exp3_test.py already apply.
+def _update_h_keep_nonlinear(self, H):
+    self.H = H
+    self.H_T = H.T
+SystemModel.update_h = _update_h_keep_nonlinear
+
+# EKF/RTS call getJacobian from Lorenz_Atractor.parameters, which hardcodes
+# view(-1, m=3) for the 3-D Lorenz state. This experiment is 2-D, so swap in a
+# dimension-agnostic version (same patch exp3_train.py applies to Pipeline_ERTS).
+import Smoothers.EKF as _ekf_mod
+import Smoothers.Extended_RTS_Smoother as _erts_mod
+def _getJacobian_nd(x, g):
+    y = x.reshape(-1)
+    J = torch.autograd.functional.jacobian(g, y)
+    return J.reshape(-1, y.shape[0])
+_ekf_mod.getJacobian = _getJacobian_nd
+_erts_mod.getJacobian = _getJacobian_nd
 import Simulations.config as config
-from Simulations.Lorenz_Atractor.parameters import m1x_0, m2x_0, m, n, \
+# Use parameters_OLD, same as exp3_train.py / exp3_test.py: the newer parameters.py
+# has no F / make_f (it is the 3-D spherical-h model), so this import used to fail.
+from Simulations.Lorenz_Atractor.parameters_OLD import m1x_0, m2x_0, m, n, \
         F, make_f, h_nonlinear, Q_structure, R_structure
 
 from emkf.main_emkf_func import E_EMKF_F_analitic
@@ -30,8 +83,10 @@ Q  = q2 * Q_structure
 R  = r2 * R_structure
 
 # Base F guess (2x2). We'll build per-seq lists from this.
+# Match the device of the imported params (m1x_0 / Q_structure are on cuda) --
+# without this F0 lands on CPU and f_linear_1d dies on a cpu/cuda mismatch.
 F0 = torch.tensor([[0.83, 0.20],
-                   [0.20, 0.83]], dtype=Q.dtype)
+                   [0.20, 0.83]], dtype=Q.dtype, device=Q.device)
 
 # ---------------------
 # Build per-dataset F lists by rotating per sequence
@@ -51,7 +106,7 @@ F_matrices_for_datasets = F_matrices_for_datasets_d[1:]  # length == cycle
 # ---------------------
 # Generate data per dataset
 # ---------------------
-dataFolderName_base = 'Simulations/Linear_canonical/paper/exp1_1/regular/'  # reuse your path
+dataFolderName_base = str(DATA_DIR) + os.sep
 all_inputs_by_F  = []
 all_targets_by_F = []
 all_F_matrices   = []
@@ -80,9 +135,9 @@ for dataset_id in range(1, cycle + 1):
 
     # Load
     [train_input, train_target, cv_input, cv_target, test_input, test_target] = torch.load(
-        dataFolderName_base + dataFileName, weights_only=True, map_location="cpu")
+        dataFolderName_base + dataFileName, weights_only=True, map_location=Q.device)
     [F_train_mat, F_val_mat, F_test_mat_list] = torch.load(
-        dataFolderName_base + dataFileName_F, weights_only=True, map_location="cpu")
+        dataFolderName_base + dataFileName_F, weights_only=True, map_location=Q.device)
 
     # Prepare initials for *next* dataset from ground-truth last state (same as your linear exp)
     x_last = test_target[:, :, -1].clone()  # [N_T, m]

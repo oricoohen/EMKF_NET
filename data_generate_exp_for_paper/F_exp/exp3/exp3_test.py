@@ -1,4 +1,32 @@
-####the old one without the f
+"""
+Test script for the non-linear-h / varying-F paper experiment (exp 3).
+
+Loads the models trained by exp3_train.py (same EXP_DIR bucket) and compares
+them against the TRUE-F / nominal-F / BiGRU baselines.
+
+Run from anywhere:  python exp3_test.py
+"""
+import os
+import sys
+from pathlib import Path
+
+# Put the repo root on sys.path and anchor every path to it, so this script runs
+# correctly from its own folder as well as from the repo root.
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'AI_M_step'
+# NOTE: 'r_0001' selects the SNR bucket -- sweep with r2 below.
+#       r2 = 10 -> 'r_10', 1 -> 'r_1', 0.1 -> 'r_01', 0.01 -> 'r_001', 0.001 -> 'r_0001'.
+#       Must match EXP_DIR in exp3_train.py.
+EXP_DIR = MODELS_ROOT / 'exp_3' / 'r_0001'
+
+# exp3 keeps its OWN data folder; it used to share exp1_1/regular with exp1_2
+# and the two scripts overwrote each other's cached test data.
+DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp_3_datasets'
+os.makedirs(DATA_DIR, exist_ok=True)
+
 import time
 import torch
 import torch.nn as nn
@@ -72,10 +100,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-# Fit to exp3_train.py: r_1 experiment, real (non-stale) paths.
-path_results_True = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/True_F/'
-gauss = False
-path_results_False = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_1/False_F/'
+# RTSNets trained by exp3_train.py, in the SAME EXP_DIR bucket.
+path_results_True  = str(EXP_DIR / 'True_F')  + os.sep
+path_results_False = str(EXP_DIR / 'False_F') + os.sep
 
 
 ####################
@@ -161,7 +188,7 @@ for dataset_id in range(1, cycles+1):
     sys_model.InitSequence(m1_0, m2_0)
 
     # Create folder and file names
-    dataFolderName = f'Simulations/Linear_canonical/paper/exp1_1/regular/'
+    dataFolderName = str(DATA_DIR) + os.sep
     dataFileName = f'snr_0{args.T_test}_dataset_{dataset_id}.pt'
     dataFileName_F = f'snr_0_F_dataset_{dataset_id}.pt'
 
@@ -226,7 +253,7 @@ print('\n=== Starting AI EMKF Experiment with Pre-trained RTSNet ===')
 # Trained by exp3_train.py on the same pooled 3-dataset train/cv data, then
 # evaluated here on the same 3 test sets as AI-EMKF.
 print('\n=== Baseline: BiGRU smoother (black-box) ===')
-bigru_path = '../../../RTSNet/synthetic/AI_M_step/exp_3/r_0001/fin/new_bigru_lin_3ds.pt'
+bigru_path = str(EXP_DIR / 'EMKF' / 'False' / 'new_bigru_lin_3ds.pt')  # written by exp3_train.py
 # bigru_path = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/bigru_smoother_3ds.pt'
 bigru_mse_lin_sum = 0.0
 # Timing: run BiGRU SEQUENCE BY SEQUENCE (seq_by_seq=True) so its runtime is
@@ -305,7 +332,7 @@ average_true_F_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-destination_folder = 'RTSNet/AI_M_step/exp_3/r_0001/EMKF/False/'
+destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
 # Jointly-trained EMKalmanNet pair from exp3_train.py (train_F_..._joint_batched):
 destination_path_M = destination_folder + 'new_joint_mnet_3ds_batched.pt'          # F-M-net
 destination_path_RTS_joint = destination_folder + 'new_joint_rtsnet_3ds_batched.pt'  # RTSNet
