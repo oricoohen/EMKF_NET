@@ -33,21 +33,21 @@ c_sound = 1.0   # speed of sound (normalized)
 # ── Microphone positions ──────────────────────────────────────────────────────
 # mic_positions[0] is the reference microphone (used as TDOA baseline).
 mic_positions = torch.tensor(
-    [[0.0, 0.0], [10.0, 0.0], [-10.0, 0.0]],
+    [[0.0, -10.0], [10.0, -10.0], [-10.0, -10.0]],
     dtype=torch.float32, device=device,
 )  # [M_mics, 2]
 
 # ── Trajectory validity bounds ────────────────────────────────────────────────
 USE_BOUNDARIES = True           # True: enforce original bounds  False: unbounded (huge limits, for experiments)
 
-if USE_BOUNDARIES:
-    PX_MIN, PX_MAX =  -150.0,   150.0 #9
-    PY_MIN, PY_MAX =   1,  150.0 #   1, 15
-    V_MAX          =   3.5
 # if USE_BOUNDARIES:
-#     PX_MIN, PX_MAX =  -9.0,   9.0 #9
-#     PY_MIN, PY_MAX =   1,  15.0 #   1, 15
+#     PX_MIN, PX_MAX =  -150.0,   150.0 #9
+#     PY_MIN, PY_MAX =   1,  150.0 #   1, 15
 #     V_MAX          =   3.5
+if USE_BOUNDARIES:
+    PX_MIN, PX_MAX =  -10.0,   10.0 #9
+    PY_MIN, PY_MAX =   -9,  10.0 #   1, 15
+    V_MAX          =   3.5
 else:
     PX_MIN, PX_MAX = -1000.0, 1000.0
     PY_MIN, PY_MAX = -1000.0, 1000.0
@@ -68,10 +68,10 @@ R  = r2 * R_structure
 # ── Initial condition (fixed and known for every sequence) ────────────────────
 # p_y starts at the centre of [PY_MIN, PY_MAX] = 3.5 so noise has equal margin
 # in both directions before hitting either bound.
-v0    = 0.75
-m1x_0 = torch.tensor([[15], [15], [v0], [v0]],####i 0.5.4.0.3.0.3
-# v0    = 0.3
-# m1x_0 = torch.tensor([[0.5], [4], [v0], [v0]],####i 0.5.4.0.3.0.3
+# v0    = 0.75
+# m1x_0 = torch.tensor([[15], [15], [v0], [v0]],####i 0.5.4.0.3.0.3
+v0    = 0.3
+m1x_0 = torch.tensor([[0.], [0], [v0], [v0]],####i 0.5.4.0.3.0.3
                       dtype=torch.float32, device=device)  # [4, 1]
 m2x_0 = 0.01 * torch.eye(m, dtype=torch.float32, device=device)  # [4, 4]
 
@@ -113,9 +113,20 @@ def f(x):
 def h(x: torch.Tensor) -> torch.Tensor:
     """
     Nonlinear TDOA observations relative to mic[0] (reference).
-    x: [4]    ->  returns [n_obs]       (1-D; matches Lorenz h, used by RTSNet)
-    x: [4, 1] ->  returns [n_obs, 1]    (column; used by SystemModel.GenerateSequence)
+    x: [4]       ->  returns [n_obs]        (1-D; matches Lorenz h, used by RTSNet)
+    x: [4, 1]    ->  returns [n_obs, 1]     (column; used by SystemModel.GenerateSequence)
+    x: [B, 4, 1] ->  returns [B, n_obs, 1]  (batched; used by the vectorized RTSNet path)
     """
+    # Batched path — keyed on RANK 3 (unambiguous vs the [m,1] column case).
+    if x.dim() == 3:
+        pos = x[:, :2, 0]                                                  # [B, 2]
+        d_ref = torch.norm(pos - mic_positions[0], p=2, dim=-1)            # [B]
+        tdoas = [
+            (torch.norm(pos - mic_positions[i], p=2, dim=-1) - d_ref) / c_sound
+            for i in range(1, M_mics)
+        ]
+        return torch.stack(tdoas, dim=-1).unsqueeze(-1)                    # [B, n_obs, 1]
+
     col_input = x.dim() >= 2
     pos   = x.reshape(-1)[:2]
     d_ref = torch.norm(pos - mic_positions[0], p=2)
@@ -134,7 +145,22 @@ def h_jacobian(x: torch.Tensor) -> torch.Tensor:
 
     ∂TDOA_i/∂p = (p - m_i)/d_i − (p - m_ref)/d_ref  (divided by c_sound)
     Velocity components (columns 2, 3) are always zero.
+
+    x: [B, m, 1] -> returns [B, n_obs, m]  (batched; rank-3, unambiguous).
     """
+    # Batched path — rank-3 input.
+    if x.dim() == 3:
+        pos = x[:, :2, 0]                                                       # [B, 2]
+        d_ref    = torch.norm(pos - mic_positions[0], p=2, dim=-1, keepdim=True)  # [B, 1]
+        unit_ref = (pos - mic_positions[0]) / (d_ref + 1e-8)                    # [B, 2]
+        rows = []
+        for i in range(1, M_mics):
+            d_i    = torch.norm(pos - mic_positions[i], p=2, dim=-1, keepdim=True)  # [B, 1]
+            unit_i = (pos - mic_positions[i]) / (d_i + 1e-8)                    # [B, 2]
+            grad_pos = (unit_i - unit_ref) / c_sound                           # [B, 2]
+            rows.append(torch.cat([grad_pos, torch.zeros_like(grad_pos)], dim=-1))  # [B, 4]
+        return torch.stack(rows, dim=1)                                        # [B, n_obs, m]
+
     pos      = x.reshape(-1)[:2]                                  # [2]
     d_ref    = torch.norm(pos - mic_positions[0], p=2)
     unit_ref = (pos - mic_positions[0]) / (d_ref + 1e-8)          # [2]

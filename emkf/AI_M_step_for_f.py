@@ -19,11 +19,13 @@ class DeltaF_MStepNet(nn.Module):
     Output:
       - ΔF:  [B, m, m]
     """
-    def __init__(self, m, n, d_hidden=256, dF_scale=0.3):###oti changed it from 0.1
+    def __init__(self, m, n, d_hidden=256, dF_scale=0.1, use_big_mstep_net=False):###0.1 (was 0.3): bound ΔF near the true correction range to prevent expansive-F blow-up
         super().__init__()
         self.m = m
         self.n = n
         self.dF_scale = dF_scale
+        self.use_big_mstep_net = use_big_mstep_net
+        self.d_hidden = d_hidden
         self.d_z = 5 * (m * m) + (n * n)
         self.block_dims = [
             m * m,  # A1
@@ -48,12 +50,36 @@ class DeltaF_MStepNet(nn.Module):
         # ============================================================
         # self.ln = nn.LayerNorm(self.d_z)
 
-        self.mlp = nn.Sequential(
-            nn.Linear(self.d_z, d_hidden),
-            nn.GELU(),
-            nn.Linear(d_hidden, d_hidden),
-            nn.GELU(),
-            nn.Linear(d_hidden, m * m))
+        if use_big_mstep_net:
+            self.input_net = nn.Sequential(
+                nn.Linear(self.d_z, d_hidden),
+                nn.GELU(),
+                nn.LayerNorm(d_hidden),
+            )
+            self.res_blocks = nn.ModuleList([
+                nn.Sequential(
+                    nn.Linear(d_hidden, d_hidden),
+                    nn.GELU(),
+                    nn.LayerNorm(d_hidden),
+                    nn.Linear(d_hidden, d_hidden),
+                    nn.GELU(),
+                )
+                for _ in range(3)
+            ])
+            self.output_net = nn.Sequential(
+                nn.LayerNorm(d_hidden),
+                nn.Linear(d_hidden, d_hidden),
+                nn.GELU(),
+                nn.Linear(d_hidden, m * m),
+            )
+        else:
+            # Base architecture: keep this identical to the current network.
+            self.mlp = nn.Sequential(
+                nn.Linear(self.d_z, d_hidden),
+                nn.GELU(),
+                nn.Linear(d_hidden, d_hidden),
+                nn.GELU(),
+                nn.Linear(d_hidden, m * m))
 
     def _norm_block(self, block, eps=1e-6):
         # block: [B, D_block]
@@ -82,7 +108,13 @@ class DeltaF_MStepNet(nn.Module):
                 start = end
             z = torch.cat(blocks, dim=1)
 
-            raw = self.mlp(z)
+            if hasattr(self, "input_net"):
+                hidden = self.input_net(z)
+                for block in self.res_blocks:
+                    hidden = hidden + 0.5 * block(hidden)
+                raw = self.output_net(hidden)
+            else:
+                raw = self.mlp(z)
             # Apply tanh bound for stability
             deltaF_vec = self.dF_scale * torch.tanh(raw)
             return deltaF_vec.view(B, self.m, self.m)

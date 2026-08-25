@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import matplotlib
+matplotlib.use("Agg")  # non-interactive backend — save plots to disk
 import matplotlib.pyplot as plt
 
 from datetime import datetime
@@ -45,30 +46,31 @@ print("Current Time =", strTime)
 ###################
 args = config.general_settings()
 ### dataset parameters
-args.N_E = 3000
-args.N_CV = 250
-args.N_T = 200
-args.T = 50
-args.T_test = 50
+args.N_E = 400
+args.N_CV = 150
+args.N_T = 100
+args.T = 30
+args.T_test = 30
 ### training parameters
-args.n_steps = 400
-args.n_batch = 25
+args.n_steps = 500
+args.n_batch = 15
 args.lr = 1e-4
 args.wd = 1e-3
 args.use_amp = False
 
-T      = args.T
-T_test = args.T_test
+T      = 30
+T_test = 30
 
-### noise levelsbut
-q2 = 0.001
+### noise levels
+q2 = 0.01
 r2 = 1
 
 ### cycle: number of datasets
-cycle = 5
-# Each sequence draws theta independently from Uniform(-theta_max, +theta_max).
-# No dataset-level base theta — every sequence is fully independent.
-theta_max = 0.12   # drawn range = Uniform(-0.12, +0.12), covers test ±0.10
+cycle = 6
+# Every sequence-segment (each sequence, each dataset) draws theta independently
+# from Uniform(-theta_max, +theta_max). No dataset-level base theta, no drift —
+# fully independent per segment. Matches the test generation exactly.
+theta_max = 0.12       # drawn range = Uniform(-0.12, +0.12)
 
 ### EM iterations
 num_em_iters = 2
@@ -79,48 +81,74 @@ m1x_0 = m1x_0.to(device)
 m2x_0 = m2x_0.to(device)
 
 ### paths
-save_dir  = "RTSNet/tdoa_2d/3mics/new_x0/r1/"
-# save_dir  = "RTSNet/tdoa_2d/3mics/r10/cycle1/"
+# Fresh output location for the random-theta + F-reset-per-dataset run
+# (each dataset restarts F from theta=0, no propagate_F).
+# Warm-start LOAD paths below still read the old r10/cycle1 checkpoints.
+save_dir  = "RTSNet/tdoa_2d/diff_3_mics/r1q001_6cycles/"
 cycle_dir = save_dir + f"{cycle}cycle/"
 os.makedirs(save_dir,  exist_ok=True)
 os.makedirs(cycle_dir, exist_ok=True)
 
-# Load paths: pre-trained networks from the 1-dataset experiment
+# Warm-start load paths — r=10 5-cycle checkpoints are the closest available.
+# MNet is trained fresh in this script (see standalone MNet section below) —
+# no MNet warm-start path needed; the r=1 joint MNet checkpoint was tried
+# previously and found to be collapsed/broken, so it is deliberately not used.
+load_path_rtsnet_true    = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_true0.001.pt"
+# load_path_rtsnet_false   = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_false0.001.pt"
+load_path_rtsnet_F_joint = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/5dRTSNet_false0.001.pt"
+bigru_load_path          = "RTSNet/tdoa_2d/3mics/r10/cycle1/5cycle/BiGRU.pt"
 
-load_path_rtsnet_true  = save_dir + "RTSNet_true0.001.pt"
-load_path_rtsnet_false = save_dir + "RTSNet_false0.001.pt"
-# load_path_rtsnet_true  = cycle_dir + "5dRTSNet_true0.001.pt"
-# load_path_rtsnet_false = cycle_dir + "5dRTSNet_false0.001.pt"
-load_path_M_F = save_dir + "M_step_F_net0.001.pt"
-load_path_rtsnet_F_joint = save_dir + "RTSNet_falseF_joint0.001.pt"
-load_path_M_F_joint = save_dir + "M_step_F_net_joint0.001.pt"
-
-load_path_rtsnet_true  = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_true0.001.pt"
-load_path_rtsnet_false = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_false0.001.pt"
-load_path_M_F = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dM_step_F_net0.001.pt"
-load_path_rtsnet_F_joint = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dRTSNet_falseF_joint0.001.pt"
-load_path_M_F_joint = "RTSNet/tdoa_2d/3mics/r1/cycle1/5cycle/5dM_step_F_net_joint0.001.pt"
+# Sparse-measurement mask: OBS_DROP fraction of timesteps have NO measurement
+# (pure F-prediction across the gap), forcing the smoother to lean on F so a good
+# F estimate actually pays off. Same construction is used in the test script so the
+# train/test measurement schedule is byte-identical (T_train == T_test).
+OBS_DROP = 0.0   # 0.0 = full obs (dense, matches the analytic test); >0 drops that fraction of steps
+def _make_obs_mask(T, drop):
+    mask = torch.ones(T, dtype=torch.bool)
+    if drop and drop > 0:
+        n_drop = int(round(T * drop))
+        drop_idx = torch.linspace(1, T - 1, steps=n_drop).round().long().unique()  # never t=0
+        mask[drop_idx] = False
+    return mask
+obs_mask = None if OBS_DROP == 0 else _make_obs_mask(args.T, OBS_DROP)
+drop_tag = f"_drop{int(round(OBS_DROP * 100))}" if OBS_DROP > 0 else ""
 
 # Cycle-dataset experiment outputs
-destination_path_rtsnet_true   = cycle_dir + "5dRTSNet_true0.001.pt"
-destination_path_rtsnet_false  = cycle_dir + "5dRTSNet_false0.001.pt"
-destination_path_M_F           = cycle_dir + "5dM_step_F_net0.001_false_rtsnet_only_F.pt"
-destination_path_rtsnet_jointF = cycle_dir + "5dRTSNet_falseF_joint0.001.pt"
-destination_path_M_F_joint     = cycle_dir + "5dM_step_F_net_joint0.001.pt"
-destination_path_bigru         = "RTSNet/tdoa_2d/3mics/r10/cycle1/" + "BiGRU.pt"
-# destination_path_rtsnet_true   = save_dir + "RTSNet_true.pt"
-# destination_path_rtsnet_false  = save_dir + "RTSNet_false.pt"
-# destination_path_M_F           = save_dir + "M_step_F_net.pt"
-# destination_path_rtsnet_jointF = save_dir + "RTSNet_falseF_joint.pt"
-# destination_path_M_F_joint     = save_dir + "M_step_F_net_joint.pt"
+T_tag = f"_T{args.T}"   # encode sequence length so T=50 / T=70 networks don't collide
+destination_path_rtsnet_true   = cycle_dir + f"5dRTSNet_true0.001{T_tag}{drop_tag}.pt"
+load_path_rtsnet_false = destination_path_rtsnet_true
+destination_path_rtsnet_false  = cycle_dir + f"5dRTSNet_false0.001{T_tag}{drop_tag}.pt"
+destination_path_bigru         = cycle_dir + f"BiGRU{T_tag}small.pt"   # trained below; NN test loads this
 
 data_path = save_dir + "training_3_dataset_data.pt"
 
 ###################
 ###    FLAGS     ###
+USE_BIG_MSTEP_NET = True   # False -> same M-step net as before, True -> wider residual M-step net
+MSTEP_HIDDEN_DIM  = 512    # used only when USE_BIG_MSTEP_NET=True
+args.use_big_mstep_net = USE_BIG_MSTEP_NET
+args.mstep_hidden_dim = MSTEP_HIDDEN_DIM if USE_BIG_MSTEP_NET else 256
+
+mstep_arch_tag = "big_mstep" if USE_BIG_MSTEP_NET else "base_mstep"
+
+# A1_RES: feed the M-step residual (A1 - F@A2) to the MNet instead of raw A1.
+# Failed to train from a fresh init (expansive-F blow-up), so parked at False.
+# MUST match the A1_RES flag in the test script.
+A1_RES = False
+a1_tag = "_a1res" if A1_RES else ""
+
+destination_path_M_F           = cycle_dir + f"5dM_step_F_net0.001_{mstep_arch_tag}{a1_tag}{T_tag}{drop_tag}.pt"
+destination_path_rtsnet_jointF = cycle_dir + f"5dRTSNet_falseF_joint0.001_new{mstep_arch_tag}{a1_tag}{T_tag}{drop_tag}.pt"
+destination_path_M_F_joint     = cycle_dir + f"5dM_step_F_net_joint0.001_new{mstep_arch_tag}{a1_tag}{T_tag}{drop_tag}.pt"
 ###################
-LOAD_DATA  = False  # True → skip generation, load data from data_path
-OVERSAMPLE = 1.5   # generate this × more candidates than N_E/N_CV/N_T
+def _noisy_false_theta(F_true, noise_half=0.1, clip=0.14):
+    theta = math.atan2(F_true[3, 2].item(), F_true[2, 2].item())
+    lo = max(-noise_half, -clip - theta)
+    hi = min( noise_half,  clip - theta)
+    return theta + lo + (hi - lo) * torch.rand(1).item()
+
+LOAD_DATA  = True  # True → skip generation, load data from data_path
+OVERSAMPLE = 1.7   # generate this × more candidates than N_E/N_CV/N_T
 
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
@@ -130,6 +158,7 @@ print("=" * 70)
 print(f"2D TDOA RTSNet — {cycle}-cycle multi-dataset experiment (rotation theta model)")
 print(f"  T={T}  T_test={T_test}  q2={q2}  r2={r2}")
 print(f"  cycle={cycle}  theta_max=±{theta_max}  (each seq independent)  false F = make_F_block(0.0)")
+print(f"  M-step net: {'BIG' if USE_BIG_MSTEP_NET else 'BASE'}  hidden={args.mstep_hidden_dim}")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -185,18 +214,33 @@ else:
     carry_cv    = None
     carry_test  = None
 
+    # ── Independent random theta per segment ──
+    # Every sequence-segment (each sequence, each dataset) draws its own theta
+    # ~ Uniform(-theta_max, +theta_max), fresh per dataset. Covers sign flips
+    # between datasets and the full ±theta_max range. Matches the test's
+    # per-segment random draw exactly.
+    import random as _rand
+    def _rand_theta(N):
+        return [(_rand.random() - 0.5) * 2 * theta_max for _ in range(N)]
+
     print(f"\nGenerating {cycle} datasets  "
           f"(N_gen train={N_gen_E}  cv={N_gen_CV}  test={N_gen_T}) ...")
 
     for k in range(cycle):
         print(f"  Dataset {k} ...", end="", flush=True)
 
+        # fresh independent theta per sequence for this segment/dataset
+        theta_tr = _rand_theta(N_gen_E)
+        theta_cv = _rand_theta(N_gen_CV)
+        theta_te = _rand_theta(N_gen_T)
+
+        # theta_true_max=0.0 → theta = theta_base exactly (per-segment random)
         ti, tt, F_tr, v_tr = generate_dataset_raw_batch(
-            N_gen_E,  T,      2*theta_max, Q, R, x_init=carry_train)
+            N_gen_E,  T,      0.0, Q, R, x_init=carry_train, theta_base=theta_tr)
         ci, ct, F_cv, v_cv = generate_dataset_raw_batch(
-            N_gen_CV, T,      2*theta_max, Q, R, x_init=carry_cv)
+            N_gen_CV, T,      0.0, Q, R, x_init=carry_cv,    theta_base=theta_cv)
         xi, xt, F_te, v_te = generate_dataset_raw_batch(
-            N_gen_T,  T_test, 2*theta_max, Q, R, x_init=carry_test)
+            N_gen_T,  T_test, 0.0, Q, R, x_init=carry_test,  theta_base=theta_te)
 
         for i in range(N_gen_E):
             if not v_tr[i]: good_seq_train[i] = 0
@@ -347,7 +391,8 @@ for seq_idx in range(4):
 
     fig.suptitle(f'Sequence {seq_idx} — all datasets (train)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
-    plt.show()
+    plt.savefig(cycle_dir + f"seq{seq_idx}_datasets.png", dpi=150, bbox_inches="tight")
+    plt.close()
 
 #########################################
 ###  System models                     ###
@@ -380,167 +425,6 @@ sys_model_false.F_valid_TRUE = all_F_cv_true
 sys_model_false.F_test_TRUE  = all_F_test_true
 
 
-#######################
-### RTSNet true-F   ###
-#######################
-print("\nRTSNet TRUE-F — cycle fine-tuning")
-RTSNet_model_true = RTSNetNN()
-RTSNet_model_true.NNBuild(sys_model_true, args)
-RTSNet_Pipeline_true = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_trueF")
-RTSNet_Pipeline_true.setssModel(sys_model_true)
-RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
-RTSNet_Pipeline_true.setTrainingParams(args)
-
-# RTSNet_Pipeline_true.train_RTS_net_3_datasets(
-#     sys_model_true,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_true,
-#     load_path_RTS=load_path_rtsnet_true,
-#     generate_f=True,
-#     datasets=cycle,
-# )
-
-# sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
-# [MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
-#  rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
-#     sys_model_true,
-#     all_test_inputs,
-#     all_test_targets,
-#     destination_path_rtsnet_true,
-#     generate_f=True,
-#     datasets=cycle,
-# )
-
-#######################
-### RTSNet false-F  ###
-#######################
-print("\nRTSNet FALSE-F — cycle fine-tuning")
-RTSNet_model_false = RTSNetNN()
-RTSNet_model_false.NNBuild(sys_model_false, args)
-RTSNet_Pipeline_false = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_falseF")
-RTSNet_Pipeline_false.setssModel(sys_model_false)
-RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
-RTSNet_Pipeline_false.setTrainingParams(args)
-
-# RTSNet_Pipeline_false.train_RTS_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_RTS=destination_path_rtsnet_false,
-#     load_path_RTS=load_path_rtsnet_false,
-#     generate_f=True,
-#     datasets=cycle,
-# )
-
-# sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
-# [MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
-#  rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
-#     sys_model_false,
-#     all_test_inputs,
-#     all_test_targets,
-#     destination_path_rtsnet_false,
-#     generate_f=True,
-#     datasets=cycle,
-# )
-
-#############################
-### MNet cycle training    ###
-#############################
-print(f"\nMNet {cycle}-cycle training ...")
-
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F,
-    load_path_RTS=destination_path_rtsnet_true,
-    load_mnet=load_path_M_F,       # initialise from training-1 MNet
-    num_em_iters=num_em_iters,
-    alpha=(0.3, 1.0, 0.85),
-    lambda_F=1e-3,
-    generate_f=True,
-    datasets=cycle,
-    propagate_F=False,
-    A1_res=True,
-)
-
-
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=destination_path_M_F,       # initialise from training-1 MNet
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-#     datasets=cycle,
-#     propagate_F=False,
-# )
-
-###############################
-### Joint cycle training     ###
-###############################
-print(f"\nJoint {cycle}-cycle training ...")
-
-# RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
-#     sys_model_false,
-#     all_cv_inputs,    all_cv_targets,
-#     all_train_inputs, all_train_targets,
-#     destination_path_M=destination_path_M_F_joint,
-#     destination_path_RTS=destination_path_rtsnet_jointF,
-#     load_path_RTS=destination_path_rtsnet_false,
-#     load_mnet=destination_path_M_F,   # initialised by MNet training above
-#     num_em_iters=num_em_iters,
-#     alpha=(0.3, 1.0, 0.85),
-#     lambda_F=1e-3,
-#     generate_f=True,
-#     datasets=cycle,
-#     propagate_F=False,
-#     A1_res= True
-# )
-
-RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
-    sys_model_false,
-    all_cv_inputs,    all_cv_targets,
-    all_train_inputs, all_train_targets,
-    destination_path_M=destination_path_M_F_joint,
-    destination_path_RTS=destination_path_rtsnet_jointF,
-    load_path_RTS=destination_path_rtsnet_jointF,
-    load_mnet=destination_path_M_F_joint,   # initialised by MNet training above
-    num_em_iters=num_em_iters,
-    alpha=(0.1, 1.0, 0.85),
-    lambda_F=0.1,
-    generate_f=True,
-    datasets=cycle,
-    propagate_F=False,
-    A1_res= True
-)
-###############################
-### Test MNet + Joint       ###
-###############################
-sys_model_false.F_test      = all_F_test_false   # [cycle][group_idx]
-sys_model_false.F_test_TRUE = all_F_test_true     # [cycle][group_idx]
-
-print("\nTesting MNet ...")
-[MSE_test_arr_mnet, MSE_test_avg_mnet, MSE_test_dB_avg_mnet,
- rtsnet_out_mnet, RunTime_mnet] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
-    sys_model_false, all_test_inputs, all_test_targets,
-    destination_path_rtsnet_false, destination_path_M_F,
-    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,propagate_F=False,
-)
-
-print("\nTesting joint ...")
-[MSE_test_arr_joint, MSE_test_avg_joint, MSE_test_dB_avg_joint,
- rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
-    sys_model_false, all_test_inputs, all_test_targets,
-    destination_path_rtsnet_jointF, destination_path_M_F_joint,
-    num_em_iters=num_em_iters, generate_f=True, datasets=cycle,propagate_F=False,
-)
-
 ########################################
 ### BiGRU baseline                   ###
 ########################################
@@ -553,26 +437,179 @@ train_bigru_smoother(
     n=n, m=m,
     save_path=destination_path_bigru,
     device=device,
-    epochs=args.n_steps,
-    batch_size=args.n_batch,
+    epochs=300,
+    batch_size=10,
     lr=args.lr,
+
+)
+sthrhtrtsthrrthtrh
+#######################
+### RTSNet true-F   ###
+#######################
+print("\nRTSNet TRUE-F — cycle fine-tuning")
+RTSNet_model_true = RTSNetNN()
+RTSNet_model_true.NNBuild(sys_model_true, args)
+RTSNet_Pipeline_true = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_trueF")
+RTSNet_Pipeline_true.setssModel(sys_model_true)
+RTSNet_Pipeline_true.setModel(RTSNet_model_true, args)
+RTSNet_Pipeline_true.setTrainingParams(args)
+
+RTSNet_Pipeline_true.train_RTS_net_3_datasets(
+    sys_model_true,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_true,
+    load_path_RTS=load_path_rtsnet_true,
+    generate_f=True,
+    datasets=cycle,
+    obs_mask=obs_mask,   # dense now (obs_mask=None)
 )
 
-print("\nBiGRU — testing ...")
-bigru_model = torch.load(destination_path_bigru, weights_only=False, map_location=device)
-bigru_model.eval()
+sys_model_true.F_test = all_F_test_true   # [cycle][group_idx]
+[MSE_test_arr_true, MSE_test_avg_true, MSE_test_dB_avg_true,
+ rtsnet_out_true, RunTime_true] = RTSNet_Pipeline_true.NNTest_3_datasets(
+    sys_model_true,
+    all_test_inputs,
+    all_test_targets,
+    destination_path_rtsnet_true,
+    generate_f=True,
+    datasets=cycle,
+    obs_mask=obs_mask,
+)
 
-bigru_outputs         = []   # list[dataset] of [N_T, m, T]
-mse_bigru_per_dataset = torch.zeros(cycle)
-with torch.no_grad():
-    for k in range(cycle):
-        y    = all_test_inputs[k].to(device)
-        tgt  = all_test_targets[k].to(device)
-        xhat = bigru_model(y)          # [N_T, m, T]
-        mse_bigru_per_dataset[k] = loss_fn(xhat, tgt)
-        bigru_outputs.append(xhat.cpu())
+#######################
+### RTSNet false-F  ###
+#######################
+print("\nRTSNet FALSE-F — cycle fine-tuning")
+RTSNet_model_false = RTSNetNN()
+RTSNet_model_false.NNBuild(sys_model_false, args)
+RTSNet_Pipeline_false = Pipeline(strTime, "RTSNet", "RTSNet_TDOA_falseF")
+RTSNet_Pipeline_false.setssModel(sys_model_false)
+RTSNet_Pipeline_false.setModel(RTSNet_model_false, args)
+RTSNet_Pipeline_false.setTrainingParams(args)
 
-mse_bigru_avg_db = 10 * math.log10(mse_bigru_per_dataset.mean().item())
+RTSNet_Pipeline_false.train_RTS_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_RTS=destination_path_rtsnet_false,
+    load_path_RTS=load_path_rtsnet_false,   # warm-start from old r10 RTSNet-false
+    generate_f=True,
+    datasets=cycle,
+    obs_mask=obs_mask,   # dense now (obs_mask=None); MNet/joint load this checkpoint
+)
+
+sys_model_false.F_test = all_F_test_false   # [cycle][group_idx]
+[MSE_test_arr_false, MSE_test_avg_false, MSE_test_dB_avg_false,
+ rtsnet_out_false, RunTime_false] = RTSNet_Pipeline_false.NNTest_3_datasets(
+    sys_model_false,
+    all_test_inputs,
+    all_test_targets,
+    destination_path_rtsnet_false,
+    generate_f=True,
+    datasets=cycle,
+    obs_mask=obs_mask,
+)
+
+#############################
+### MNet cycle training    ###
+#############################
+# Standalone MNet pretraining — RTSNet is FROZEN here, so the M-step net
+# learns to recover F purely from smoothing statistics before joint
+# fine-tuning starts moving RTSNet too. Fresh init (load_mnet=None):
+# warm-starting from the r=1 joint MNet checkpoint was found to produce
+# near-zero / wrong-signed ΔF (collapsed by the old lambda_F=0.1 run),
+# which then poisoned joint training. Train clean instead.
+print(f"\nMNet {cycle}-cycle training (standalone, frozen RTSNet) ...")
+
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F,
+    load_path_RTS=destination_path_rtsnet_false,   # freshly-trained RTSNet-false above
+    # Warm-start from a working MNet (NOT fresh) — a random net emits uncalibrated
+    # ΔF that pushes F expansive and NaNs every epoch. This one is calibrated.
+    load_mnet="RTSNet/tdoa_2d/3mics/r10/5cycle/5dM_step_F_net_joint0.001_newbig_mstep.pt",
+    num_em_iters=num_em_iters,
+    alpha=(0.5, 1.0, 0.85),   # EM1 decent, EM2 priority (was (0.3,1.0) — EM1 under-trained)
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,          # each dataset restarts F estimation from the base
+    F_init=make_F_block(0.0),   # ...F (theta=0), NOT the previous dataset's estimate
+    A1_res=A1_RES,
+    use_big_mstep_net=USE_BIG_MSTEP_NET,
+    mstep_hidden_dim=args.mstep_hidden_dim,
+    obs_mask=obs_mask,
+)
+
+###############################
+### Joint cycle training     ###
+###############################
+print(f"\nJoint {cycle}-cycle training ...")
+
+RTSNet_Pipeline_false.train_F_mstep_net_3_datasets_joint(
+    sys_model_false,
+    all_cv_inputs,    all_cv_targets,
+    all_train_inputs, all_train_targets,
+    destination_path_M=destination_path_M_F_joint,
+    destination_path_RTS=destination_path_rtsnet_jointF,
+    load_path_RTS=destination_path_rtsnet_false,   # freshly-trained RTSNet-false above
+    load_mnet=destination_path_M_F,   # initialised by MNet training above
+    num_em_iters=num_em_iters,
+    alpha=(0.5, 1.0, 0.85),   # EM1 decent, EM2 priority (was (0.1,1.0) — EM1 under-trained)
+    lambda_F=1e-3,
+    generate_f=True,
+    datasets=cycle,
+    propagate_F=False,          # each dataset restarts F estimation from the base
+    F_init=make_F_block(0.0),   # ...F (theta=0), NOT the previous dataset's estimate
+    A1_res=A1_RES,
+    use_big_mstep_net=USE_BIG_MSTEP_NET,
+    mstep_hidden_dim=args.mstep_hidden_dim,
+    obs_mask=obs_mask,
+)
+###############################
+### Test MNet + Joint       ###
+###############################
+sys_model_false.F_test      = all_F_test_false   # [cycle][group_idx]
+sys_model_false.F_test_TRUE = all_F_test_true     # [cycle][group_idx]
+
+# Standalone MNet not trained — skip its test
+# print("\nTesting MNet ...")
+# [MSE_test_arr_mnet, ...] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(...)
+
+print("\nTesting joint ...")
+[MSE_test_arr_joint, MSE_test_avg_joint, MSE_test_dB_avg_joint,
+ rtsnet_out_joint, RunTime_joint] = RTSNet_Pipeline_false.test_F_mstep_net_3_datasets(
+    sys_model_false, all_test_inputs, all_test_targets,
+    destination_path_rtsnet_jointF, destination_path_M_F_joint,
+    num_em_iters=num_em_iters, generate_f=True, datasets=cycle, propagate_F=False, A1_res=A1_RES,   # F resets to theta=0 each dataset (matches training)
+    obs_mask=obs_mask,
+)
+
+# BiGRU training is commented out above, so its checkpoint may not exist.
+# Only test it when the file is actually present — otherwise skip cleanly.
+HAS_BIGRU = os.path.exists(destination_path_bigru)
+bigru_outputs   = []   # list[dataset] of [N_T, m, T]
+mse_bigru_avg_db = None
+if HAS_BIGRU:
+    print("\nBiGRU — testing ...")
+    bigru_model = torch.load(destination_path_bigru, weights_only=False, map_location=device)
+    bigru_model.eval()
+
+    mse_bigru_per_dataset = torch.zeros(cycle)
+    with torch.no_grad():
+        for k in range(cycle):
+            y    = all_test_inputs[k].to(device)
+            tgt  = all_test_targets[k].to(device)
+            xhat = bigru_model(y)          # [N_T, m, T]
+            mse_bigru_per_dataset[k] = loss_fn(xhat, tgt)
+            bigru_outputs.append(xhat.cpu())
+
+    mse_bigru_avg_db = 10 * math.log10(mse_bigru_per_dataset.mean().item())
+else:
+    print(f"\nBiGRU — skipped (no checkpoint at {destination_path_bigru}).")
 
 ########################################
 ### Plot                              ###
@@ -582,28 +619,25 @@ t_axis = torch.arange(T_test)
 states = all_test_targets[0][0]
 plt.figure(figsize=(12, 5))
 plt.plot(t_axis, states.cpu()[1],                              linewidth=2.5, label="true p_y")
-plt.plot(t_axis, rtsnet_out_true[0].cpu()[1],                 linewidth=2,   label="RTSNet true F")
-plt.plot(t_axis, rtsnet_out_false[0].cpu()[1],                linewidth=2,   label="RTSNet false F")
-plt.plot(t_axis, rtsnet_out_mnet[0].cpu()[1],                 linewidth=2,   label=f"MNet {cycle}-cycle")
-plt.plot(t_axis, rtsnet_out_joint[0].cpu()[1], "-.",          linewidth=2,   label=f"Joint {cycle}-cycle")  # type: ignore[index]
-plt.plot(t_axis, bigru_outputs[0][0][1],        "--",          linewidth=2,   label="BiGRU")
+plt.plot(t_axis, rtsnet_out_joint[0].cpu()[1], "-.",          linewidth=2,   label=f"Joint {cycle}-cycle")
+if HAS_BIGRU:
+    plt.plot(t_axis, bigru_outputs[0][0][1],    "--",          linewidth=2,   label="BiGRU")
 plt.xlabel("time")
 plt.ylabel("y position")
-plt.title(f"TDOA tracking: y position — {cycle}-cycle")
+plt.title(f"TDOA tracking: y position — {cycle}-cycle  r2={r2}")
 plt.grid(True, linestyle="--", alpha=0.5)
 plt.legend()
 plt.tight_layout()
-plt.show()
+plt.savefig(cycle_dir + "training_result.png", dpi=150, bbox_inches="tight")
+plt.close()
 
 ########################################
 ### Results summary                   ###
 ########################################
 print("\n" + "=" * 70)
-print(f"RESULTS SUMMARY  (cycle={cycle}, a_range={a_range}, b_range={b_range})")
+print(f"RESULTS SUMMARY  (cycle={cycle}  q2={q2}  r2={r2})")
 print("=" * 70)
-print(f"  RTSNet TRUE-F  (avg)          : {MSE_test_dB_avg_true.item():.2f} dB")
-print(f"  RTSNet FALSE-F (avg)          : {MSE_test_dB_avg_false.item():.2f} dB")
-print(f"  MNet {cycle}-cycle (avg)      : {MSE_test_dB_avg_mnet.item():.2f} dB")  # type: ignore[union-attr]
 print(f"  Joint {cycle}-cycle (avg)     : {MSE_test_dB_avg_joint.item():.2f} dB")
-print(f"  BiGRU          (avg)          : {mse_bigru_avg_db:.2f} dB")
+if HAS_BIGRU:
+    print(f"  BiGRU          (avg)          : {mse_bigru_avg_db:.2f} dB")
 print("=" * 70)

@@ -3,6 +3,17 @@ import math
 import torch
 import torch.nn as nn
 import matplotlib
+# Try an interactive backend so trajectory windows pop up immediately.
+# Falls back to Agg (file-only) if no GUI backend is available.
+_INTERACTIVE = True
+try:
+    matplotlib.use("TkAgg")
+except Exception:
+    try:
+        matplotlib.use("Qt5Agg")
+    except Exception:
+        matplotlib.use("Agg")
+        _INTERACTIVE = False
 import matplotlib.pyplot as plt
 
 from datetime import datetime
@@ -42,15 +53,15 @@ print("Current Time =", strTime)
 ###################
 args = config.general_settings()
 args.N_T   = 100
-args.T     = 50
-args.T_test = 50
+args.T     = 30
+args.T_test = 30
 
 T_test = args.T_test
 
-q2 = 0.001
+q2 = 0.01
 r2 = 1
 
-cycle = 5
+cycle = 6
 
 USE_DIAG_MODEL = False   # True: diagonal alpha model (Type 2); False: rotation theta model (Type 1)
 
@@ -60,7 +71,7 @@ USE_DIAG_MODEL = False   # True: diagonal alpha model (Type 2); False: rotation 
 MEASURE_EVERY_K = 1
 
 # if USE_DIAG_MODEL:
-#     # a_per_dataset[k] IS F[2,2] (alpha_x) directly, b_per_dataset[k] IS F[3,3] (alpha_y) directly.
+#     # a_per_dataset[k] IS F[2,2] (alpha_x) directl, b_per_dataset[k] IS F[3,3] (alpha_y) directly.
 #     # vx_{t+1} = a * vx_t + noise,  vy_{t+1} = b * vy_t + noise
 #     # False F uses make_F_diag(1.0, 1.0) (constant-velocity assumption).
 #     a_per_dataset = [1.0, 0.98, 0.95,  1.0, 0.97]   # F[2,2] = alpha_x directly
@@ -72,12 +83,13 @@ MEASURE_EVERY_K = 1
 #         for k in range(cycle)
 #     ]
 # else:
-theta_per_dataset = [0.08, -0.08, 0.1, -0.1, 0.06]   # rad/step: mix of left/right curves, no full circles
-# theta_per_dataset = [0.08,-0.08, 0.1,]
+# Fixed per-dataset theta (rad/step). The TEST scenario is deterministic:
+# every sequence in dataset k uses the same theta_per_dataset[k].
+theta_per_dataset = [0.1, 0.08, -0.1, -0.08, 0.06, 0.1]
 assert len(theta_per_dataset) == cycle
 ds_label = [f'θ={theta_per_dataset[k]:.2f}' for k in range(cycle)]
 
-max_em_iter = 5
+max_em_iter = 3
 
 Q     = (q2 * Q_structure).to(device)
 R     = (r2 * R_structure).to(device)
@@ -97,7 +109,7 @@ data_path = save_dir + "test_analytic_3_dataset_data.pt"
 ###    FLAGS     ###
 ###################
 LOAD_DATA  = False  # True → skip generation, load data from data_path
-OVERSAMPLE = 1.15   # theta model: generate ceil(N_T × OVERSAMPLE) candidates
+OVERSAMPLE = 1.3   # theta model: generate ceil(N_T × OVERSAMPLE) candidates
 #   (diag model uses its own standard generation regardless of OVERSAMPLE)
 # Trajectory physics flags (edit in Simulations/TDOA_2D/parameters.py):
 #   USE_BOUNDARIES — True: enforce px/py/v bounds   False: unbounded
@@ -106,10 +118,7 @@ OVERSAMPLE = 1.15   # theta model: generate ceil(N_T × OVERSAMPLE) candidates
 print("=" * 70)
 print(f"2D TDOA Analytic ERTS -- {cycle}-cycle multi-dataset test")
 print(f"  T_test={T_test}  q2={q2}  r2={r2}")
-if USE_DIAG_MODEL:
-    print(f"  USE_DIAG_MODEL=True  a={a_per_dataset}  b={b_per_dataset}  false F = constant velocity")
-else:
-    print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
+print(f"  cycle={cycle}  theta_per_dataset={theta_per_dataset}  false F fixed at theta=0")
 print(f"  Microphones: {M_mics}   State dim: {m}   Obs dim: {n}")
 print("=" * 70)
 
@@ -179,6 +188,56 @@ for k in range(cycle):
     print(f"    True F:\n{F_t.cpu().numpy().round(4)}")
     print(f"    False F:\n{F_f.cpu().numpy().round(4)}")
 print("------------------------------------------------------------------------")
+
+#########################################
+###  POPUP -- trajectories, 3 sequences ###
+#########################################
+# Pops up one window showing the 2D ground-truth trajectory of the first
+# 3 test sequences, with all `cycle` datasets drawn per sequence.
+N_POPUP = 3
+print(f"\nPopping up trajectories for the first {N_POPUP} sequences ...")
+_pop_colors = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+               'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+
+fig_pop, axes_pop = plt.subplots(1, N_POPUP, figsize=(6 * N_POPUP, 6), squeeze=False)
+axes_pop = axes_pop.flatten()
+for seq_idx in range(N_POPUP):
+    axp = axes_pop[seq_idx]
+    for k in range(cycle):
+        states_k = all_test_targets[k][seq_idx].cpu()   # [m, T_test]
+        col      = _pop_colors[k % len(_pop_colors)]
+        axp.plot(states_k[0], states_k[1], color=col, linewidth=1.8,
+                 label=f'ds{k} {ds_label[k]}')
+        axp.scatter(states_k[0, 0],  states_k[1, 0],  color=col, marker='o', s=45, zorder=5)
+        axp.scatter(states_k[0, -1], states_k[1, -1], color=col, marker='x', s=65, zorder=5)
+
+    for idx, mic in enumerate(mic_positions):
+        axp.scatter(mic[0].item(), mic[1].item(), marker='^', color='black', s=70, zorder=6)
+        axp.annotate(f'm{idx}', (mic[0].item(), mic[1].item()),
+                     textcoords='offset points', xytext=(4, 4), fontsize=7)
+
+    axp.add_patch(mpatches.Rectangle(
+        (PX_MIN, PY_MIN), PX_MAX - PX_MIN, PY_MAX - PY_MIN,
+        linewidth=1.5, edgecolor='red', facecolor='lightyellow',
+        linestyle='--', zorder=1, alpha=0.3, label='valid region'))
+
+    _px0 = m1x_0.reshape(-1)[0].item();  _py0 = m1x_0.reshape(-1)[1].item()
+    axp.set_xlim(_px0 - 10, _px0 + 10);  axp.set_ylim(_py0 - 10, _py0 + 10)
+    axp.set_aspect('equal', adjustable='box')
+    axp.set_xlabel('p_x');  axp.set_ylabel('p_y')
+    axp.set_title(f'Sequence {seq_idx}  (o=start, x=end)')
+    axp.legend(fontsize=7, loc='best');  axp.grid(True, alpha=0.4)
+
+fig_pop.suptitle(f'Ground-truth trajectories -- first {N_POPUP} sequences, all datasets', fontsize=13)
+plt.tight_layout()
+plt.savefig(cycle_dir + f"popup_first{N_POPUP}_seqs.png", dpi=150)
+if _INTERACTIVE:
+    plt.show(block=False)   # pop up now, keep the script running
+    plt.pause(0.5)
+else:
+    print("  (no GUI backend -- saved to "
+          f"{cycle_dir}popup_first{N_POPUP}_seqs.png instead)")
+    plt.close(fig_pop)
 
 # #########################################
 # ###  Cross-check: run_ekf_erts vs      ###
@@ -275,6 +334,7 @@ for seq_idx in range(10):
     ax_traj.set_xlabel('p_x');    ax_traj.set_ylabel('p_y')
     _px0 = m1x_0.reshape(-1)[0].item();  _py0 = m1x_0.reshape(-1)[1].item()
     ax_traj.set_xlim(_px0 - 10, _px0 + 10);    ax_traj.set_ylim(_py0 - 10, _py0 + 10)
+    ax_traj.set_aspect('equal', adjustable='box')
     ax_traj.set_title('2D trajectory (o=start, x=end per dataset)')
     ax_traj.legend(fontsize=7);   ax_traj.grid(True, alpha=0.4)
 
@@ -291,7 +351,8 @@ for seq_idx in range(10):
 
     fig.suptitle(f'Sequence {seq_idx} -- all datasets (test)  |  dashed = dataset boundary', fontsize=12)
     plt.tight_layout()
-    plt.show()   # blocking — close this window to see the next sequence
+    plt.savefig(cycle_dir + f"seq{seq_idx}_datasets.png", dpi=150)
+    plt.close()
 
 #########################################
 ###  Run ERTS across all datasets     ###
@@ -316,7 +377,7 @@ mse_false_arr = torch.zeros(cycle, N_T)
 mse_emkf_arr  = torch.zeros(cycle, N_T)
 mse_bigru_arr = torch.zeros(cycle, N_T)
 
-# Position-only MSE arrays: [datasets, N_T]  — dims 0,1 (p_x, p_y) only
+# Position-only MSE arrays: [datasets, N_   T]  — dims 0,1 (p_x, p_y) only
 pos_true_arr  = torch.zeros(cycle, N_T)
 pos_false_arr = torch.zeros(cycle, N_T)
 pos_emkf_arr  = torch.zeros(cycle, N_T)
@@ -468,9 +529,11 @@ for data in range(cycle):
     print(f"  [seq 0] true F:\n{F_true_seq0.cpu().numpy().round(4)}")
 
     for j in range(N_T):
-        emkf_x_carries[j] = last_x_emkf[j]
-        emkf_P_carries[j] = last_P_emkf[j]
-        emkf_F_carries[j] = F_mats_batch[j][-1]  # carry estimated F to next dataset
+        emkf_x_carries[j] = last_x_emkf[j]                 # carry state forward
+        emkf_P_carries[j] = last_P_emkf[j]                 # carry covariance forward
+        # F RESETS to the theta=0 init each dataset (do NOT propagate the estimate),
+        # so every dataset re-estimates its turn from scratch.
+        emkf_F_carries[j] = make_F_diag(1.0, 1.0) if USE_DIAG_MODEL else make_F_block(0.0)
 
 #########################################
 ###  Run BiGRU baseline               ###
@@ -569,8 +632,8 @@ for k in range(cycle):
 axes[-1].set_xlabel("time")
 fig.suptitle(f"TDOA ERTS analytic -- {cycle}-dataset sequential scenario", fontsize=13)
 plt.tight_layout()
-
-plt.show(block=False)
+plt.savefig(cycle_dir + "seq0_ypos_vs_time.png", dpi=150)
+plt.close(fig)
 
 #########################################
 ###  2-D spatial popup -- seq 0        ###
@@ -621,6 +684,7 @@ for k in range(cycle):
     ax2.set_ylabel('p_y (m)', fontsize=9)
     _px0 = m1x_0.reshape(-1)[0].item();  _py0 = m1x_0.reshape(-1)[1].item()
     ax2.set_xlim(_px0 - 10, _px0 + 10);  ax2.set_ylim(_py0 - 10, _py0 + 10)
+    ax2.set_aspect('equal', adjustable='box')
     ax2.set_title(f'Dataset {k}  {ds_label[k]}', fontsize=10)
     ax2.legend(fontsize=8, loc='best')
     ax2.grid(True, alpha=0.4)
@@ -632,6 +696,11 @@ for k in range(cycle, len(axes2_flat)):
 fig2.suptitle(f'2D positions -- sequence 0, per dataset  |  q2={q2}  r2={r2}  T={T_test}',
               fontsize=13)
 plt.tight_layout()
+plt.savefig(cycle_dir + "traj_2d_seq0.png", dpi=200)
+plt.close()
+print(f"  Plots saved to: {cycle_dir}")
 
-plt.show(block=False)
-plt.show()   # keep all windows open
+# Keep the trajectory popup(s) open until the user closes the window(s).
+if _INTERACTIVE:
+    print("\nClose the plot window(s) to exit.")
+    plt.show(block=True)

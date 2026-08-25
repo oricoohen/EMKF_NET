@@ -47,10 +47,11 @@ def train_bigru_smoother(
     save_path,
     device,
     epochs=300,
-    batch_size=32,
+    batch_size=16,
     lr=1e-3,
-    hidden_size=128,
-    num_layers=2
+    hidden_size=16,
+    num_layers=2,
+    load_path=None,
 ):
     import os
     import math
@@ -73,12 +74,19 @@ def train_bigru_smoother(
 
     os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-    model = BiGRUSmoother(
-        n=n,
-        m=m,
-        hidden_size=hidden_size,
-        num_layers=num_layers
-    ).to(device)
+    if load_path is not None and os.path.isfile(load_path):
+        print(f"BiGRU warm-start from: {load_path}")
+        model = torch.load(load_path, weights_only=False, map_location=device)
+        model.to(device)
+    else:
+        if load_path is not None:
+            print(f"BiGRU warm-start file not found ({load_path}), starting fresh.")
+        model = BiGRUSmoother(
+            n=n,
+            m=m,
+            hidden_size=hidden_size,
+            num_layers=num_layers
+        ).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.MSELoss()
