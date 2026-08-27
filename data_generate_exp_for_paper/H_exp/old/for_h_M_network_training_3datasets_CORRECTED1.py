@@ -1,50 +1,13 @@
 """
-Training script for the diverse-H paper experiment (H exp).
-
-F is FIXED (known); H is DIVERSE (unknown, to be estimated). Builds 3 datasets whose H
-drifts by a random rotation per dataset, then trains:
-
-  1) the BiGRU black-box smoother baseline
-  2) the H-M-step net (train_H_mstep_net_3_datasets)
-
-The stage-1 RTSNets it loads (RTSNET_true.pt / RTSNET_false.pt) are trained by
-for_h_AI_emkf_training_M_st_for_diver_h.py -- run that first for a fresh bucket.
-
-EXP_NAME and R_BUCKET below must match the ones in
-for_h_M_network_AI_emkf_testing_paper1.py.
-
-Run from anywhere:  python for_h_M_network_training_3datasets_CORRECTED1.py
+Corrected version for H estimation (EMKF_H)
+This properly sets up data for train_H_mstep_net_3_datasets function
+F is FIXED (known), H is DIVERSE (unknown, to be estimated)
 """
-import os
-import sys
-from pathlib import Path
-
-# Put the repo root on sys.path and anchor every path to it, so this script runs correctly
-# from its own folder as well as from the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 import torch
 import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F, det
-
-# ============================================================
-# EXPERIMENT SWITCH -- which paper experiment this run produces.
-#   'exp_1' = Gaussian process/observation noise
-#   'exp_2' = Exponential (heavy-tailed, NON zero-mean) noise
-# Selects the model folder AND the noise distribution together, so they cannot drift
-# apart. Must be set BEFORE any DataGen call. Noise STRENGTH still comes from q2 / r2;
-# this only changes the DISTRIBUTION.
-# ============================================================
-EXP_NAME = 'exp_1'
-
-import Simulations.Linear_sysmdl as _lsm
-_lsm.NOISE_DIST = 'gauss' if EXP_NAME == 'exp_1' else 'exponential'
-print(f"EXP_NAME = {EXP_NAME}   NOISE_DIST = {_lsm.NOISE_DIST}")
-
 from emkf.main_emkf_func_AI import EMKF_F
 
 from Simulations.utils import DataLoader, DataGen, estimate_QR
@@ -78,23 +41,8 @@ strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
 
-##############################################################################
-### Paths -- all anchored to REPO_ROOT, so the CWD does not matter.
-###
-### R_BUCKET selects the SNR bucket and drives r2 below, so the folder tag and the noise
-### strength can never drift apart. Available H buckets: r_1, r_01, r_001, r_0001.
-##############################################################################
-MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'changed_H_v_0'
-R_BUCKET = 'r_1'
-R2_BY_BUCKET = {'r_1': 1., 'r_01': 0.1, 'r_001': 0.01, 'r_0001': 0.001}
-
-EXP_DIR = MODELS_ROOT / EXP_NAME / R_BUCKET
-path_results_True  = str(EXP_DIR / 'True_H')  + os.sep
-path_results_False = str(EXP_DIR / 'False_H') + os.sep
-
-# Gaussian and exponential runs must NOT share a data cache.
-DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp_3_datasets_H' / EXP_NAME
-os.makedirs(DATA_DIR, exist_ok=True)
+path_results_True = '../../../RTSNet/synthetic/changed_H_v_0/exp_1/r_1/True_H/'
+path_results_False = '../../../RTSNet/synthetic/changed_H_v_0/exp_1/r_1/False_H/'
 
 ####################
 ### Design Model ###
@@ -123,10 +71,9 @@ torch.manual_seed(1)
 max_iter = 4
 cycles = 3  # Number of datasets (each represents 30 timesteps with different F)
 
-# True model parameters. q2 is fixed for the H experiment; r2 comes from R_BUCKET so it
-# always matches the folder the models are written to.
+# True model parameters
 q2 = 1
-r2 = R2_BY_BUCKET[R_BUCKET]
+r2 = 1
 
 print('q2 is:', q2)
 print('r2 is:', r2)
@@ -195,7 +142,7 @@ for dataset_id in range(cycles):
     print(H_current)
 
     # Create folder and file names
-    dataFolderName = str(DATA_DIR) + os.sep
+    dataFolderName = f'Simulations/Linear_canonical/paper/exp_3_datasets_H/'
     dataFileName = f'dataset_{dataset_id}_data.pt'
     dataFileName_H = f'dataset_{dataset_id}_H.pt'
 
@@ -300,29 +247,11 @@ sys_model.H_test_TRUE = all_H_matrices_test
 print("✓ System model configured with 3-dataset H structure")
 
 # Paths for models
-# Stage-1 RTSNets, under the names actually on disk (they used to be loaded as
-# best-rts_{true,false}.pt, which exist nowhere in the H tree).
-path_results_True_rts = path_results_True + 'RTSNET_true.pt'
-path_results_wrong_rts = path_results_False + 'RTSNET_false.pt'
-
-# The old literal was 'RTSNet/changed_H_v_0/exp_2/r_1/EMKF/False/' -- missing 'synthetic/',
-# and pinned to exp_2 while path_results_* above pointed at exp_1, so the trainer read one
-# bucket's RTSNets and wrote another bucket's M-net.
-destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
-os.makedirs(destination_folder, exist_ok=True)
-# '...3_datasets2.pt' exists only in exp_2/r_01; every bucket uses the un-suffixed name,
-# which is what for_h_M_network_AI_emkf_testing_paper1.py loads.
-destination_path_M = destination_folder + 'M_net_H_trained_3_datasets.pt'
+path_results_True_rts = path_results_True + 'best-rts_true.pt'
+path_results_wrong_rts = path_results_False + 'best-rts_false.pt'
+destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_1/EMKF/False/'
+destination_path_M = destination_folder + 'M_net_H_trained_3_datasets2.pt'
 destination_path_M_load = destination_folder + 'M_rand_false_trained_12_20_f_rtsnet_new_net.pt'
-
-if not os.path.isfile(path_results_wrong_rts):
-    raise FileNotFoundError(
-        f"Stage-1 RTSNet missing for {EXP_NAME}/{R_BUCKET}: {path_results_wrong_rts}\n"
-        f"  Run for_h_AI_emkf_training_M_st_for_diver_h.py for this bucket first.")
-# Warm-start checkpoint for the M-net; optional -- train from scratch if absent.
-if not os.path.isfile(destination_path_M_load):
-    print(f"WARNING: warm-start M-net not found ({destination_path_M_load}); training from scratch.")
-    destination_path_M_load = None
 
 
 #########################################################################################################
@@ -330,9 +259,7 @@ if not os.path.isfile(destination_path_M_load):
 # BiGRU doesn't use F or H, so this is identical whether F or H is the changing quantity.
 #########################################################################################################
 from Baselines.BiGRU_smoother import train_bigru_smoother
-# The test script reads the BiGRU from bgru/, not from EMKF/False/, so write it there.
-bigru_save_path = str(EXP_DIR / 'bgru' / 'bigru_H_3ds.pt')
-os.makedirs(EXP_DIR / 'bgru', exist_ok=True)
+bigru_save_path = destination_folder + 'bigru_H_3ds.pt'
 print("\n===== BiGRU baseline training (3 datasets) =====")
 train_bigru_smoother(
     train_input=all_train_inputs, train_target=all_train_targets,
@@ -342,6 +269,7 @@ train_bigru_smoother(
     epochs=300, batch_size=32, lr=1e-3, hidden_size=128, num_layers=2,
 )
 print("BiGRU baseline saved to:", bigru_save_path)
+asdgadgadgssdg
 
 
 

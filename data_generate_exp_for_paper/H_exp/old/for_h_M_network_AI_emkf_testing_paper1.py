@@ -90,25 +90,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-##############################################################################
-### Paths -- all anchored to REPO_ROOT, so the CWD does not matter.
-###
-### R_BUCKET selects the SNR bucket and drives r2 below, so the folder tag and the noise
-### strength can never drift apart. Available H buckets: r_1, r_01, r_001, r_0001
-### (there is no r_10 in the H tree). EXP_NAME + R_BUCKET must match the trainer.
-##############################################################################
-MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'changed_H_v_0'
-R_BUCKET = 'r_1'
-R2_BY_BUCKET = {'r_1': 1., 'r_01': 0.1, 'r_001': 0.01, 'r_0001': 0.001}
-
-EXP_DIR = MODELS_ROOT / EXP_NAME / R_BUCKET
-path_results_True  = str(EXP_DIR / 'True_H')  + os.sep
-path_results_False = str(EXP_DIR / 'False_H') + os.sep
-
-# Gaussian and exponential runs must NOT share a data cache, so the generated datasets go
-# in a per-experiment sub-folder (the old path was a shared, un-anchored 'exp1_H/regular').
-DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp1_H' / EXP_NAME
-os.makedirs(DATA_DIR, exist_ok=True)
+path_results_True = '../../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/True_H/'
+gauss = False
+path_results_False = '../../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/False_H/'
 
 
 ####################
@@ -131,10 +115,9 @@ max_iter = 4
 
 cycles = 3
 
-# True model. q2 is fixed for the H experiment; r2 comes from R_BUCKET so it always
-# matches the folder the models were trained in.
+# True model
 q2 = 1
-r2 = R2_BY_BUCKET[R_BUCKET]
+r2 = 1
 
 # v_db = 0
 # snr_db =20.0################################################################################################################################################################################################
@@ -203,7 +186,7 @@ for dataset_id in range(1, cycles+1):
     sys_model.InitSequence(m1_0, m2_0)
 
     # Create folder and file names
-    dataFolderName = str(DATA_DIR) + os.sep
+    dataFolderName = f'Simulations/Linear_canonical/paper/exp1_H/regular/'
     dataFileName = f'snr_0{args.T_test}_dataset0_{dataset_id}.pt'
     dataFileName_H = f'snr_0_H_dataset0_{dataset_id}.pt'
 
@@ -237,13 +220,8 @@ for dataset_id in range(1, cycles+1):
     all_H_matrices.append(H_test_mat_list)
 
 
-# Stage-1 RTSNets for this bucket, under the names actually on disk (they used to be
-# loaded as best-rts_{true,false}.pt, which exist nowhere in the H tree).
-path_results_True_rts = path_results_True+'RTSNET_true.pt'
-path_results_wrong_rts = path_results_False+'RTSNET_false.pt'
-for _p in (path_results_True_rts, path_results_wrong_rts):
-    if not os.path.isfile(_p):
-        raise FileNotFoundError(f"RTSNet checkpoint missing for {EXP_NAME}/{R_BUCKET}: {_p}")
+path_results_True_rts = path_results_True+'best-rts_true.pt'
+path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 
 
 
@@ -254,11 +232,8 @@ for _p in (path_results_True_rts, path_results_wrong_rts):
 # for_h_M_network_training_3datasets_CORRECTED1.py, evaluated on the 3 test sets.
 #############################################################################
 
-# Learned models for this bucket. The old literal was
-# 'RTSNet/changed_H_v_0/exp_2/r_1/EMKF/False/' -- missing 'synthetic/', and pinned to a
-# different experiment/bucket than path_results_* above.
-destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
-bigru_path = str(EXP_DIR / 'bgru' / 'bigru_H_3ds.pt')
+destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_1/EMKF/False/'##############################################################################################################################################
+bigru_path = destination_folder + 'bigru_H_3ds.pt'
 print('\n=== BiGRU baseline test ===')
 bigru_mse_lin_sum = 0.0
 for dataset_id in range(cycles):
@@ -267,7 +242,7 @@ for dataset_id in range(cycles):
     print(f"  BiGRU dataset {dataset_id + 1}: {b_db:.3f} dB")
 average_bigru_mse_db = 10 * torch.log10(torch.tensor(bigru_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 print(f"Average MSE with BiGRU: {average_bigru_mse_db:.3f} dB")
-
+sdsdf
 # Create RTSNet
 RTSNet_model = RTSNetNN()
 RTSNet_model.NNBuild(sys_model, args)
@@ -332,11 +307,7 @@ average_true_H_mse_db = 10 * torch.log10(torch.tensor(true_mse_lin_sum / cycles,
 
 ############################################################################# create the datadestination for the models
 # The folder where the new copies will be saved.
-# The '...3_datasets2.pt' variant exists ONLY in exp_2/r_01; every bucket has the
-# un-suffixed name, so that is what the trainer writes and what we load here.
-destination_path_M = destination_folder + 'M_net_H_trained_3_datasets.pt'
-if not os.path.isfile(destination_path_M):
-    raise FileNotFoundError(f"H M-net missing for {EXP_NAME}/{R_BUCKET}: {destination_path_M}")
+destination_path_M = destination_folder + 'M_net_H_trained_3_datasets2.pt'
 # destination_path_M_2 =  destination_folder + 'try_one_iter_just_x_mix_f.pt'
 # destination_path_M = destination_folder +f"M_rand_false_trained_12_20_f_rtsnet_new_net.pt"
 path_results_wrong_psmooth = path_results_False+'best-psmooth_false.pt'
@@ -442,11 +413,10 @@ for dataset_id in range(cycles):
     # Prepare initials for NEXT dataset
     p0_em_last = sys_model_ai.m2x_0.clone().detach()
 
-    # Chain the EMKF's OWN smoothed last state into the next dataset. This used to
-    # overwrite it with test_target[:,:,-1] -- the TRUE state, an oracle warm-start that
-    # flattered the EMKF and was inconsistent with the TRUE-H / INIT-H baselines above,
-    # which both chain their own estimate. Same fix as exp_1and2_testing.py.
-    x0_em_last = last_x_list
+    # Use TRUE last state for continuity
+    last_x_list = test_target[:,:,-1]
+    print('last_x_list TRUE:',last_x_list[0])
+    x0_em_last = [last_x_list[j].unsqueeze(-1).clone() for j in range(len(last_x_list))]
 
     assert x0_em_last[0].ndim == 2 and x0_em_last[0].shape[1] == 1, f"x0 shape off: {x0_em_last[0].shape}"
 emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))

@@ -1,40 +1,5 @@
-"""
-Analytic (non-learned) baseline for the diverse-H paper experiment (H exp).
-
-F is FIXED and known; H is diverse and unknown. Runs, on one dataset:
-  1) Kalman filter / RTS smoother with the TRUE diverse H (upper bound)
-  2) RTS smoother with a WRONG (rotated) H          (lower bound)
-  3) EMKF_H_analitic -- the classical closed-form EM estimate of H
-
-No learned checkpoints are loaded, so this script has no model paths to keep in sync --
-only the data folder and the noise switch.
-
-Run from anywhere:  python for_h_regular_emkf_paper.py
-"""
-import os
-import sys
-from pathlib import Path
-
-# Put the repo root on sys.path and anchor every path to it, so this script runs correctly
-# from its own folder as well as from the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
 import torch
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F, generate_random_H_matrices
-
-# ============================================================
-# EXPERIMENT SWITCH -- 'exp_1' = Gaussian noise, 'exp_2' = Exponential (heavy-tailed,
-# NON zero-mean). Must be set BEFORE any DataGen call. Noise STRENGTH comes from q2 / r2
-# below; this only changes the DISTRIBUTION.
-# ============================================================
-EXP_NAME = 'exp_1'
-
-import Simulations.Linear_sysmdl as _lsm
-_lsm.NOISE_DIST = 'gauss' if EXP_NAME == 'exp_1' else 'exponential'
-print(f"EXP_NAME = {EXP_NAME}   NOISE_DIST = {_lsm.NOISE_DIST}")
-
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 import Simulations.config as config
@@ -43,6 +8,7 @@ from emkf.main_emkf_func import EMKF_H_analitic  # Changed from EMKF_F_analitic
 from Simulations.utils import DataLoader, DataGen, estimate_QR
 from RTSNet.PsmoothNN import PsmoothNN
 import numpy as np
+from torch.distributions import Exponential
 
 
 # # For NumPy
@@ -52,20 +18,9 @@ import numpy as np
 torch.manual_seed(1)
 DEVICE = torch.device("cuda")
 DTYPE  = torch.float32
-
-# Matches the other H scripts: r2 is driven by the bucket tag so the noise strength and the
-# experiment folder can never disagree.
-R_BUCKET = 'r_1'
-R2_BY_BUCKET = {'r_1': 1., 'r_01': 0.1, 'r_001': 0.01, 'r_0001': 0.001}
-
 args = config.general_settings()
 args.N_T = 175  # Number of test examples (size of the test dataset used to evaluate performance).100
-args.N_E = 400  # Was left at the config default (1000) while F_in/H_in below are built
-                # from it -- set it explicitly to match the other H scripts.
-args.N_CV = 100
 
-args.T = 30      # Was left at the config default (100) while T_test was 30, so the
-                 # train and test sequences had different lengths.
 args.T_test = 30 # Length of the time series for test sequences.
 
 # True model
@@ -78,14 +33,10 @@ snr_db = 0   # in dB, paper convention
 # q2 = r2 / (10.0 ** (v_db / 10.0))
 # print('r2=',r2)
 # print('q2=',q2)
-# q2 fixed for the H experiment; r2 from the bucket -- same convention as the other three
-# H scripts (this file used to hard-code q2 = r2 = 0.01, which matched none of them).
-q2 = 1.
-r2 = R2_BY_BUCKET[R_BUCKET]
-print('q2 is:', q2)
-print('r2 is:', r2)
-Q = (q2 * Q_structure).to(DEVICE, dtype=DTYPE)
-R = (r2 * R_structure).to(DEVICE, dtype=DTYPE)
+q2 = 0.01
+r2 = 0.01
+Q = q2 * Q_structure
+R = r2 * R_structure
 
 # F is KNOWN (fixed true model) - no diversity needed
 F = torch.tensor([[0.83, 0.2],[0.2, 0.83]], device=DEVICE, dtype=DTYPE)
@@ -102,12 +53,7 @@ sys_model.InitSequence(m1_0, m2_0)
 ###################################
 ### Data Loader (Generate Data) ###
 ###################################
-# 'Simulations/Linear_canonical/data/v0dB/' does not exist (that tree only has F_rotated,
-# H_rotated, RandomInitConditions, Scalable_traj_length, Scaling_to_large_models), so this
-# script could never run. Point it at the H experiment's own cache, split by noise type.
-DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp1_H' / 'analytic' / EXP_NAME
-os.makedirs(DATA_DIR, exist_ok=True)
-dataFolderName = str(DATA_DIR) + os.sep
+dataFolderName = 'Simulations/Linear_canonical/data/v0dB' + '/'
 dataFileName = '2x2_rq3030_T100.pt'
 dataFileName_H = '2x2_H_diverse'  # Changed from 2x2_F
 

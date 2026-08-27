@@ -123,14 +123,19 @@ MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'AI_M_step'
 EXP_DIR = MODELS_ROOT / 'exp_1' / 'r_10'
 
 # Learned models produced by exp_1and2_training.py.
-destination_path_M         = str(EXP_DIR / 'mnet_lin_3ds.pt')           # regular mnet
-destination_path_M_joint   = str(EXP_DIR / 'joint_mnet_1m1r_lin.pt')    # joint mnet
-destination_path_RTS_joint = str(EXP_DIR / 'joint_rtsnet_1m1r_lin.pt')  # joint RTSNet
-bigru_path                 = str(EXP_DIR / 'new_bigru_lin_3ds.pt')      # BiGRU baseline
+# NOTE: the r_10 bucket has been tidied up -- the checkpoints actually used for the
+# paper now sit in their own sub-folders under their final names, and every earlier
+# experiment was moved into the neighbouring 'old/' folders. The paths below point
+# at those final names; exp_1and2_training.py still WRITES the old flat names, so
+# re-running the trainer means re-tidying (or updating it to match).
+destination_path_M         = str(EXP_DIR / 'EMKF' / 'False' / 'M_net.pt')   # regular mnet
+destination_path_M_joint   = str(EXP_DIR / 'joint_mnet_1m1r_lin.pt')        # joint mnet
+destination_path_RTS_joint = str(EXP_DIR / 'joint_rtsnet_1m1r_lin.pt')      # joint RTSNet
+bigru_path                 = str(EXP_DIR / 'bgru' / 'bigru_lin_3ds.pt')     # BiGRU baseline
 
 # RTSNets trained by stage 1 of exp_1and2_training.py, in the SAME EXP_DIR bucket.
-path_results_True_rts  = str(EXP_DIR / 'True_F'  / 'best-rts_true.pt')
-path_results_wrong_rts = str(EXP_DIR / 'False_F' / 'best-rts_false.pt')
+path_results_True_rts  = str(EXP_DIR / 'True_F'  / 'RTSNET_true.pt')
+path_results_wrong_rts = str(EXP_DIR / 'False_F' / 'RTSNET_false.pt')
 
 # Where the generated test data is cached.
 DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp1_1' / 'regular'
@@ -156,7 +161,7 @@ cycles = 3   # number of sequential datasets, each with a further-drifted true F
 
 # True model noise variances. keep the q2 fixed and change only r2 between 10 to 0.001
 q2 = 0.01
-r2 = 0.001
+r2 = 10
 
 print('q2 is:',q2)
 print('r2 is:',r2)
@@ -401,37 +406,52 @@ emkf_final_mse_db = 10 * torch.log10(torch.tensor(emkf_mse_lin_sum / cycles, dev
 # Same test_mstep_net, but with the joint RTSNet + joint mnet, F/x carryover.
 #############################################################################
 print('\n=== JOINT AI EMKF Sequential Testing ===')
-joint_mse_lin_sum = 0.0
-current_F_estimate_prev_j = None
-x0j_last = p0j_last = None
-for dataset_id in range(cycles):
-    test_input = all_inputs_by_F[dataset_id]
-    test_target = all_targets_by_F[dataset_id]
-    true_F_for_this_dataset = F_matrices_for_datasets[dataset_id]
 
-    current_F_estimate_j = F_initial_guess if dataset_id == 0 else current_F_estimate_prev_j
+# The joint pair is written by stage 4 of exp_1and2_training.py. It has never been
+# run for this bucket (no joint_*.pt exists anywhere under exp_1/), so rather than
+# dying on a FileNotFoundError halfway through and losing the four baselines above,
+# skip the section and report it as unavailable in the summary.
+joint_available = (os.path.isfile(destination_path_RTS_joint)
+                   and os.path.isfile(destination_path_M_joint))
+joint_final_mse_db = None
 
-    sys_model_aj = SystemModel(current_F_estimate_j[0], Q, H, R, args.T, args.T_test)
-    sys_model_aj.InitSequence(m1_0, m2_0)
-    sys_model_aj.F_test = current_F_estimate_j
-    sys_model_aj.F_test_TRUE = true_F_for_this_dataset
-    sys_model_aj.H_test = all_H_matrices
+if not joint_available:
+    print("SKIPPED -- joint checkpoints not found in this bucket:")
+    print(f"    joint RTSNet : {destination_path_RTS_joint}")
+    print(f"    joint mnet   : {destination_path_M_joint}")
+    print("  Run stage 4 of exp_1and2_training.py for this EXP_DIR to produce them.")
+else:
+    joint_mse_lin_sum = 0.0
+    current_F_estimate_prev_j = None
+    x0j_last = p0j_last = None
+    for dataset_id in range(cycles):
+        test_input = all_inputs_by_F[dataset_id]
+        test_target = all_targets_by_F[dataset_id]
+        true_F_for_this_dataset = F_matrices_for_datasets[dataset_id]
 
-    kw = dict(destination_path_RTS=destination_path_RTS_joint,
-              destination_path_M=destination_path_M_joint,
-              num_em_iters=3, generate_f=False)
-    if dataset_id > 0:
-        kw.update(init_x_list=x0j_last, init_P_list=p0j_last)
-    jt_losses, jt_f_losses, jt_final_F_list, jt_last_x_list = \
-        RTSNet_Pipeline.test_mstep_net(sys_model_aj, test_input, test_target, **kw)
+        current_F_estimate_j = F_initial_guess if dataset_id == 0 else current_F_estimate_prev_j
 
-    joint_mse_lin_sum += float(jt_losses[-1])
-    current_F_estimate_prev_j = jt_final_F_list
-    x0j_last = jt_last_x_list
-    p0j_last = sys_model_aj.m2x_0.clone().detach()
-    ds_db = 10 * torch.log10(torch.tensor(float(jt_losses[-1]), device=DEVICE, dtype=DTYPE))
-    print(f"  Joint dataset {dataset_id + 1}: {ds_db:.3f} dB")
-joint_final_mse_db = 10 * torch.log10(torch.tensor(joint_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
+        sys_model_aj = SystemModel(current_F_estimate_j[0], Q, H, R, args.T, args.T_test)
+        sys_model_aj.InitSequence(m1_0, m2_0)
+        sys_model_aj.F_test = current_F_estimate_j
+        sys_model_aj.F_test_TRUE = true_F_for_this_dataset
+        sys_model_aj.H_test = all_H_matrices
+
+        kw = dict(destination_path_RTS=destination_path_RTS_joint,
+                  destination_path_M=destination_path_M_joint,
+                  num_em_iters=3, generate_f=False)
+        if dataset_id > 0:
+            kw.update(init_x_list=x0j_last, init_P_list=p0j_last)
+        jt_losses, jt_f_losses, jt_final_F_list, jt_last_x_list = \
+            RTSNet_Pipeline.test_mstep_net(sys_model_aj, test_input, test_target, **kw)
+
+        joint_mse_lin_sum += float(jt_losses[-1])
+        current_F_estimate_prev_j = jt_final_F_list
+        x0j_last = jt_last_x_list
+        p0j_last = sys_model_aj.m2x_0.clone().detach()
+        ds_db = 10 * torch.log10(torch.tensor(float(jt_losses[-1]), device=DEVICE, dtype=DTYPE))
+        print(f"  Joint dataset {dataset_id + 1}: {ds_db:.3f} dB")
+    joint_final_mse_db = 10 * torch.log10(torch.tensor(joint_mse_lin_sum / cycles, device=DEVICE, dtype=DTYPE))
 
 #############################################################################
 # Baseline: Test with INITIAL GUESS F using NNTest
@@ -483,7 +503,10 @@ print(f"TRUE F (perfect):        {average_true_F_mse_db:.3f} dB")
 print(f"INITIAL GUESS (no EMKF): {average_initial_guess_mse_db:.3f} dB")
 print(f"BiGRU (black-box):       {average_bigru_mse_db:.3f} dB")
 print(f"EMKF FINAL (regular):    {emkf_final_mse_db:.3f} dB")
-print(f"EMKF FINAL (joint):      {joint_final_mse_db:.3f} dB")
+if joint_final_mse_db is None:
+    print(f"EMKF FINAL (joint):      n/a (joint nets not trained for this bucket)")
+else:
+    print(f"EMKF FINAL (joint):      {joint_final_mse_db:.3f} dB")
 print(f"EMKF improvement over initial: {(average_initial_guess_mse_db - emkf_final_mse_db):.3f} dB")
 print(f"EMKF improvement over BiGRU:    {(average_bigru_mse_db - emkf_final_mse_db):.3f} dB")
 print(f"Gap to perfect (TRUE F): {(emkf_final_mse_db - average_true_F_mse_db):.3f} dB")

@@ -32,7 +32,7 @@ from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
 # q2 / r2 below; this only changes the DISTRIBUTION.
 # ============================================================
 import Simulations.Linear_sysmdl as _lsm
-_lsm.NOISE_DIST = 'gauss'
+_lsm.NOISE_DIST = 'exponential'
 print(f"NOISE_DIST = {_lsm.NOISE_DIST}  (exp 1 = gauss, exp 2 = exponential)")
 
 from Smoothers.KalmanFilter_test import KFTest
@@ -55,20 +55,17 @@ device = m1_0.device
 
 
 args = config.general_settings()
-args.N_T = 10  # Number of test examples (size of the test dataset used to evaluate performance).100
+args.N_T = 100  # Number of test examples (size of the test dataset used to evaluate performance).100
 
 args.T = 30       # Length of the time series (train/cv; unused here since Test=True).
 args.T_test = 30  # Length of the time series for test sequences.
 cycle = 3         # number of sequential datasets, each with a further-drifted true F
-
-# True model noise variances.
+max_iter = 3
+# True model noise variances.q2 stays 0.01 and r2 varies between 10 to 0.001
 q2 = 0.01
 r2 = 0.01
 
-# Alternative SNR-based parameterization (paper convention), if you prefer it:
-#   v_db, snr_db = 0, 0          # v_db = 10*log10(r2/q2)
-#   r2 = 10.0 ** (-snr_db / 10.0)
-#   q2 = r2 / (10.0 ** (v_db / 10.0))
+
 
 Q = q2 * Q_structure
 R = r2 * R_structure
@@ -165,18 +162,7 @@ F_current_estimate = [F_initial_gues_1 .clone() for _ in range(args.N_T)]
 F_initial_estimate = [F_initial_gues_1 .clone() for _ in range(args.N_T)]
 
 ###############################################################################################
-##estimate Q and R from data
-# gauss = False
-# if gauss:
-#     combined_target = torch.cat(all_targets_by_F, dim=2)
-#     combined_input = torch.cat(all_inputs_by_F, dim=2)
-#     print('Combined shapes for QR estimation:', combined_input.shape, combined_target.shape)  # sanity: [N_T, n, 5*T_test], [N_T, m, 5*T_test]
-#     Q_hat, R_hat = estimate_QR(combined_input, combined_target)
-#     Q = Q_hat
-#     R = R_hat
-#     sys_model = SystemModel(F, Q, H, R, args.T, args.T_test)
 
-#################################################################################################
 
 
 
@@ -267,10 +253,10 @@ for dataset_id in range(cycle):
 
     if dataset_id == 0:
         F_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last = EMKF_F_analitic(sys_model, F_current_estimate,
-            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025)
+            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=max_iter,generate_f=False, tol_likelihood=0.01, tol_params=0.025)
     else:
         F_matrices, likelihoods, iterations_list, mse_avg_T, x_last, p_last = EMKF_F_analitic(sys_model, F_current_estimate,
-            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=3,generate_f=False, tol_likelihood=0.01, tol_params=0.025,
+            H.unsqueeze(0), Q, R, test_input, m1_0.reshape(-1), m2_0,test_target, max_it=max_iter,generate_f=False, tol_likelihood=0.01, tol_params=0.025,
                                                                                 init_x_list=x0_last, init_P_list=p0_last)
     # >>> propagate: last smoothed x_T and P_T become next dataset's initials <<<
     # keep initials 1-D: compute_A1/A2 require [m]; the KF/S_Test squeeze internally so [m] is fine

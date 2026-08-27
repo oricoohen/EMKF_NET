@@ -1,46 +1,9 @@
-"""
-Stage-1 training for the diverse-H paper experiment (H exp).
-
-Trains the two RTSNet smoothers every other H script depends on:
-  * True_H/RTSNET_true.pt   -- RTSNet given the true diverse H
-  * False_H/RTSNET_false.pt -- RTSNet stuck with the wrong (rotated) H
-
-and then trains/tests an H-M-step net on the same single-dataset setup.
-
-Run this FIRST for a fresh bucket; for_h_M_network_training_3datasets_CORRECTED1.py and
-for_h_M_network_AI_emkf_testing_paper1.py both load the RTSNets it writes.
-
-Run from anywhere:  python for_h_AI_emkf_training_M_st_for_diver_h.py
-"""
-import os
-import sys
-from pathlib import Path
-
-# Put the repo root on sys.path and anchor every path to it, so this script runs correctly
-# from its own folder as well as from the repo root.
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
+####the old one without the f
 import torch
 import torch.nn as nn
 from datetime import datetime
 
 from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F,det
-
-# ============================================================
-# EXPERIMENT SWITCH -- which paper experiment this run produces.
-#   'exp_1' = Gaussian process/observation noise
-#   'exp_2' = Exponential (heavy-tailed, NON zero-mean) noise
-# Selects the model folder AND the noise distribution together. Must be set BEFORE any
-# DataGen call. Noise STRENGTH still comes from q2 / r2; this only changes the SHAPE.
-# ============================================================
-EXP_NAME = 'exp_1'
-
-import Simulations.Linear_sysmdl as _lsm
-_lsm.NOISE_DIST = 'gauss' if EXP_NAME == 'exp_1' else 'exponential'
-print(f"EXP_NAME = {EXP_NAME}   NOISE_DIST = {_lsm.NOISE_DIST}")
-
 from emkf.main_emkf_func_AI import EMKF_F
 
 from Simulations.utils import DataLoader, DataGen, estimate_QR
@@ -82,29 +45,9 @@ strToday = today.strftime("%m.%d.%y")
 strNow = now.strftime("%H:%M:%S")
 strTime = strToday + "_" + strNow
 print("Current Time =", strTime)
-##############################################################################
-### Paths -- all anchored to REPO_ROOT, so the CWD does not matter.
-###
-### R_BUCKET selects the SNR bucket and drives r2 below, so the folder tag and the noise
-### strength can never drift apart. Available H buckets: r_1, r_01, r_001, r_0001.
-##############################################################################
-MODELS_ROOT = REPO_ROOT / 'RTSNet' / 'synthetic' / 'changed_H_v_0'
-R_BUCKET = 'r_1'
-R2_BY_BUCKET = {'r_1': 1., 'r_01': 0.1, 'r_001': 0.01, 'r_0001': 0.001}
-
-EXP_DIR = MODELS_ROOT / EXP_NAME / R_BUCKET
-path_results_True  = str(EXP_DIR / 'True_H')  + os.sep
-path_results_False = str(EXP_DIR / 'False_H') + os.sep
-os.makedirs(path_results_True,  exist_ok=True)
-os.makedirs(path_results_False, exist_ok=True)
-
-# Gaussian and exponential runs must NOT share a data cache.
-DATA_DIR = REPO_ROOT / 'Simulations' / 'Linear_canonical' / 'paper' / 'exp1_H' / 'full' / EXP_NAME
-os.makedirs(DATA_DIR, exist_ok=True)
-
-# Set TRAIN_RTSNETS = True to (re)train the two stage-1 RTSNets this bucket needs.
-# They were previously commented out, so nothing in H_exp regenerated them.
-TRAIN_RTSNETS = True
+path_results_True = '../../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/True_H/'  ######################################################################################################################################################################
+gauss = False
+path_results_False = '../../../RTSNet/synthetic/changed_H_v_0/exp_2/r_01/False_H/'  ######################################################################################################################################################################
 
 ####################
 ### Design Model ###
@@ -131,10 +74,9 @@ args.wd = 1e-3       # Weight decay (L2 regularization): penalizes large weights
 max_iter = 3
 
 
-# True model. q2 is fixed for the H experiment; r2 comes from R_BUCKET so it always
-# matches the folder the RTSNets are written to.
+# True model
 q2 = 1.
-r2 = R2_BY_BUCKET[R_BUCKET]
+r2 =1.
 v_db = 0
 # snr_db =10.0######################################################################################################################################################################
 # r2 = 10.0**(-snr_db/10.0)
@@ -156,7 +98,7 @@ print("Observation Matrix:",H)
 ###################################
 ### Data Loader (Generate Data) ###
 ###################################
-dataFolderName = str(DATA_DIR) + os.sep
+dataFolderName = 'Simulations/Linear_canonical/paper/exp1_1/full' + '/'
 dataFileName = '2x2_1.pt'
 dataFileName_F = '2x2_F_fixed'  # F is fixed (not diverse)
 dataFileName_H = '2x2_H_diverse'  # Only H is diverse
@@ -318,18 +260,12 @@ RTSNet_Pipeline.setModel(RTSNet_model,args)
 RTSNet_Pipeline.setTrainingParams(args)
 RTSNet_model.to(device)
 
-# Names as they actually appear on disk (previously best-rts_{true,false}.pt, which exist
-# nowhere in the H tree).
-path_results_True_rts = path_results_True+'RTSNET_true.pt'
-path_results_wrong_rts = path_results_False+'RTSNET_false.pt'
+path_results_True_rts = path_results_True+'best-rts_true.pt'
+path_results_wrong_rts = path_results_False+'best-rts_false.pt'
 #####TRAIN with FIXED F, DIVERSE TRUE H#####
 print('RTSNet and Psmooth with FIXED F (true) and DIVERSE TRUE H')
-if TRAIN_RTSNETS:
-    RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts,
-                            generate_f=False, generate_h=True)  # F is fixed, only H diverse
-elif not os.path.isfile(path_results_True_rts):
-    raise FileNotFoundError(
-        f"{path_results_True_rts} not found and TRAIN_RTSNETS is False -- set it True to train it.")
+# RTSNet_Pipeline.NNTrain(sys_model, cv_input, cv_target, train_input, train_target, path_results_True_rts,
+#                         generate_f=False, generate_h=True)  # F is fixed, only H diverse
 
 ### Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target, load_model_path=path_results_True_rts,
@@ -340,24 +276,17 @@ RTSNet_Pipeline.NNTest_no_p(sys_model, test_input, test_target, load_model_path=
 #RTSNet_Pipeline.setTrainingParams(args_big)
 print('RTSNet and Psmooth with FIXED F (true) and WRONG H')
 #######TRAIN with FIXED F, WRONG H########
-if TRAIN_RTSNETS:
-    RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target,
-                            path_results=path_results_wrong_rts, load_model_path=path_results_True_rts,
-                            generate_f=False, generate_h=True)  # F is fixed, only H diverse
-elif not os.path.isfile(path_results_wrong_rts):
-    raise FileNotFoundError(
-        f"{path_results_wrong_rts} not found and TRAIN_RTSNETS is False -- set it True to train it.")
-
+# RTSNet_Pipeline.NNTrain(sys_model_2, cv_input, cv_target, train_input, train_target,
+#                         path_results=path_results_wrong_rts, load_model_path=path_results_True_rts,
+#                         generate_f=False, generate_h=True)  # F is fixed, only H diverse
+#
 ## Test Neural Network
 RTSNet_Pipeline.NNTest_no_p(sys_model_2, test_input, test_target, load_model_path=path_results_wrong_rts,
                             generate_f=False, generate_h=True,  # F is fixed, only H diverse
                             init_x_list=None, init_P_list=None, non_linear_h=False)
 
-# The folder where the new copies will be saved. The old literal was
-# 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/' -- missing 'synthetic/', and pinned to a
-# fixed experiment/bucket regardless of EXP_NAME / R_BUCKET above.
-destination_folder = str(EXP_DIR / 'EMKF' / 'False') + os.sep
-os.makedirs(destination_folder, exist_ok=True)
+# The folder where the new copies will be saved.
+destination_folder = 'RTSNet/changed_H_v_0/exp_2/r_01/EMKF/False/'######################################################################################################################################################################
 
 # --- Step 2: Loop 5 times and copy the file ---
 # Create the new filename, e.g., "expert_0.pt", "expert_1.pt", etc.

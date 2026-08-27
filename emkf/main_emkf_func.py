@@ -5,7 +5,10 @@ from Simulations.Linear_sysmdl import SystemModel, rotate_F, change_F
 from Smoothers.KalmanFilter_test import KFTest
 from Smoothers.RTS_Smoother_test import S_Test
 from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_H
-from Smoothers.Extended_RTS_Smoother_test import S_Test_ext
+# S_Test_ext was refactored to (args, SysModel, ...) and no longer accepts F_list /
+# init_x_list. E_EMKF_F_analitic below is written against the original signature,
+# which survives as S_Test_ext_old. (S_Test_ext_H above is a different function.)
+from Smoothers.Extended_RTS_Smoother_test import S_Test_ext_old as S_Test_ext
 import Simulations.config as config
 from Simulations.Linear_canonical.parameters import Q_structure, R_structure, m1_0, m2_0
 

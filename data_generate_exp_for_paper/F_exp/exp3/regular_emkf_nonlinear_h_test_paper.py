@@ -78,7 +78,7 @@ cycle      = 3       # number of datasets (rotations)
 
 # Noise levels
 q2 = 0.01
-r2 = 0.001
+r2 = 0.01
 Q  = q2 * Q_structure
 R  = r2 * R_structure
 
@@ -250,20 +250,23 @@ for dataset_id in range(cycle):
         F_mats, mse_lin_last, x_last_list, p_last_list = E_EMKF_F_analitic(
             sys_model, F_current_estimate,
             h_nonlinear, Q, R,
-            test_input, m1x_0, m2x_0, test_target,
+            test_input, m1x_0.reshape(-1), m2x_0, test_target,  # x_0 must be 1-D [m]: compute_A1/A2 require it
             max_it=3, generate_f=False
         )
     else:
         F_mats, mse_lin_last, x_last_list, p_last_list = E_EMKF_F_analitic(
             sys_model, F_current_estimate,
             h_nonlinear, Q, R,
-            test_input, m1x_0, m2x_0, test_target,
+            test_input, m1x_0.reshape(-1), m2x_0, test_target,  # x_0 must be 1-D [m]: compute_A1/A2 require it
             max_it=3, generate_f=False,
             init_x_list=x0_last, init_P_list=p0_last
         )
 
     # Propagate initials
-    x0_last = [x_.clone() for x_ in x_last_list]  # each [m,1]
+    # Keep the EMKF carryover 1-D [m]: E_EMKF_F_analitic does x_0 = init_x_list[j],
+    # and compute_A1/A2 require [m], not [m,1]. (The S_Test loops above are fine
+    # with [m,1] because the smoother squeezes internally.) Same as exp1_2.
+    x0_last = [x_.reshape(-1).clone() for x_ in x_last_list]  # each [m]
     p0_last = [P_.clone() for P_ in p_last_list]  # each [m,m]
 
     # Update current F estimates for next dataset: take the final iterate per sequence
